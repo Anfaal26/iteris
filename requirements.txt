@@ -1,0 +1,22 @@
+# Iteris dependencies — pinned for Kaggle compatibility.
+# Install with:  pip install -r requirements.txt --quiet --force-reinstall
+# Then RESTART the kernel.
+
+# numpy < 2.0 is REQUIRED — Kaggle's scipy.ndimage import breaks under numpy 2.x.
+numpy<2.0
+
+# Core ML
+torch>=2.0
+monai>=1.3,<1.6
+
+# Medical image IO
+nibabel
+SimpleITK
+
+# Config + data
+pyyaml
+pandas
+scikit-image
+
+# Plotting
+matplotlib

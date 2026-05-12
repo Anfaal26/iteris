@@ -1,0 +1,48 @@
+# CAMUS dataset configuration
+# Cardiac ultrasound — 2CH + 4CH views, ED + ES phases.
+# Override any of these from the notebook by mutating the dict after load_config().
+
+dataset: CAMUS
+modality: ultrasound
+
+# Data paths — override from notebook to match the Kaggle mount.
+data_root: /kaggle/input/datasets/anfaalhossain/camus/CAMUS
+checkpoint_dir: /kaggle/working
+
+# Image preprocessing
+image_size: [256, 256]
+spacing: [1.0, 1.0]              # target pixel spacing (mm)
+normalize: minmax                 # ultrasound → min-max per image
+
+# Classes (0 = background)
+num_classes: 4
+class_names:  [background, LV_endo, LV_epi, LA]
+class_colors: ['#000000', '#00C9A7', '#F59E0B', '#F87171']
+
+# CAMUS-specific scan combinations
+views:  [2CH, 4CH]
+phases: [ED, ES]
+
+# Splits — patient-level
+val_split: 0.15
+test_split: 0.10
+label_frac: 1.0                   # 0.1 / 0.2 / 1.0 for few-shot ablations
+
+# Training
+batch_size: 8
+epochs: 60
+lr: 1.0e-4
+weight_decay: 1.0e-5
+patience: 10                       # early stop on val Dice (epochs without improvement)
+seed: 42
+
+# Augmentation (controlled inside transforms.py)
+aug_flip_prob: 0.5
+aug_affine_prob: 0.6
+aug_rotate_range: 0.26             # ±15°
+aug_scale_range: 0.1
+aug_translate_range: 10            # pixels
+aug_intensity_shift: 0.15
+aug_intensity_shift_prob: 0.4
+aug_gauss_noise_prob: 0.3
+aug_gauss_noise_std: 0.02
