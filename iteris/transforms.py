@@ -43,10 +43,19 @@ def build_transforms(cfg: dict, split: str = 'train'):
     """
     spacing = cfg.get('spacing', (1.0, 1.0))
 
+    # Orientationd is only meaningful for 3D volumes (BraTS, full ACDC).
+    # For 2D datasets (CAMUS / CHAOS / DRIVE / ISIC) it spams warnings and
+    # does no useful work. Enable in YAML with `apply_orientation: true`.
     base = [
         LoadImaged(keys=['image', 'label']),
         EnsureChannelFirstd(keys=['image', 'label']),
-        Orientationd(keys=['image', 'label'], axcodes='RAS'),
+    ]
+    if cfg.get('apply_orientation', False):
+        base.append(Orientationd(
+            keys=['image', 'label'],
+            axcodes=cfg.get('orientation_axcodes', 'RAS'),
+        ))
+    base += [
         Spacingd(
             keys=['image', 'label'],
             pixdim=(*spacing, -1),

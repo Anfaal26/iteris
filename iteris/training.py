@@ -155,6 +155,23 @@ def run_training(cfg: dict, return_loaders: bool = True) -> dict:
         print(f'Ep {epoch:03d} | tr_loss {tr_loss:.4f} tr_dice {tr_dice:.4f} | '
               f'vl_loss {vl_loss:.4f} Dice {mean_dice:.4f} {marker} | {class_str}')
 
+        # Periodic safety checkpoint — survives kernel disconnects
+        save_every = cfg.get('save_every_n_epochs', 10)
+        if save_every and epoch % save_every == 0:
+            safety_path = os.path.join(
+                cfg['checkpoint_dir'],
+                f"{cfg['dataset'].lower()}_epoch{epoch:03d}.pt",
+            )
+            torch.save({
+                'epoch':              epoch,
+                'model_state':        model.state_dict(),
+                'optimizer_state':    optimizer.state_dict(),
+                'scheduler_state':    scheduler.state_dict(),
+                'best_dice':          best_dice,
+                'history':            history,
+            }, safety_path)
+            print(f'[training]   safety ckpt → {safety_path}')
+
         if patience_ct >= cfg['patience']:
             print(f'[training] Early stop at epoch {epoch}.')
             break

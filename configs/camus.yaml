@@ -13,6 +13,8 @@ checkpoint_dir: /kaggle/working
 image_size: [256, 256]
 spacing: [1.0, 1.0]              # target pixel spacing (mm)
 normalize: minmax                 # ultrasound → min-max per image
+apply_orientation: false          # CAMUS is 2D — Orientationd would just warn
+
 
 # Classes (0 = background)
 num_classes: 4
@@ -34,6 +36,7 @@ epochs: 60
 lr: 1.0e-4
 weight_decay: 1.0e-5
 patience: 10                       # early stop on val Dice (epochs without improvement)
+save_every_n_epochs: 10            # periodic safety checkpoint (in addition to best-Dice saves)
 seed: 42
 
 # Augmentation (controlled inside transforms.py)
