@@ -1,22 +1,11 @@
-# Iteris dependencies — pinned for Kaggle compatibility.
-# Install with:  pip install -r requirements.txt --quiet --force-reinstall
-# Then RESTART the kernel.
+# Iteris — minimal dependencies (compatible with Kaggle's default environment).
+#
+# Everything Kaggle already pre-installs (numpy, torch, scipy, pandas, matplotlib,
+# tqdm) is intentionally NOT pinned — let Kaggle's defaults win to avoid pip
+# resolver conflicts. We only list packages we actively need that may be missing
+# or outdated.
 
-# numpy < 2.0 is REQUIRED — Kaggle's scipy.ndimage import breaks under numpy 2.x.
-numpy<2.0
-
-# Core ML
-torch>=2.0
-monai>=1.3,<1.6
-
-# Medical image IO
-nibabel
+monai>=1.3
+nibabel>=5.0
 SimpleITK
-
-# Config + data
 pyyaml
-pandas
-scikit-image
-
-# Plotting
-matplotlib
