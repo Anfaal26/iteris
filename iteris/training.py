@@ -102,14 +102,20 @@ def run_training(cfg: dict, return_loaders: bool = True) -> dict:
     train_tfm = build_transforms(cfg, split='train')
     eval_tfm  = build_transforms(cfg, split='val')
 
-    train_ds = CacheDataset(train_d, transform=train_tfm, cache_rate=1.0, num_workers=2)
-    val_ds   = CacheDataset(val_d,   transform=eval_tfm,  cache_rate=1.0, num_workers=2)
+    # CacheDataset uses workers ONLY during the one-time cache build, not at training time.
+    # At training time, samples are already in RAM. DataLoader num_workers=0 avoids
+    # /dev/shm exhaustion on Kaggle (~64MB by default) which causes silent OOM kills.
+    cache_workers = cfg.get('cache_workers', 2)
+    dl_workers    = cfg.get('dataloader_workers', 0)
+
+    train_ds = CacheDataset(train_d, transform=train_tfm, cache_rate=1.0, num_workers=cache_workers)
+    val_ds   = CacheDataset(val_d,   transform=eval_tfm,  cache_rate=1.0, num_workers=cache_workers)
     test_ds  = Dataset(test_d,       transform=eval_tfm)
 
     bs = cfg['batch_size']
-    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True,  num_workers=2, pin_memory=True)
-    val_loader   = DataLoader(val_ds,   batch_size=bs, shuffle=False, num_workers=2, pin_memory=True)
-    test_loader  = DataLoader(test_ds,  batch_size=1,  shuffle=False, num_workers=2, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True,  num_workers=dl_workers, pin_memory=True)
+    val_loader   = DataLoader(val_ds,   batch_size=bs, shuffle=False, num_workers=dl_workers, pin_memory=True)
+    test_loader  = DataLoader(test_ds,  batch_size=1,  shuffle=False, num_workers=dl_workers, pin_memory=True)
 
     # ── Model / Loss / Optim ─────────────────────────────────────────────────
     model     = build_model(cfg).to(device)

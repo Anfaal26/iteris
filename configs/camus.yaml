@@ -37,6 +37,8 @@ lr: 1.0e-4
 weight_decay: 1.0e-5
 patience: 10                       # early stop on val Dice (epochs without improvement)
 save_every_n_epochs: 10            # periodic safety checkpoint (in addition to best-Dice saves)
+cache_workers: 2                    # workers for the one-time cache build
+dataloader_workers: 0               # 0 = avoid /dev/shm exhaustion on Kaggle (silent OOM kill)
 seed: 42
 
 # Augmentation (controlled inside transforms.py)
