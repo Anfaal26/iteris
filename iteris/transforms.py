@@ -55,6 +55,35 @@ def build_transforms(cfg: dict, split: str = 'train'):
             keys=['image', 'label'],
             axcodes=cfg.get('orientation_axcodes', 'RAS'),
         ))
+
+    # Force consistent channel count on the image. Some datasets (e.g. BRISC)
+    # have mixed grey/RGB JPGs which DataLoader can't batch together.
+    target_c = cfg.get('in_channels', 1)
+    from monai.transforms import Lambdad as _Lambdad
+
+    def _to_target_channels(x, target=target_c):
+        c = int(x.shape[0])
+        if c == target:
+            return x
+        if target == 1 and c >= 1:
+            # Average across channels (RGB → luma-style grayscale)
+            if hasattr(x, 'mean'):
+                return x.mean(dim=0, keepdim=True)
+            import numpy as np
+            return np.mean(x, axis=0, keepdims=True)
+        if target == 3 and c == 1:
+            # Replicate single channel to 3
+            if hasattr(x, 'repeat'):
+                return x.repeat(3, 1, 1)
+            import numpy as np
+            return np.repeat(x, 3, axis=0)
+        if target == 3 and c == 4:
+            # Drop alpha channel
+            return x[:3]
+        return x  # unknown — leave alone
+
+    base.append(_Lambdad(keys=['image'], func=_to_target_channels))
+
     base += [
         Spacingd(
             keys=['image', 'label'],
