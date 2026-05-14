@@ -107,26 +107,67 @@ def build_brisc_dicts(data_root) -> List[dict]:
     """
     Walk BRISC 2025 (brain tumour MRI) dataset.
 
-    BRISC has variable folder layouts depending on the mirror; we auto-pair
-    by filename keyword: e.g. `case42.png` ↔ `case42_mask.png` (or `_seg`,
-    `_gt`, etc) anywhere under `data_root`.
+    BRISC layout — parallel `images/` + `masks/` folders:
+        <root>/[train|test]/images/<name>.jpg
+        <root>/[train|test]/masks/<name>.png
+    Files in `images/` and `masks/` share the same filename stem.
 
-    Patient identity = image filename stem. BRISC slices are pre-annotated
-    per-case; using the stem as patient ID prevents within-case splits.
+    Patient identity is extracted from the filename so multiple sequences/views
+    of the same case stay in the same split:
+        `brisc2025_train_00001_gl_ax_t1.jpg`  →  patient `train_00001`
+    (split prefix kept so train/test 00001 don't collide).
+
+    Note: BRISC's original train/test split is not honoured here — we pool all
+    samples and apply our own patient-level split (consistent across all
+    datasets in the iteris project).
+
+    Falls back to filename-suffix pairing (`case42_mask.png`) if parallel folders
+    aren't found, for compatibility with other BRISC mirrors.
     """
+    import re
+
     root = Path(data_root)
     if not root.exists():
         raise FileNotFoundError(f'BRISC data_root not found: {root}')
 
-    exts     = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
-    mask_kws = ('mask', 'seg', 'segment', 'label', 'gt', 'annotation')
+    exts = ('.png', '.jpg', '.jpeg', '.tif', '.tiff')
+    PATIENT_RE = re.compile(r'brisc2025_(train|test)_(\d+)')
+    records = []
 
+    # ── Strategy 1: parallel images/ + masks/ folders (BRISC's actual layout) ─
+    image_dirs = [p for p in root.rglob('images') if p.is_dir()]
+    for img_dir in image_dirs:
+        mask_dir = img_dir.parent / 'masks'
+        if not mask_dir.is_dir():
+            continue
+        mask_index = {}
+        for ext in exts:
+            for m in mask_dir.glob(f'*{ext}'):
+                mask_index[m.stem.lower()] = m
+        for ext in exts:
+            for img in img_dir.glob(f'*{ext}'):
+                mask = mask_index.get(img.stem.lower())
+                if mask is None:
+                    continue
+                m = PATIENT_RE.match(img.stem.lower())
+                patient_id = f'{m.group(1)}_{m.group(2)}' if m else img.stem
+                records.append(dict(
+                    image=str(img), label=str(mask),
+                    patient=patient_id,
+                ))
+
+    if records:
+        n_patients = len({r['patient'] for r in records})
+        print(f'[ingestion] BRISC: {len(records)} pairs across {n_patients} cases')
+        return records
+
+    # ── Strategy 2: filename-suffix pairing (fallback for other mirrors) ──────
+    mask_kws  = ('mask', 'seg', 'segment', 'label', 'gt', 'annotation')
     all_files = [p for ext in exts for p in root.rglob(f'*{ext}')]
     masks     = [f for f in all_files if any(k in f.stem.lower() for k in mask_kws)]
     images    = [f for f in all_files if f not in set(masks)]
     mask_by_stem = {m.stem.lower(): m for m in masks}
 
-    records, unmatched = [], 0
     for img in images:
         s = img.stem.lower()
         matched = None
@@ -143,12 +184,10 @@ def build_brisc_dicts(data_root) -> List[dict]:
                 image=str(img), label=str(matched),
                 patient=img.stem,
             ))
-        else:
-            unmatched += 1
 
     if not records:
         raise RuntimeError(f'No BRISC (image, mask) pairs found under {root}')
-    print(f'[ingestion] BRISC: {len(records)} pairs (skipped {unmatched} unmatched images)')
+    print(f'[ingestion] BRISC: {len(records)} pairs (filename-suffix layout)')
     return records
 
 
