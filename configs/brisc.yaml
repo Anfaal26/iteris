@@ -1,0 +1,50 @@
+# BRISC 2025 — brain tumour MRI segmentation (binary: bg / tumour).
+# Source: kaggle.com/datasets/briscdataset/brisc2025
+
+dataset: BRISC
+modality: brain_mri
+
+# Override in notebook to match Kaggle mount path.
+data_root: /kaggle/input/brisc2025
+checkpoint_dir: /kaggle/working
+
+# ── Preprocessing ──────────────────────────────────────────────────────────────
+image_size: [256, 256]
+spacing: [1.0, 1.0]                # target pixel spacing (mm)
+normalize: zscore                  # MRI standard — robust to scanner intensity drift
+apply_orientation: false           # BRISC is 2D-stored PNGs
+binarize_labels: true              # raw PNGs are 0/255 → map to 0/1
+
+# ── Classes ────────────────────────────────────────────────────────────────────
+in_channels: 1                     # greyscale MRI
+num_classes: 2                     # background + tumour
+class_names:  [background, tumor]
+class_colors: ['#000000', '#F43F5E']     # rose, matches CONTEXT.md design palette
+
+# ── Splits (patient-level via image stem) ──────────────────────────────────────
+val_split:  0.15
+test_split: 0.10
+label_frac: 1.0                     # 0.1 / 0.2 / 1.0 for few-shot ablations
+
+# ── Training ───────────────────────────────────────────────────────────────────
+batch_size: 8
+epochs: 60
+lr: 1.0e-4
+weight_decay: 1.0e-5
+patience: 10
+save_every_n_epochs: 10
+cache_rate: 1.0
+cache_workers: 2
+dataloader_workers: 0
+seed: 42
+
+# ── Augmentation ───────────────────────────────────────────────────────────────
+aug_flip_prob:           0.5
+aug_affine_prob:         0.6
+aug_rotate_range:        0.26       # ±15° — tumour MRI rarely needs extreme rotation
+aug_scale_range:         0.1
+aug_translate_range:     10
+aug_intensity_shift:     0.15
+aug_intensity_shift_prob: 0.4
+aug_gauss_noise_prob:    0.3
+aug_gauss_noise_std:     0.02

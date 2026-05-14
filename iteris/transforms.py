@@ -66,6 +66,15 @@ def build_transforms(cfg: dict, split: str = 'train'):
             spatial_size=cfg['image_size'],
             mode=('bilinear', 'nearest'),
         ),
+    ]
+
+    # Binarise labels for datasets stored as 0/255 PNGs (BRISC, HAM10000,
+    # Kvasir, DRIVE). Multi-class datasets like CAMUS leave this off.
+    if cfg.get('binarize_labels', False):
+        from monai.transforms import Lambdad
+        base.append(Lambdad(keys=['label'], func=lambda x: x > 0))
+
+    base += [
         build_intensity_transform(cfg),
         EnsureTyped(keys=['image', 'label'], dtype=(torch.float32, torch.long)),
     ]

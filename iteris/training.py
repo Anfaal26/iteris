@@ -107,9 +107,10 @@ def run_training(cfg: dict, return_loaders: bool = True) -> dict:
     # /dev/shm exhaustion on Kaggle (~64MB by default) which causes silent OOM kills.
     cache_workers = cfg.get('cache_workers', 2)
     dl_workers    = cfg.get('dataloader_workers', 0)
+    cache_rate    = cfg.get('cache_rate', 1.0)
 
-    train_ds = CacheDataset(train_d, transform=train_tfm, cache_rate=1.0, num_workers=cache_workers)
-    val_ds   = CacheDataset(val_d,   transform=eval_tfm,  cache_rate=1.0, num_workers=cache_workers)
+    train_ds = CacheDataset(train_d, transform=train_tfm, cache_rate=cache_rate, num_workers=cache_workers)
+    val_ds   = CacheDataset(val_d,   transform=eval_tfm,  cache_rate=cache_rate, num_workers=cache_workers)
     test_ds  = Dataset(test_d,       transform=eval_tfm)
 
     bs = cfg['batch_size']

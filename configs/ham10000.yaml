@@ -1,0 +1,59 @@
+# HAM10000 — skin lesion dermoscopy segmentation (binary: bg / lesion).
+# Images:  kaggle.com/datasets/kmader/skin-cancer-mnist-ham10000
+# Masks:   kaggle.com/datasets/tschandl/ham10000-lesion-segmentations
+#
+# Both datasets must be attached to the Kaggle notebook.
+
+dataset: HAM10000
+modality: dermoscopy
+
+# Override these in the notebook to match the Kaggle mount paths.
+# HAM10000 needs two image folders (part_1 + part_2) and one mask folder.
+image_roots:
+  - /kaggle/input/datasets/kmader/skin-cancer-mnist-ham10000/HAM10000_images_part_1
+  - /kaggle/input/datasets/kmader/skin-cancer-mnist-ham10000/HAM10000_images_part_2
+mask_root: /kaggle/input/datasets/tschandl/ham10000-lesion-segmentations/HAM10000_segmentations_lesion_tschandl
+checkpoint_dir: /kaggle/working
+
+# ── Preprocessing ──────────────────────────────────────────────────────────────
+image_size: [256, 256]
+spacing: [1.0, 1.0]
+normalize: minmax                  # RGB dermoscopy — consistent lighting
+apply_orientation: false
+binarize_labels: true              # masks are 0/255
+
+# ── Classes ────────────────────────────────────────────────────────────────────
+in_channels: 3                     # RGB
+num_classes: 2                     # background + lesion
+class_names:  [background, lesion]
+class_colors: ['#000000', '#FBBF24']     # yellow, matches CONTEXT.md palette
+
+# ── Splits (patient-level via ISIC ID) ─────────────────────────────────────────
+val_split:  0.15
+test_split: 0.10
+label_frac: 1.0
+
+# ── Training ───────────────────────────────────────────────────────────────────
+# 10k samples × 256×256×3 float32 ≈ 7 GB cache — fits in Kaggle's 30 GB RAM.
+batch_size: 8
+epochs: 60
+lr: 1.0e-4
+weight_decay: 1.0e-5
+patience: 10
+save_every_n_epochs: 10
+cache_rate: 1.0
+cache_workers: 2
+dataloader_workers: 0
+seed: 42
+
+# ── Augmentation ───────────────────────────────────────────────────────────────
+# Lesions can be photographed at any orientation → wider rotate range than CAMUS.
+aug_flip_prob:           0.5
+aug_affine_prob:         0.5
+aug_rotate_range:        0.52       # ±30°
+aug_scale_range:         0.15
+aug_translate_range:     20
+aug_intensity_shift:     0.10
+aug_intensity_shift_prob: 0.4
+aug_gauss_noise_prob:    0.3
+aug_gauss_noise_std:     0.02
