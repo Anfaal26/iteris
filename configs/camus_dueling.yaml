@@ -1,0 +1,39 @@
+# CAMUS DRL — Dueling Double DQN agent.
+# Same env + buffer as DQN, but with the dueling V(s) + A(s,a) head.
+
+agent_type: DUELING
+dataset: CAMUS
+
+baseline_cfg_name:    camus.yaml
+baseline_checkpoint:  /kaggle/input/camus-baseline-outputs/camus_best.pt
+camus_data_root:      /kaggle/input/datasets/anfaalhossain/camus/CAMUS
+
+target_class: 1               # 1=LV_endo, 2=LV_epi, 3=LA
+
+# Environment
+image_size: 256
+max_steps: 20
+shift_px: 2
+sdt_clip: 20.0
+reward_clip: 1.0
+min_area_fraction: 0.01
+
+# Networks
+embed_dim: 256
+
+# Dueling DQN hyperparams (same as DQN — only the head differs)
+lr: 1.0e-4
+gamma: 0.99
+tau: 0.005
+batch_size: 64
+buffer_size: 10000
+prefill_steps: 2000
+
+epsilon_start: 1.0
+epsilon_end:   0.05
+epsilon_decay_steps: 40000
+
+train_steps: 50000
+eval_every: 2000
+seed: 42
+checkpoint_dir: /kaggle/working

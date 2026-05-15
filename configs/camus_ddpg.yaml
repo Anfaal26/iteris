@@ -1,0 +1,44 @@
+# CAMUS DRL — DDPG (continuous-action) agent.
+# 2D translation action in [-cont_action_scale, +cont_action_scale] per axis.
+
+agent_type: DDPG
+dataset: CAMUS
+
+baseline_cfg_name:    camus.yaml
+baseline_checkpoint:  /kaggle/input/camus-baseline-outputs/camus_best.pt
+camus_data_root:      /kaggle/input/datasets/anfaalhossain/camus/CAMUS
+
+target_class: 1               # 1=LV_endo, 2=LV_epi, 3=LA
+
+# Environment
+image_size: 256
+max_steps: 20
+sdt_clip: 20.0
+reward_clip: 1.0
+min_area_fraction: 0.01
+cont_action_scale: 0.04        # ±10 px at 256 — reduced from spec's 0.1 (±25 px is too large)
+
+# Networks
+embed_dim: 256
+
+# DDPG hyperparams
+actor_lr:  1.0e-4
+critic_lr: 1.0e-3              # critic higher per DDPG best practice
+gamma: 0.99
+tau:   0.005
+batch_size: 64
+buffer_size: 10000
+prefill_steps: 2000
+
+# OU exploration noise (reduced σ from 0.2 — too aggressive for our action range)
+ou_theta: 0.15
+ou_sigma: 0.02
+
+# Actor freeze for first N steps so critic can bootstrap from random transitions
+actor_freeze_steps: 2000
+
+# Training budget — DDPG converges slower than discrete agents
+train_steps: 100000
+eval_every:  2500
+seed: 42
+checkpoint_dir: /kaggle/working

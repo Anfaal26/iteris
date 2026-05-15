@@ -56,3 +56,21 @@ def load_config(path: Union[str, Path]) -> dict:
         cfg['spacing'] = tuple(cfg['spacing'])
 
     return cfg
+
+
+def load_drl_config(path: Union[str, Path]) -> dict:
+    """
+    Load a DRL agent config (skips baseline-specific validation).
+
+    DRL configs only need a handful of keys: agent_type, target_class,
+    train_steps, etc. They share the iteris infrastructure but train
+    different objects (agents, not U-Nets).
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f'DRL config not found: {path}')
+    with open(path, 'r') as f:
+        cfg = yaml.safe_load(f)
+    if 'agent_type' not in cfg:
+        raise KeyError(f'DRL config missing required key: agent_type')
+    return cfg
