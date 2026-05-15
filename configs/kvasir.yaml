@@ -1,0 +1,53 @@
+# Kvasir-SEG — GI polyp segmentation (binary: bg / polyp).
+# Source: kaggle.com/datasets/debeshjha1/kvasirseg
+
+dataset: KVASIR
+modality: endoscopy
+
+# Override in notebook to match Kaggle mount path. Auto-detection handles
+# the double Kvasir-SEG/Kvasir-SEG/ wrapper.
+data_root: /kaggle/input/datasets/debeshjha1/kvasirseg
+checkpoint_dir: /kaggle/working
+
+# ── Preprocessing ──────────────────────────────────────────────────────────────
+image_size: [256, 256]
+spacing: [1.0, 1.0]
+normalize: minmax                  # RGB endoscopy — consistent illumination
+apply_orientation: false
+binarize_labels: true              # masks are 0/255
+
+# ── Classes ────────────────────────────────────────────────────────────────────
+in_channels: 3                     # RGB
+num_classes: 2                     # background + polyp
+class_names:  [background, polyp]
+class_colors: ['#000000', '#10B981']     # emerald — distinct from BRISC's tumour rose
+
+# ── Splits (patient-level) ─────────────────────────────────────────────────────
+val_split:  0.15
+test_split: 0.10
+label_frac: 1.0
+
+# ── Training ───────────────────────────────────────────────────────────────────
+# Kvasir-SEG: 1000 samples at 256x256x3 float32 = ~600 MB cache. Comfortable fit.
+batch_size: 8
+epochs: 60
+lr: 1.0e-4
+weight_decay: 1.0e-5
+patience: 10
+save_every_n_epochs: 10
+cache_rate: 1.0
+cache_workers: 2
+dataloader_workers: 0
+seed: 42
+
+# ── Augmentation ───────────────────────────────────────────────────────────────
+# Polyps can appear at any orientation in the scope frame.
+aug_flip_prob:           0.5
+aug_affine_prob:         0.6
+aug_rotate_range:        0.52       # ±30°
+aug_scale_range:         0.15
+aug_translate_range:     20
+aug_intensity_shift:     0.15
+aug_intensity_shift_prob: 0.4
+aug_gauss_noise_prob:    0.3
+aug_gauss_noise_std:     0.02
