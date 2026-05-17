@@ -46,6 +46,8 @@ def build_transforms(cfg: dict, split: str = 'train'):
     # Orientationd is only meaningful for 3D volumes (BraTS, full ACDC).
     # For 2D datasets (CAMUS / CHAOS / DRIVE / ISIC) it spams warnings and
     # does no useful work. Enable in YAML with `apply_orientation: true`.
+    # `loader_reader` lets datasets override the default ITKReader — DRIVE's
+    # .gif vessel masks need PILReader (ITKReader treats unknowns as DICOM).
     base = [
         LoadImaged(keys=['image', 'label'], reader=cfg.get('loader_reader', None)),
         EnsureChannelFirstd(keys=['image', 'label']),
