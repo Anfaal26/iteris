@@ -47,7 +47,7 @@ def build_transforms(cfg: dict, split: str = 'train'):
     # For 2D datasets (CAMUS / CHAOS / DRIVE / ISIC) it spams warnings and
     # does no useful work. Enable in YAML with `apply_orientation: true`.
     base = [
-        LoadImaged(keys=['image', 'label']),
+        LoadImaged(keys=['image', 'label'], reader=cfg.get('loader_reader', None)),
         EnsureChannelFirstd(keys=['image', 'label']),
     ]
     if cfg.get('apply_orientation', False):

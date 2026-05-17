@@ -17,6 +17,7 @@ spacing: [1.0, 1.0]
 normalize: minmax                   # RGB fundus
 apply_orientation: false
 binarize_labels: true               # 1st_manual masks are 0/255
+loader_reader: PILReader            # GIF masks need PIL -- ITKReader has no GIF support
 
 # ── Classes ────────────────────────────────────────────────────────────────────
 in_channels: 3                      # RGB (full-channel for vanilla; green-only is a Week 4 ablation)
