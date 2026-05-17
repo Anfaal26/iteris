@@ -48,8 +48,34 @@ def build_transforms(cfg: dict, split: str = 'train'):
     # does no useful work. Enable in YAML with `apply_orientation: true`.
     # `loader_reader` lets datasets override the default ITKReader — DRIVE's
     # .gif vessel masks need PILReader (ITKReader treats unknowns as DICOM).
+    #
+    # DicomReader.verify_suffix() returns True for any file when pydicom is
+    # installed, and it is registered last (= highest priority). To beat it we
+    # subclass PILReader to also claim .gif and register it AFTER DicomReader.
+    _loader_reader = cfg.get('loader_reader', None)
+    if _loader_reader == 'PILReader':
+        # `monai.utils.is_supported_format` is unstable across MONAI versions
+        # (sometimes lives in monai.data.utils, sometimes monai.utils.misc).
+        # Use a self-contained suffix check instead.
+        from monai.data import PILReader as _PILReader
+
+        _SUFFIXES = ('.png', '.jpg', '.jpeg', '.bmp',
+                     '.tif', '.tiff', '.gif', '.npy', '.npz')
+
+        class _GIFPILReader(_PILReader):
+            @staticmethod
+            def verify_suffix(filename):
+                if isinstance(filename, (list, tuple)):
+                    return all(_GIFPILReader.verify_suffix(f) for f in filename)
+                return str(filename).lower().endswith(_SUFFIXES)
+
+        _loader_reader = _GIFPILReader()
+    elif isinstance(_loader_reader, type) or hasattr(_loader_reader, 'verify_suffix'):
+        # Pre-instantiated reader passed in — use as-is.
+        pass
+
     base = [
-        LoadImaged(keys=['image', 'label'], reader=cfg.get('loader_reader', None)),
+        LoadImaged(keys=['image', 'label'], reader=_loader_reader),
         EnsureChannelFirstd(keys=['image', 'label']),
     ]
     if cfg.get('apply_orientation', False):
