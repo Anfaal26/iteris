@@ -25,17 +25,21 @@ from tqdm.auto import trange
 
 from .env     import SegmentationEnv, signed_dt
 from .buffer  import ReplayBuffer
-from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent
+from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
+                       MSADuelingDQNAgent, MSADDPGAgent
 
 
 AGENT_REGISTRY = {
-    'DQN':     (DQNAgent,        'discrete'),
-    'DDQN':    (DDQNAgent,       'discrete'),
-    'DUELING': (DuelingDQNAgent, 'discrete'),
-    'DDPG':    (DDPGAgent,       'continuous'),
+    'DQN':         (DQNAgent,           'discrete'),
+    'DDQN':        (DDQNAgent,          'discrete'),
+    'DUELING':     (DuelingDQNAgent,    'discrete'),
+    'DDPG':        (DDPGAgent,          'continuous'),
+    'MSA-DUELING': (MSADuelingDQNAgent, 'discrete'),
+    'MSA-DDPG':    (MSADDPGAgent,       'continuous'),
 }
 
-
+# Agent classes that accept extra MSA hyperparameters (num_heads, key_dim)
+_MSA_AGENT_CLASSES = (MSADuelingDQNAgent, MSADDPGAgent)
 def _build_state_caches(samples: List[dict], image_size: int) -> dict:
     """Stack image + init_mask arrays for vectorised lookup at sample time."""
     n = len(samples)
@@ -145,8 +149,13 @@ def run_drl_training(
     common = dict(in_channels=4, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
                   embed_dim=cfg.get('embed_dim', 256), device=device)
+    # Extra kwargs for MSA variants (ignored by all base-class agents)
+    msa_kwargs = (
+        dict(num_heads=cfg.get('num_heads', 4), key_dim=cfg.get('key_dim', 64))
+        if issubclass(agent_cls, _MSA_AGENT_CLASSES) else {}
+    )
     if action_type == 'discrete':
-        agent = agent_cls(num_actions=7, lr=cfg.get('lr', 1e-4), **common)
+        agent = agent_cls(num_actions=7, lr=cfg.get('lr', 1e-4), **common, **msa_kwargs)
     else:
         common.pop('lr', None)
         agent = agent_cls(
@@ -158,6 +167,7 @@ def run_drl_training(
             ou_sigma=cfg.get('ou_sigma', 0.02),
             actor_freeze_steps=cfg.get('actor_freeze_steps', 2000),
             **common,
+            **msa_kwargs,
         )
 
     # ── Buffer ────────────────────────────────────────────────────────────────

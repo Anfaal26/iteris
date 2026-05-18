@@ -1,0 +1,48 @@
+# CAMUS DRL — MSA-Dueling DQN agent.
+# Dueling Double DQN with a Multi-Head Self-Attention backbone.
+# The CNN global-average-pool is replaced by 4-head spatial-token attention
+# (64 tokens from the 8×8 feature map, 64-dim keys per head).
+# All env / buffer / training mechanics are identical to camus_dueling.yaml.
+# Expected wall time: ~4 hr on T4 (×1.3 of Dueling DQN per compute budget).
+
+agent_type: MSA-Dueling
+dataset: CAMUS
+
+baseline_cfg_name:    camus.yaml
+baseline_checkpoint:  /kaggle/input/camus-baseline-outputs/camus_best.pt
+camus_data_root:      /kaggle/input/datasets/anfaalhossain/camus/CAMUS
+
+target_class: 1               # 1=LV_endo, 2=LV_epi, 3=LA
+
+# ── Environment (locked — same as all CAMUS DRL configs) ──────────────────────
+image_size: 256
+max_steps: 20
+shift_px: 2
+sdt_clip: 20.0
+reward_clip: 1.0
+min_area_fraction: 0.01
+
+# ── MSA backbone ──────────────────────────────────────────────────────────────
+num_heads: 4                  # attention heads
+key_dim:   64                 # per-head key/query/value dimension
+                              # → attn_dim = 4 × 64 = 256
+
+# ── Network ───────────────────────────────────────────────────────────────────
+embed_dim: 256
+
+# ── Dueling DQN hyperparams (unchanged from camus_dueling.yaml) ───────────────
+lr: 1.0e-4
+gamma: 0.99
+tau: 0.005
+batch_size: 64
+buffer_size: 10000
+prefill_steps: 2000
+
+epsilon_start: 1.0
+epsilon_end:   0.05
+epsilon_decay_steps: 40000
+
+train_steps: 50000
+eval_every: 2000
+seed: 42
+checkpoint_dir: /kaggle/working

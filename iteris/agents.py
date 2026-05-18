@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic
+from .msa         import MSADuelingQNetwork, MSAActor as _MSAActor
 
 
 def _soft_update(target_net: nn.Module, source_net: nn.Module, tau: float):
@@ -243,3 +244,125 @@ class DDPGAgent:
         self.actor_target.load_state_dict(state['actor_target'])
         self.critic.load_state_dict(state['critic'])
         self.critic_target.load_state_dict(state['critic_target'])
+
+
+# ─── MSA variants ──────────────────────────────────────────────────────────────
+
+
+
+class MSADuelingDQNAgent(DQNAgent):
+    """
+    Dueling Double DQN with a Multi-Head Self-Attention backbone.
+
+    The CNN global-average-pool is replaced by spatial-token self-attention
+    (4 heads, 64-dim keys per head) before the Dueling Q head.  All training
+    mechanics — Double DQN target, soft update, epsilon-greedy, Huber loss —
+    are inherited unchanged from DQNAgent.
+
+    Strategy: call DQNAgent.__init__ with dueling=True / double=True (which
+    wires up all attributes), then swap self.q / self.q_target for MSA-backed
+    networks and rebind the optimizer.  No training code is duplicated.
+
+    Args
+    ----
+    num_heads : int   Number of attention heads (default 4, per CONTEXT.md).
+    key_dim   : int   Per-head key/query/value dimension (default 64).
+    All other args mirror DQNAgent.
+    """
+
+    def __init__(
+        self,
+        in_channels: int   = 4,
+        num_actions: int   = 7,
+        lr:          float = 1e-4,
+        gamma:       float = 0.99,
+        tau:         float = 0.005,
+        embed_dim:   int   = 256,
+        num_heads:   int   = 4,
+        key_dim:     int   = 64,
+        device:      torch.device = None,
+    ):
+        # Initialise base agent (creates DuelingQNetwork internally — we replace it next)
+        super().__init__(
+            in_channels=in_channels,
+            num_actions=num_actions,
+            lr=lr,
+            gamma=gamma,
+            tau=tau,
+            double=True,
+            dueling=True,
+            embed_dim=embed_dim,
+            device=device,
+        )
+        # Swap in MSA-backed networks
+        self.q = MSADuelingQNetwork(
+            in_channels, num_actions, embed_dim, num_heads, key_dim
+        ).to(self.device)
+        self.q_target = deepcopy(self.q).eval()
+        for p in self.q_target.parameters():
+            p.requires_grad_(False)
+        # Rebind optimizer to the new network's parameters
+        self.opt = torch.optim.Adam(self.q.parameters(), lr=lr)
+
+
+class MSADDPGAgent(DDPGAgent):
+    """
+    DDPG with a Multi-Head Self-Attention backbone in the actor.
+
+    The actor's CNN global-average-pool is replaced by spatial-token
+    self-attention (4 heads, 64-dim keys).  The critic retains the standard
+    CNN backbone — per CONTEXT.md: "4-head MSA in actor" only.
+
+    Strategy: call DDPGAgent.__init__ (which builds CNN actor + critic),
+    then replace self.actor / self.actor_target with MSA-backed networks and
+    rebind the actor optimizer.  The critic, critic_target, critic_opt,
+    OU noise, and all update logic are inherited unchanged.
+
+    Args
+    ----
+    num_heads : int   Number of attention heads (default 4, per CONTEXT.md).
+    key_dim   : int   Per-head key/query/value dimension (default 64).
+    All other args mirror DDPGAgent.
+    """
+
+    def __init__(
+        self,
+        in_channels:        int   = 4,
+        action_dim:         int   = 2,
+        action_scale:       float = 0.04,
+        actor_lr:           float = 1e-4,
+        critic_lr:          float = 1e-3,
+        gamma:              float = 0.99,
+        tau:                float = 0.005,
+        ou_theta:           float = 0.15,
+        ou_sigma:           float = 0.02,
+        actor_freeze_steps: int   = 2000,
+        embed_dim:          int   = 256,
+        num_heads:          int   = 4,
+        key_dim:            int   = 64,
+        device:             torch.device = None,
+    ):
+        # Initialise base agent (creates CNN Actor + Critic internally)
+        super().__init__(
+            in_channels=in_channels,
+            action_dim=action_dim,
+            action_scale=action_scale,
+            actor_lr=actor_lr,
+            critic_lr=critic_lr,
+            gamma=gamma,
+            tau=tau,
+            ou_theta=ou_theta,
+            ou_sigma=ou_sigma,
+            actor_freeze_steps=actor_freeze_steps,
+            embed_dim=embed_dim,
+            device=device,
+        )
+        # Swap CNN actor for MSA actor (critic keeps CNN backbone per spec)
+        self.actor = _MSAActor(
+            in_channels, action_dim, action_scale, embed_dim, num_heads, key_dim
+        ).to(self.device)
+        self.actor_target = deepcopy(self.actor).eval()
+        for p in self.actor_target.parameters():
+            p.requires_grad_(False)
+        # Rebind actor optimizer to the new network's parameters
+        self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
