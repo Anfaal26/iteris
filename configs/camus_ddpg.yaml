@@ -16,7 +16,7 @@ max_steps: 20
 sdt_clip: 20.0
 reward_clip: 1.0
 min_area_fraction: 0.01
-cont_action_scale: 0.04        # ±10 px at 256 — reduced from spec's 0.1 (±25 px is too large)
+cont_action_scale: 0.02        # ±5 px at 256 — reduced from 0.04 to prevent off-screen drift on mode-collapse
 
 # Networks
 embed_dim: 256
@@ -30,9 +30,10 @@ batch_size: 64
 buffer_size: 10000
 prefill_steps: 2000
 
-# OU exploration noise (reduced σ from 0.2 — too aggressive for our action range)
+# OU exploration noise (σ reduced further to 0.005 — was 0.02, causing drift compounding
+# during the 2k-step prefill window when only random+OU rollouts seed the buffer)
 ou_theta: 0.15
-ou_sigma: 0.02
+ou_sigma: 0.005
 
 # Actor freeze for first N steps so critic can bootstrap from random transitions
 actor_freeze_steps: 2000

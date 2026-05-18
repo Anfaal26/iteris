@@ -87,18 +87,28 @@ class DuelingQNetwork(nn.Module):
 
 
 class Actor(nn.Module):
-    """DDPG actor — tanh-bounded output scaled to ±action_scale."""
+    """
+    DDPG actor — tanh-bounded output scaled to ±action_scale.
+
+    Final-layer init is small-uniform [-3e-3, +3e-3] per Lillicrap et al. 2015
+    (the original DDPG paper). This is critical to prevent tanh saturation
+    during the actor-freeze warmup — without it, default Kaiming init can let
+    weights drift to where tanh outputs are pinned at ±1, causing mode collapse
+    (the actor outputs the same maximal-magnitude action for every state).
+    """
     def __init__(self, in_channels=4, action_dim=2, action_scale=0.04, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
-        self.head = nn.Sequential(
-            nn.Linear(embed_dim, 128), nn.ReLU(inplace=True),
-            nn.Linear(128, action_dim),
-        )
+        self.fc1 = nn.Linear(embed_dim, 128)
+        self.fc2 = nn.Linear(128, action_dim)
         self.action_scale = action_scale
+        # Small-uniform init on the FINAL layer only (standard DDPG practice)
+        nn.init.uniform_(self.fc2.weight, -3e-3, 3e-3)
+        nn.init.uniform_(self.fc2.bias,   -3e-3, 3e-3)
 
     def forward(self, x):
-        return torch.tanh(self.head(self.backbone(x))) * self.action_scale
+        h = F.relu(self.fc1(self.backbone(x)))
+        return torch.tanh(self.fc2(h)) * self.action_scale
 
 
 class Critic(nn.Module):
@@ -109,6 +119,10 @@ class Critic(nn.Module):
     BEFORE the final layers. Concatenating a 2-d action to a final 256-d state
     embedding (as the project spec originally implied) means the action gets
     drowned out and the critic learns a near-state-only Q.
+
+    Final-layer small-uniform init [-3e-3, +3e-3] keeps initial Q estimates
+    near zero — prevents the actor from exploiting random Q spikes during
+    early training.
     """
     def __init__(self, in_channels=4, action_dim=2, embed_dim=256):
         super().__init__()
@@ -116,12 +130,13 @@ class Critic(nn.Module):
         self.action_proj = nn.Sequential(
             nn.Linear(action_dim, 128), nn.ReLU(inplace=True),
         )
-        self.merge = nn.Sequential(
-            nn.Linear(embed_dim + 128, 128), nn.ReLU(inplace=True),
-            nn.Linear(128, 1),
-        )
+        self.merge_fc1 = nn.Linear(embed_dim + 128, 128)
+        self.merge_fc2 = nn.Linear(128, 1)
+        nn.init.uniform_(self.merge_fc2.weight, -3e-3, 3e-3)
+        nn.init.uniform_(self.merge_fc2.bias,   -3e-3, 3e-3)
 
     def forward(self, state, action):
         s = self.backbone(state)
         a = self.action_proj(action)
-        return self.merge(torch.cat([s, a], dim=1))
+        h = F.relu(self.merge_fc1(torch.cat([s, a], dim=1)))
+        return self.merge_fc2(h)
