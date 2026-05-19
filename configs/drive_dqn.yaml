@@ -1,0 +1,48 @@
+# DRIVE DRL — Double DQN agent for retinal-vessel refinement.
+# Hardest dataset: 20 labelled samples, multi-blob topology (~450 components/mask).
+# Boundary precision (HD95) matters as much as area overlap (Dice).
+
+agent_type: DDQN
+dataset: DRIVE
+target_class: 1                # 1 = vessel
+
+baseline_cfg_name:    drive.yaml
+baseline_checkpoint:  /kaggle/input/drive-baseline-outputs/drive_best.pt
+
+# ── Environment ────────────────────────────────────────────────────────────
+image_size: 256
+max_steps: 20
+shift_px: 1                    # vessels are 1-2 px wide — finest step
+sdt_clip: 10.0                 # very thin structures → small SDT range
+reward_clip: 1.0
+min_area_fraction: 0.001       # vessels can occupy <1% locally; keep them
+
+# ── Reward shaping (DRIVE-specific) ─────────────────────────────────────────
+# Composite reward: Dice gain AND HD95 improvement weighted equally.
+# Pure ΔDice is misleading for multi-blob vessels — connecting two blobs into
+# one curve barely changes Dice but dramatically improves HD95.
+reward_mode:   dice_hd_composite
+reward_alpha:  0.5             # Dice weight
+reward_beta:   0.5             # HD95 weight (normalised by hd_norm)
+hd_norm:      30.0             # typical DRIVE vessel HD95 range ~10–30 px
+
+# ── Networks ───────────────────────────────────────────────────────────────
+embed_dim: 256
+
+# ── DQN hyperparams (scaled down — small dataset = short training) ─────────
+lr: 1.0e-4
+gamma: 0.99
+tau: 0.005
+batch_size: 32                 # smaller batch (only 15 train images)
+buffer_size: 5000              # smaller buffer
+prefill_steps: 500
+
+epsilon_start: 1.0
+epsilon_end:   0.05
+epsilon_decay_steps: 20000
+
+# ── Training (shorter — risk of overfitting on 15 images is huge) ──────────
+train_steps: 25000
+eval_every:  1000
+seed: 42
+checkpoint_dir: /kaggle/working

@@ -75,8 +75,18 @@ class DQNAgent:
 
     def update(self, batch: dict, state_builder: Callable) -> dict:
         n = len(batch['sample_idx'])
-        states      = torch.stack([state_builder(batch['sample_idx'][i], batch['current_mask'][i]) for i in range(n)]).to(self.device)
-        next_states = torch.stack([state_builder(batch['sample_idx'][i], batch['next_mask'][i])    for i in range(n)]).to(self.device)
+        cs = batch.get('current_sdt')           # may be None if buffer.cache_sdt=False
+        ns = batch.get('next_sdt')
+        states = torch.stack([
+            state_builder(batch['sample_idx'][i], batch['current_mask'][i],
+                          cs[i] if cs is not None else None)
+            for i in range(n)
+        ]).to(self.device)
+        next_states = torch.stack([
+            state_builder(batch['sample_idx'][i], batch['next_mask'][i],
+                          ns[i] if ns is not None else None)
+            for i in range(n)
+        ]).to(self.device)
         actions = torch.from_numpy(batch['action']).long().to(self.device)
         rewards = torch.from_numpy(batch['reward']).to(self.device)
         dones   = torch.from_numpy(batch['done']).float().to(self.device)
@@ -194,8 +204,18 @@ class DDPGAgent:
 
     def update(self, batch: dict, state_builder: Callable) -> dict:
         n = len(batch['sample_idx'])
-        states      = torch.stack([state_builder(batch['sample_idx'][i], batch['current_mask'][i]) for i in range(n)]).to(self.device)
-        next_states = torch.stack([state_builder(batch['sample_idx'][i], batch['next_mask'][i])    for i in range(n)]).to(self.device)
+        cs = batch.get('current_sdt')
+        ns = batch.get('next_sdt')
+        states = torch.stack([
+            state_builder(batch['sample_idx'][i], batch['current_mask'][i],
+                          cs[i] if cs is not None else None)
+            for i in range(n)
+        ]).to(self.device)
+        next_states = torch.stack([
+            state_builder(batch['sample_idx'][i], batch['next_mask'][i],
+                          ns[i] if ns is not None else None)
+            for i in range(n)
+        ]).to(self.device)
         actions = torch.from_numpy(batch['action']).float().to(self.device)
         rewards = torch.from_numpy(batch['reward']).to(self.device)
         dones   = torch.from_numpy(batch['done']).float().to(self.device)

@@ -51,12 +51,23 @@ def _build_state_caches(samples: List[dict], image_size: int) -> dict:
 
 
 def _make_state_builder(caches: dict, sdt_clip: float):
-    """Return a function (idx, current_mask) → torch tensor (4, H, W)."""
-    def build(idx, current_mask):
+    """
+    Return a builder (idx, current_mask, cached_sdt=None) → torch (4, H, W).
+
+    If `cached_sdt` is provided (e.g. from ReplayBuffer with cache_sdt=True),
+    skip the expensive scipy.ndimage SDT recomputation. This is the single
+    biggest training-speed optimisation — without it, agent.update() spends
+    ~80% of its time recomputing SDTs that were already computed during
+    env.step().
+    """
+    def build(idx, current_mask, cached_sdt=None):
         image = caches['image'][idx]
         init  = caches['init_mask'][idx].astype(np.float32)
         cur   = current_mask.astype(np.float32)
-        sdt   = signed_dt(current_mask, sdt_clip)
+        if cached_sdt is not None:
+            sdt = cached_sdt.astype(np.float32)
+        else:
+            sdt = signed_dt(current_mask, sdt_clip)
         return torch.from_numpy(np.stack([image, cur, sdt, init], axis=0))
     return build
 
@@ -142,6 +153,10 @@ def run_drl_training(
         sdt_clip          = cfg.get('sdt_clip', 20.0),
         reward_clip       = cfg.get('reward_clip', 1.0),
         cont_action_scale = cfg.get('cont_action_scale', 0.04),
+        reward_mode       = cfg.get('reward_mode', 'dice_delta'),
+        reward_alpha      = cfg.get('reward_alpha', 0.5),
+        reward_beta       = cfg.get('reward_beta', 0.5),
+        hd_norm           = cfg.get('hd_norm', 50.0),
     )
     state_builder = _make_state_builder(train_caches, env_kwargs['sdt_clip'])
 
@@ -171,11 +186,14 @@ def run_drl_training(
         )
 
     # ── Buffer ────────────────────────────────────────────────────────────────
+    # cache_sdt=True is the key speed optimisation: skips ~80% of SDT recomputation
+    # in agent.update() by reusing the SDT computed during env.step().
     buffer = ReplayBuffer(
         capacity   = cfg.get('buffer_size', 10000),
         mask_shape = (H, H),
         action_dim = 2 if action_type == 'continuous' else None,
         discrete   = (action_type == 'discrete'),
+        cache_sdt  = cfg.get('cache_sdt', True),
     )
 
     # ── Pre-fill buffer with random rollouts ──────────────────────────────────
@@ -184,19 +202,22 @@ def run_drl_training(
     while len(buffer) < prefill_steps:
         idx = np.random.randint(len(train_samples))
         env = _make_env(train_caches, idx, env_kwargs)
-        env.reset()
+        prev_state = env.reset()           # state = stack([img, mask, SDT, init])
         while True:
             if action_type == 'discrete':
                 a = np.random.randint(7)
             else:
                 scale = cfg.get('cont_action_scale', 0.04)
                 a = np.random.uniform(-scale, scale, size=2).astype(np.float32)
-            prev = env.mask.copy()
-            _, r, done, _ = env.step(a)
-            buffer.push(idx, prev, a, r, env.mask.copy(), done)
+            prev_mask = env.mask.copy()
+            prev_sdt  = prev_state[2]      # SDT slot of state tensor
+            next_state, r, done, _ = env.step(a)
+            buffer.push(idx, prev_mask, a, r, env.mask.copy(), done,
+                        current_sdt=prev_sdt, next_sdt=next_state[2])
+            prev_state = next_state
             if done or len(buffer) >= prefill_steps:
                 break
-    print(f'[drl] Buffer size: {len(buffer)}')
+    print(f'[drl] Buffer size: {len(buffer)}  (SDT cache: {buffer.cache_sdt})')
 
     # ── Main training loop ────────────────────────────────────────────────────
     train_steps         = cfg.get('train_steps', 50000)
@@ -235,9 +256,11 @@ def run_drl_training(
             else:
                 a = agent.select_action(state, explore=True)
 
-            prev = env.mask.copy()
+            prev_mask = env.mask.copy()
+            prev_sdt  = state[2]           # cached SDT from previous state
             next_state, r, done, _ = env.step(a)
-            buffer.push(idx, prev, a, r, env.mask.copy(), done)
+            buffer.push(idx, prev_mask, a, r, env.mask.copy(), done,
+                        current_sdt=prev_sdt, next_sdt=next_state[2])
 
             if len(buffer) >= batch_size:
                 agent.update(buffer.sample(batch_size), state_builder)

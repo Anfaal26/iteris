@@ -86,8 +86,14 @@ class SegmentationEnv:
         stop_eps_hd: float = 0.5,
         stop_n: int = 3,
         cont_action_scale: float = 0.04,
+        # ── reward shaping (dataset-tuned) ──────────────────────────────────
+        reward_mode: str = 'dice_delta',
+        reward_alpha: float = 0.5,        # weight on Dice component (composite)
+        reward_beta: float  = 0.5,        # weight on HD95 component (composite)
+        hd_norm: float = 50.0,            # HD95 normalisation in px
     ):
         assert action_type in ('discrete', 'continuous')
+        assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
         assert image.shape == gt_mask.shape == init_mask.shape
         self.image     = image.astype(np.float32)
         self.gt        = gt_mask.astype(np.uint8)
@@ -103,8 +109,40 @@ class SegmentationEnv:
         self.stop_eps_hd       = stop_eps_hd
         self.stop_n            = stop_n
         self.cont_action_scale = cont_action_scale
+        self.reward_mode       = reward_mode
+        self.reward_alpha      = reward_alpha
+        self.reward_beta       = reward_beta
+        self.hd_norm           = hd_norm
 
         self.reset()
+
+    def _compute_reward(self, prev_dice, new_dice, prev_hd, new_hd):
+        """Dataset-tuned reward shaping. Returns RAW reward (will be clipped)."""
+        if self.reward_mode == 'dice_delta':
+            # General-purpose: pure Dice improvement. CAMUS, HAM10000, Kvasir.
+            return new_dice - prev_dice
+
+        if self.reward_mode == 'dice_hd_composite':
+            # Boundary-precision: weights both Dice gain AND HD95 improvement.
+            # Suited for thin / topologically-complex structures (DRIVE vessels,
+            # CAMUS LV_epi at the apex). HD improvement is +ve when HD95 drops.
+            r_dice = new_dice - prev_dice
+            if (np.isnan(prev_hd) or np.isnan(new_hd) or
+                np.isinf(prev_hd) or np.isinf(new_hd)):
+                r_hd = 0.0
+            else:
+                r_hd = float(np.clip((prev_hd - new_hd) / self.hd_norm, -1.0, 1.0))
+            return self.reward_alpha * r_dice + self.reward_beta * r_hd
+
+        if self.reward_mode == 'iou_delta':
+            # IoU is less sensitive to area than Dice — better signal for small
+            # targets where Dice fluctuates wildly (BRISC tumours <2% area).
+            # IoU = Dice / (2 − Dice)
+            prev_iou = prev_dice / max(2.0 - prev_dice, 1e-6)
+            new_iou  = new_dice  / max(2.0 - new_dice,  1e-6)
+            return new_iou - prev_iou
+
+        raise ValueError(f'Unknown reward_mode: {self.reward_mode}')
 
     def reset(self) -> np.ndarray:
         self.mask = self.init_mask.copy()
@@ -115,6 +153,7 @@ class SegmentationEnv:
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
         prev_dice = self.dice_history[-1]
+        prev_hd95 = self.hd95_history[-1]
 
         if self.action_type == 'discrete':
             self.mask = self._apply_discrete(int(action))
@@ -125,8 +164,8 @@ class SegmentationEnv:
         new_dice = dice_score(self.mask, self.gt)
         new_hd95 = hd95_px(self.mask, self.gt)
 
-        # Reward = ΔDice, clipped BEFORE returning (so buffer never sees spikes)
-        raw_reward = new_dice - prev_dice
+        # Dataset-tuned reward (mode set in cfg), clipped BEFORE buffer push
+        raw_reward = self._compute_reward(prev_dice, new_dice, prev_hd95, new_hd95)
         reward = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
 
         self.dice_history.append(new_dice)
