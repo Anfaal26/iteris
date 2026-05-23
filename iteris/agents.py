@@ -140,46 +140,75 @@ class DuelingDQNAgent(DQNAgent):
 # ─── DDPG ──────────────────────────────────────────────────────────────────────
 
 class OUNoise:
-    """Discrete-time Ornstein–Uhlenbeck exploration noise."""
-    def __init__(self, action_dim: int, theta: float = 0.15, sigma: float = 0.02):
+    """
+    Discrete-time Ornstein–Uhlenbeck exploration noise with per-component sigma.
+
+    ``sigma`` can be a scalar (uniform across all components) or a list/array
+    with one value per action dimension.  Per-component sigma is essential when
+    action components have different scales — e.g., morph (±0.25) vs.
+    translation (±0.02) require different noise magnitudes for proportional
+    exploration coverage.
+    """
+    def __init__(self, action_dim: int, theta: float = 0.15, sigma = 0.01):
         self.action_dim = action_dim
         self.theta      = theta
-        self.sigma      = sigma
+        # Broadcast scalar or list → (action_dim,) float32 array
+        sig = np.atleast_1d(np.asarray(sigma, dtype=np.float32))
+        self.sigma = np.broadcast_to(sig, (action_dim,)).copy()
         self.reset()
 
     def reset(self):
         self.state = np.zeros(self.action_dim, dtype=np.float32)
 
-    def sample(self):
-        self.state += -self.theta * self.state + self.sigma * np.random.randn(self.action_dim)
-        return self.state.astype(np.float32)
+    def sample(self) -> np.ndarray:
+        self.state += (
+            -self.theta * self.state
+            + self.sigma * np.random.randn(self.action_dim).astype(np.float32)
+        )
+        return self.state.copy()
 
 
 class DDPGAgent:
-    """DDPG with mid-layer action injection, actor-freeze warmup, OU noise."""
+    """
+    DDPG with mid-layer action injection, actor-freeze warmup, OU noise.
+
+    The continuous action is now 3-component: (morph, dy_norm, dx_norm).
+    ``action_scale`` is a list ``[morph_scale, trans_scale, trans_scale]``
+    that sets the per-component output range of the actor (tanh × scale).
+    ``ou_sigma`` can be a scalar (same noise for all components) or a list
+    with per-component values — use a list to keep noise proportional to
+    each component's range (e.g., [0.025, 0.002, 0.002]).
+    """
     action_type = 'continuous'
 
     def __init__(
         self,
-        in_channels: int = 4,
-        action_dim: int = 2,
-        action_scale: float = 0.04,
-        actor_lr: float = 1e-4,
-        critic_lr: float = 1e-3,
-        gamma: float = 0.99,
-        tau: float = 0.005,
-        ou_theta: float = 0.15,
-        ou_sigma: float = 0.02,
-        actor_freeze_steps: int = 2000,
-        embed_dim: int = 256,
-        device: torch.device = None,
+        in_channels:        int   = 4,
+        action_dim:         int   = 3,
+        action_scale              = None,   # list [morph_scale, trans_scale, trans_scale]
+        actor_lr:           float = 1e-4,
+        critic_lr:          float = 1e-3,
+        gamma:              float = 0.99,
+        tau:                float = 0.005,
+        ou_theta:           float = 0.15,
+        ou_sigma                  = None,   # scalar or per-component list
+        actor_freeze_steps: int   = 2000,
+        embed_dim:          int   = 256,
+        device:             torch.device = None,
     ):
-        self.device       = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.action_dim   = action_dim
-        self.action_scale = action_scale
-        self.gamma        = gamma
-        self.tau          = tau
+        self.device             = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.action_dim         = action_dim
+        self.gamma              = gamma
+        self.tau                = tau
         self.actor_freeze_steps = actor_freeze_steps
+
+        if action_scale is None:
+            action_scale = [0.25, 0.02, 0.02]   # [morph, dy, dx]
+        self.action_scale_np = np.array(action_scale, dtype=np.float32)
+
+        # Default ou_sigma: 10 % of each component's range for proportional exploration
+        if ou_sigma is None:
+            ou_sigma = (self.action_scale_np * 0.1).tolist()
 
         self.actor         = Actor(in_channels, action_dim, action_scale, embed_dim).to(self.device)
         self.critic        = Critic(in_channels, action_dim, embed_dim).to(self.device)
@@ -191,16 +220,17 @@ class DDPGAgent:
         self.actor_opt  = torch.optim.Adam(self.actor.parameters(),  lr=actor_lr)
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
 
-        self.noise = OUNoise(action_dim, theta=ou_theta, sigma=ou_sigma)
+        self.noise      = OUNoise(action_dim, theta=ou_theta, sigma=ou_sigma)
         self.step_count = 0
 
     @torch.no_grad()
     def select_action(self, state: np.ndarray, explore: bool = True) -> np.ndarray:
         s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
-        a = self.actor(s).cpu().numpy().squeeze(0)
+        a = self.actor(s).cpu().numpy().squeeze(0)   # already scaled by action_scale buffer
         if explore:
             a = a + self.noise.sample()
-        return np.clip(a, -self.action_scale, self.action_scale).astype(np.float32)
+        # Clip per-component to ±action_scale
+        return np.clip(a, -self.action_scale_np, self.action_scale_np).astype(np.float32)
 
     def update(self, batch: dict, state_builder: Callable) -> dict:
         n = len(batch['sample_idx'])
@@ -330,17 +360,16 @@ class MSADDPGAgent(DDPGAgent):
     DDPG with a Multi-Head Self-Attention backbone in the actor.
 
     The actor's CNN global-average-pool is replaced by spatial-token
-    self-attention (4 heads, 64-dim keys).  The critic retains the standard
-    CNN backbone — per CONTEXT.md: "4-head MSA in actor" only.
+    self-attention (4 heads, 64-dim keys per CONTEXT.md).  The critic retains
+    the standard CNN backbone ("MSA in actor" only).
 
-    Strategy: call DDPGAgent.__init__ (which builds CNN actor + critic),
-    then replace self.actor / self.actor_target with MSA-backed networks and
-    rebind the actor optimizer.  The critic, critic_target, critic_opt,
-    OU noise, and all update logic are inherited unchanged.
+    All 3-component action semantics (morph, dy, dx) and per-component
+    action_scale / ou_sigma from DDPGAgent are preserved — only the actor
+    network backbone changes.
 
     Args
     ----
-    num_heads : int   Number of attention heads (default 4, per CONTEXT.md).
+    num_heads : int   Number of attention heads (default 4).
     key_dim   : int   Per-head key/query/value dimension (default 64).
     All other args mirror DDPGAgent.
     """
@@ -348,21 +377,21 @@ class MSADDPGAgent(DDPGAgent):
     def __init__(
         self,
         in_channels:        int   = 4,
-        action_dim:         int   = 2,
-        action_scale:       float = 0.04,
+        action_dim:         int   = 3,
+        action_scale              = None,   # list [morph_scale, trans_scale, trans_scale]
         actor_lr:           float = 1e-4,
         critic_lr:          float = 1e-3,
         gamma:              float = 0.99,
         tau:                float = 0.005,
         ou_theta:           float = 0.15,
-        ou_sigma:           float = 0.02,
+        ou_sigma                  = None,   # scalar or per-component list
         actor_freeze_steps: int   = 2000,
         embed_dim:          int   = 256,
         num_heads:          int   = 4,
         key_dim:            int   = 64,
         device:             torch.device = None,
     ):
-        # Initialise base agent (creates CNN Actor + Critic internally)
+        # Initialise base agent (creates CNN Actor + Critic; we replace actor below)
         super().__init__(
             in_channels=in_channels,
             action_dim=action_dim,
@@ -377,12 +406,15 @@ class MSADDPGAgent(DDPGAgent):
             embed_dim=embed_dim,
             device=device,
         )
+        # action_scale_np already set by DDPGAgent.__init__; pass same list to MSAActor
+        action_scale_list = self.action_scale_np.tolist()
+
         # Swap CNN actor for MSA actor (critic keeps CNN backbone per spec)
         self.actor = _MSAActor(
-            in_channels, action_dim, action_scale, embed_dim, num_heads, key_dim
+            in_channels, action_dim, action_scale_list, embed_dim, num_heads, key_dim
         ).to(self.device)
         self.actor_target = deepcopy(self.actor).eval()
         for p in self.actor_target.parameters():
             p.requires_grad_(False)
-        # Rebind actor optimizer to the new network's parameters
+        # Rebind actor optimizer to the MSA network's parameters
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)

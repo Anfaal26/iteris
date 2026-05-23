@@ -146,17 +146,24 @@ def run_drl_training(
     train_caches = _build_state_caches(train_samples, image_size)
     val_caches   = _build_state_caches(val_samples,   image_size)
 
+    # cont_action_scale is the legacy single-scale key (old per-agent configs).
+    # New per-class configs supply cont_morph_scale / cont_trans_scale separately.
+    _legacy_scale = cfg.get('cont_action_scale', 0.02)
     env_kwargs = dict(
         action_type       = action_type,
         max_steps         = cfg.get('max_steps', 20),
         shift_px          = cfg.get('shift_px', 2),
         sdt_clip          = cfg.get('sdt_clip', 20.0),
         reward_clip       = cfg.get('reward_clip', 1.0),
-        cont_action_scale = cfg.get('cont_action_scale', 0.04),
+        cont_morph_scale  = cfg.get('cont_morph_scale', 0.25),
+        cont_trans_scale  = cfg.get('cont_trans_scale', _legacy_scale),
         reward_mode       = cfg.get('reward_mode', 'dice_delta'),
         reward_alpha      = cfg.get('reward_alpha', 0.5),
         reward_beta       = cfg.get('reward_beta', 0.5),
         hd_norm           = cfg.get('hd_norm', 50.0),
+        stop_eps_dice     = cfg.get('stop_eps_dice', 0.001),
+        stop_eps_hd       = cfg.get('stop_eps_hd', 0.5),
+        stop_n            = cfg.get('stop_n', 3),
     )
     state_builder = _make_state_builder(train_caches, env_kwargs['sdt_clip'])
 
@@ -173,14 +180,20 @@ def run_drl_training(
         agent = agent_cls(num_actions=7, lr=cfg.get('lr', 1e-4), **common, **msa_kwargs)
     else:
         common.pop('lr', None)
+        _legacy_scale = cfg.get('cont_action_scale', 0.02)
+        morph_scale   = cfg.get('cont_morph_scale', 0.25)
+        trans_scale   = cfg.get('cont_trans_scale', _legacy_scale)
+        action_scale  = [morph_scale, trans_scale, trans_scale]
+        # ou_sigma from config may be scalar (legacy) or list (per-component)
+        ou_sigma_raw  = cfg.get('ou_sigma', None)   # None → DDPGAgent default (10% of scale)
         agent = agent_cls(
-            action_dim=2,
-            action_scale=cfg.get('cont_action_scale', 0.04),
-            actor_lr=cfg.get('actor_lr',  1e-4),
-            critic_lr=cfg.get('critic_lr', 1e-3),
-            ou_theta=cfg.get('ou_theta', 0.15),
-            ou_sigma=cfg.get('ou_sigma', 0.02),
-            actor_freeze_steps=cfg.get('actor_freeze_steps', 2000),
+            action_dim         = 3,
+            action_scale       = action_scale,
+            actor_lr           = cfg.get('actor_lr',  1e-4),
+            critic_lr          = cfg.get('critic_lr', 1e-3),
+            ou_theta           = cfg.get('ou_theta', 0.15),
+            ou_sigma           = ou_sigma_raw,
+            actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
             **common,
             **msa_kwargs,
         )
@@ -191,7 +204,7 @@ def run_drl_training(
     buffer = ReplayBuffer(
         capacity   = cfg.get('buffer_size', 10000),
         mask_shape = (H, H),
-        action_dim = 2 if action_type == 'continuous' else None,
+        action_dim = 3 if action_type == 'continuous' else None,   # 3-component: morph+dy+dx
         discrete   = (action_type == 'discrete'),
         cache_sdt  = cfg.get('cache_sdt', True),
     )
@@ -199,6 +212,11 @@ def run_drl_training(
     # ── Pre-fill buffer with random rollouts ──────────────────────────────────
     prefill_steps = cfg.get('prefill_steps', 2000)
     print(f'[drl] Pre-filling buffer with {prefill_steps} random transitions...')
+    # Build per-component ranges for random continuous actions
+    _legacy_scale = cfg.get('cont_action_scale', 0.02)
+    _morph_scale  = cfg.get('cont_morph_scale', 0.25)
+    _trans_scale  = cfg.get('cont_trans_scale', _legacy_scale)
+
     while len(buffer) < prefill_steps:
         idx = np.random.randint(len(train_samples))
         env = _make_env(train_caches, idx, env_kwargs)
@@ -207,8 +225,12 @@ def run_drl_training(
             if action_type == 'discrete':
                 a = np.random.randint(7)
             else:
-                scale = cfg.get('cont_action_scale', 0.04)
-                a = np.random.uniform(-scale, scale, size=2).astype(np.float32)
+                # 3-component: (morph, dy_norm, dx_norm) — each component has its own range
+                a = np.array([
+                    np.random.uniform(-_morph_scale, _morph_scale),
+                    np.random.uniform(-_trans_scale, _trans_scale),
+                    np.random.uniform(-_trans_scale, _trans_scale),
+                ], dtype=np.float32)
             prev_mask = env.mask.copy()
             prev_sdt  = prev_state[2]      # SDT slot of state tensor
             next_state, r, done, _ = env.step(a)

@@ -1,0 +1,138 @@
+# CAMUS DRL — Class 2: LV_epi (left ventricular epicardium)
+#
+# Load with:
+#   from iteris.config import load_drl_class_config, resolve_agent_config
+#   cfg_full = load_drl_class_config('configs/camus_drl_c2.yaml')
+#   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
+
+target_class:        2
+class_name:          LV_epi
+dataset:             CAMUS
+baseline_cfg_name:   camus.yaml
+baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_best.pt
+
+# ── Reward shaping — LV_epi rationale ────────────────────────────────────────
+# Week-1 baseline: Dice 0.872, HD95 ~8 px.  LV_epi wraps LV_endo and tapers
+# to a thin apex — the single hardest boundary in CAMUS.  Pure Dice-delta
+# treats all boundary pixels equally; the HD95 component specifically penalises
+# large deviations that occur at the apex, which account for most HD95 error.
+# Balanced alpha/beta (0.5/0.5): both overlap and precision matter equally here.
+# hd_norm = 2× expected HD95 of ~8 px.
+reward_mode:   dice_hd_composite
+reward_alpha:  0.5               # 50 % Dice
+reward_beta:   0.5               # 50 % HD95 — apex boundary is high-priority
+hd_norm:       16.0              # normalise HD95; 16 ≈ 2× expected HD95 of ~8 px
+
+# ── Environment ───────────────────────────────────────────────────────────────
+image_size:        256
+max_steps:         20
+shift_px:          2
+sdt_clip:          20.0
+reward_clip:       1.0
+min_area_fraction: 0.01
+stop_eps_dice:     0.001
+stop_eps_hd:       0.5
+stop_n:            3
+
+# ── Per-agent hyperparams ─────────────────────────────────────────────────────
+agents:
+
+  DDQN:
+    agent_type:          DDQN
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 40000
+    train_steps:         60000    # slightly longer: LV_epi is harder than LV_endo
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  DUELING:
+    agent_type:          DUELING
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 40000
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  MSA-DUELING:
+    agent_type:          MSA-DUELING
+    num_heads:           4
+    key_dim:             64
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 40000
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  DDPG:
+    agent_type:          DDPG
+    cont_morph_scale:    0.25
+    cont_trans_scale:    0.02
+    ou_sigma:            [0.025, 0.002, 0.002]
+    ou_theta:            0.15
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    actor_freeze_steps:  2000
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    train_steps:         120000   # DDPG needs more steps; LV_epi is the hardest class
+    eval_every:          2500
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  MSA-DDPG:
+    agent_type:          MSA-DDPG
+    num_heads:           4
+    key_dim:             64
+    cont_morph_scale:    0.25
+    cont_trans_scale:    0.02
+    ou_sigma:            [0.025, 0.002, 0.002]
+    ou_theta:            0.15
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    actor_freeze_steps:  2000
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    train_steps:         120000
+    eval_every:          2500
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working

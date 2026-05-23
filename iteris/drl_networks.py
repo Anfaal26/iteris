@@ -88,43 +88,56 @@ class DuelingQNetwork(nn.Module):
 
 class Actor(nn.Module):
     """
-    DDPG actor — tanh-bounded output scaled to ±action_scale.
+    DDPG actor — tanh output with per-component scaling.
+
+    Outputs a 3-component action:
+        out[0] : morph   — SDT threshold shift (dilate / erode)
+        out[1] : dy_norm — fractional y-translation
+        out[2] : dx_norm — fractional x-translation
+
+    ``action_scale`` is a list ``[morph_scale, trans_scale, trans_scale]``
+    stored as a registered buffer so it moves with the model across devices.
+    The tanh output (in [-1, +1]) is multiplied element-wise by action_scale,
+    so each component lives in its own bounded range — morph and translation
+    need different magnitudes (morph ≈ 0.25, trans ≈ 0.02 for 256-px images).
 
     Final-layer init is small-uniform [-3e-3, +3e-3] per Lillicrap et al. 2015
-    (the original DDPG paper). This is critical to prevent tanh saturation
-    during the actor-freeze warmup — without it, default Kaiming init can let
-    weights drift to where tanh outputs are pinned at ±1, causing mode collapse
-    (the actor outputs the same maximal-magnitude action for every state).
+    to prevent tanh saturation during the actor-freeze warmup.
     """
-    def __init__(self, in_channels=4, action_dim=2, action_scale=0.04, embed_dim=256):
+    def __init__(self, in_channels=4, action_dim=3, action_scale=None, embed_dim=256):
         super().__init__()
+        if action_scale is None:
+            action_scale = [0.25, 0.02, 0.02]   # [morph, dy, dx] — tunable via YAML
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.fc1 = nn.Linear(embed_dim, 128)
         self.fc2 = nn.Linear(128, action_dim)
-        self.action_scale = action_scale
+        # Per-component scale as a buffer: auto-moves with model.to(device)
+        self.register_buffer(
+            'action_scale',
+            torch.tensor(action_scale, dtype=torch.float32),
+        )
         # Small-uniform init on the FINAL layer only (standard DDPG practice)
         nn.init.uniform_(self.fc2.weight, -3e-3, 3e-3)
         nn.init.uniform_(self.fc2.bias,   -3e-3, 3e-3)
 
     def forward(self, x):
         h = F.relu(self.fc1(self.backbone(x)))
-        return torch.tanh(self.fc2(h)) * self.action_scale
+        return torch.tanh(self.fc2(h)) * self.action_scale   # element-wise scale
 
 
 class Critic(nn.Module):
     """
     DDPG critic with mid-layer action injection.
 
-    The action is projected to 128-d and concatenated with the state embedding
-    BEFORE the final layers. Concatenating a 2-d action to a final 256-d state
-    embedding (as the project spec originally implied) means the action gets
-    drowned out and the critic learns a near-state-only Q.
+    Accepts a 3-component action (morph, dy_norm, dx_norm).  The action is
+    projected to 128-d and fused with the state embedding before the output
+    head — this prevents the low-magnitude action signal from being drowned
+    out by the high-dimensional state embedding at the final layer.
 
-    Final-layer small-uniform init [-3e-3, +3e-3] keeps initial Q estimates
-    near zero — prevents the actor from exploiting random Q spikes during
-    early training.
+    Final-layer small-uniform init [-3e-3, +3e-3] keeps initial Q values near
+    zero, preventing early actor exploitation of random Q spikes.
     """
-    def __init__(self, in_channels=4, action_dim=2, embed_dim=256):
+    def __init__(self, in_channels=4, action_dim=3, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.action_proj = nn.Sequential(

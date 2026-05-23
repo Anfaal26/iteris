@@ -74,3 +74,83 @@ def load_drl_config(path: Union[str, Path]) -> dict:
     if 'agent_type' not in cfg:
         raise KeyError(f'DRL config missing required key: agent_type')
     return cfg
+
+
+def load_drl_class_config(path: Union[str, Path]) -> dict:
+    """
+    Load a per-class DRL config (camus_drl_c1.yaml, etc.).
+
+    Per-class configs contain:
+      - class-specific env / reward params at the top level
+        (target_class, reward_mode, hd_norm, shift_px, …)
+      - an ``agents:`` block with per-algorithm hyperparams
+
+    They do NOT have ``agent_type`` at the top level — that lives inside
+    each agents sub-block.  Use ``resolve_agent_config()`` after loading
+    to merge the chosen agent's hyperparams into a flat training dict.
+
+    Raises
+    ------
+    FileNotFoundError  if path does not exist
+    KeyError           if ``target_class`` or ``agents`` is missing
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f'DRL class config not found: {path}')
+    with open(path, 'r') as f:
+        cfg = yaml.safe_load(f)
+    for key in ('target_class', 'agents'):
+        if key not in cfg:
+            raise KeyError(f'DRL class config {path} is missing required key: {key}')
+    return cfg
+
+
+def resolve_agent_config(cfg: dict, agent_name: str) -> dict:
+    """
+    Merge per-agent hyperparams from a per-class config into a flat dict.
+
+    Per-class configs (loaded via ``load_drl_class_config``) have the shape::
+
+        target_class: 1
+        reward_mode:  dice_hd_composite
+        ...                              # env / reward params (shared)
+        agents:
+          DDQN:
+            lr: 1.0e-4
+            ...
+          DDPG:
+            actor_lr: 1.0e-4
+            ...
+
+    This function extracts ``cfg['agents'][agent_name]`` and merges it over
+    the top-level dict (agent params win on conflict), then sets
+    ``cfg['agent_type']`` so the training loop can pick the right class.
+
+    Parameters
+    ----------
+    cfg        : dict returned by ``load_drl_class_config``
+    agent_name : one of 'DDQN' | 'DUELING' | 'DDPG' | 'MSA-DUELING' | 'MSA-DDPG'
+
+    Returns
+    -------
+    Flat dict ready to pass directly to ``run_drl_training``.
+
+    Raises
+    ------
+    KeyError  if agent_name is not present in cfg['agents']
+    """
+    agents   = cfg.get('agents', {})
+    agent_key = agent_name.upper()
+    available = list(agents.keys())
+    if agent_key not in agents:
+        raise KeyError(
+            f"Agent '{agent_key}' not found in config. "
+            f"Available: {available}"
+        )
+    # Start from top-level (env / reward / class params), strip 'agents' block
+    merged = {k: v for k, v in cfg.items() if k != 'agents'}
+    # Layer agent-specific hyperparams on top (override where keys conflict)
+    merged.update(agents[agent_key])
+    # Ensure agent_type is always set (it lives inside the agent block)
+    merged['agent_type'] = agent_key
+    return merged

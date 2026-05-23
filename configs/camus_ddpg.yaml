@@ -1,5 +1,8 @@
 # CAMUS DRL — DDPG (continuous-action) agent.
-# 2D translation action in [-cont_action_scale, +cont_action_scale] per axis.
+# 3-component action: (morph, dy_norm, dx_norm) — see env.py for semantics.
+# NOTE: for CAMUS training prefer the per-class configs (camus_drl_c1/c2/c3.yaml)
+# which carry class-specific reward shaping. This file is kept as a standalone
+# fallback for quick single-run experiments.
 
 agent_type: DDPG
 dataset: CAMUS
@@ -9,6 +12,7 @@ baseline_checkpoint:  /kaggle/input/camus-baseline-outputs/camus_best.pt
 camus_data_root:      /kaggle/input/datasets/anfaalhossain/camus/CAMUS
 
 target_class: 1               # 1=LV_endo, 2=LV_epi, 3=LA
+reward_mode: dice_delta        # override in per-class config for class-specific shaping
 
 # Environment
 image_size: 256
@@ -16,7 +20,8 @@ max_steps: 20
 sdt_clip: 20.0
 reward_clip: 1.0
 min_area_fraction: 0.01
-cont_action_scale: 0.02        # ±5 px at 256 — reduced from 0.04 to prevent off-screen drift on mode-collapse
+cont_morph_scale: 0.25         # ±5 px dilation/erosion via SDT threshold (at sdt_clip=20)
+cont_trans_scale: 0.02         # ±5 px translation (at H=256)
 
 # Networks
 embed_dim: 256
@@ -30,10 +35,9 @@ batch_size: 64
 buffer_size: 10000
 prefill_steps: 2000
 
-# OU exploration noise (σ reduced further to 0.005 — was 0.02, causing drift compounding
-# during the 2k-step prefill window when only random+OU rollouts seed the buffer)
+# Per-component OU noise: [morph, dy, dx] — proportional to each action_scale
 ou_theta: 0.15
-ou_sigma: 0.005
+ou_sigma: [0.025, 0.002, 0.002]
 
 # Actor freeze for first N steps so critic can bootstrap from random transitions
 actor_freeze_steps: 2000

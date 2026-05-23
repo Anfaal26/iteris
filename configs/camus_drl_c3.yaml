@@ -1,0 +1,138 @@
+# CAMUS DRL — Class 3: LA (left atrium)
+#
+# Load with:
+#   from iteris.config import load_drl_class_config, resolve_agent_config
+#   cfg_full = load_drl_class_config('configs/camus_drl_c3.yaml')
+#   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
+
+target_class:        3
+class_name:          LA
+dataset:             CAMUS
+baseline_cfg_name:   camus.yaml
+baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_best.pt
+
+# ── Reward shaping — LA rationale ─────────────────────────────────────────────
+# Week-1 baseline: Dice 0.896, HD95 ~10 px.  The left atrium has high shape
+# variability across patients and views — some are nearly circular, others
+# highly elongated.  HD95 is less reliable here because a single outlier
+# boundary pixel can spike HD95 regardless of overall segmentation quality.
+# Pure Dice-delta is safer: it rewards overlap improvement consistently.
+# hd_norm kept in config for potential ablations using dice_hd_composite.
+reward_mode:   dice_delta        # shape variability makes HD95 an unreliable signal
+reward_alpha:  0.7               # ignored for dice_delta; kept for composite ablation
+reward_beta:   0.3               # ignored for dice_delta; kept for composite ablation
+hd_norm:       22.0              # 2× expected HD95 of ~10 px (for ablation if needed)
+
+# ── Environment ───────────────────────────────────────────────────────────────
+image_size:        256
+max_steps:         20
+shift_px:          2
+sdt_clip:          20.0
+reward_clip:       1.0
+min_area_fraction: 0.01
+stop_eps_dice:     0.001
+stop_eps_hd:       0.5
+stop_n:            3
+
+# ── Per-agent hyperparams ─────────────────────────────────────────────────────
+agents:
+
+  DDQN:
+    agent_type:          DDQN
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 40000
+    train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  DUELING:
+    agent_type:          DUELING
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 40000
+    train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  MSA-DUELING:
+    agent_type:          MSA-DUELING
+    num_heads:           4
+    key_dim:             64
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 40000
+    train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  DDPG:
+    agent_type:          DDPG
+    cont_morph_scale:    0.25
+    cont_trans_scale:    0.02
+    ou_sigma:            [0.025, 0.002, 0.002]
+    ou_theta:            0.15
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    actor_freeze_steps:  2000
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    train_steps:         100000
+    eval_every:          2500
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  MSA-DDPG:
+    agent_type:          MSA-DDPG
+    num_heads:           4
+    key_dim:             64
+    cont_morph_scale:    0.25
+    cont_trans_scale:    0.02
+    ou_sigma:            [0.025, 0.002, 0.002]
+    ou_theta:            0.15
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    actor_freeze_steps:  2000
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         10000
+    prefill_steps:       2000
+    train_steps:         100000
+    eval_every:          2500
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working

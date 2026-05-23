@@ -11,8 +11,28 @@ State (4, H, W) float32:
     ch 2 : signed distance transform of ch 1        (dynamic, derived from ch 1)
     ch 3 : U-Net init mask                          (static within an episode)
 
-Reward: r_t = Dice(mask_t, GT) - Dice(mask_{t-1}, GT), clipped to [-1, +1].
-Episode: max 20 steps, OR composite stop (|ΔDice|<0.001 AND |ΔHD95|<0.5 for 3 steps).
+Reward modes (set per-class via YAML):
+    dice_delta          r_t = Dice(t) - Dice(t-1)            — general purpose
+    dice_hd_composite   α·ΔDice + β·ΔHD95_norm               — boundary precision
+    iou_delta           r_t = IoU(t) - IoU(t-1)              — small targets
+
+Continuous action (DDPG family) — 3-component vector:
+    a[0]  morph   ∈ [-cont_morph_scale, +cont_morph_scale]
+          Threshold shift on the normalised SDT (range [-1, +1]).
+          +morph → lower threshold → include exterior pixels → dilate
+          -morph → raise  threshold → exclude near-boundary pixels → erode
+          Gives the DDPG agent local morphological power, unlike the old
+          translation-only 2-component design.
+    a[1]  dy_norm ∈ [-cont_trans_scale, +cont_trans_scale]
+          Fractional y-translation (scaled by H at apply time).
+    a[2]  dx_norm ∈ [-cont_trans_scale, +cont_trans_scale]
+          Fractional x-translation (scaled by W at apply time).
+
+Discrete action (DQN family) — 7 actions:
+    0 dilate · 1 erode · 2 shift↑ · 3 shift↓ · 4 shift← · 5 shift→ · 6 no-op
+
+Episode: max_steps steps, OR composite stop
+    (|ΔDice| < stop_eps_dice AND |ΔHD95| < stop_eps_hd) for stop_n consecutive steps.
 """
 
 from typing import Tuple, Dict
@@ -69,8 +89,8 @@ def shifted(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
 class SegmentationEnv:
     """Per-class binary boundary-refinement environment."""
 
-    NUM_DISCRETE_ACTIONS = 7
-    CONTINUOUS_ACTION_DIM = 2
+    NUM_DISCRETE_ACTIONS  = 7
+    CONTINUOUS_ACTION_DIM = 3   # (morph, dy_norm, dx_norm) — see module docstring
 
     def __init__(
         self,
@@ -85,12 +105,14 @@ class SegmentationEnv:
         stop_eps_dice: float = 0.001,
         stop_eps_hd: float = 0.5,
         stop_n: int = 3,
-        cont_action_scale: float = 0.04,
-        # ── reward shaping (dataset-tuned) ──────────────────────────────────
+        # ── continuous action scales ─────────────────────────────────────────
+        cont_morph_scale: float = 0.25,   # max SDT threshold shift (±5 px at sdt_clip=20)
+        cont_trans_scale: float = 0.02,   # max translation as fraction of image dim (±5 px at H=256)
+        # ── reward shaping (per-class tuned via YAML) ────────────────────────
         reward_mode: str = 'dice_delta',
         reward_alpha: float = 0.5,        # weight on Dice component (composite)
         reward_beta: float  = 0.5,        # weight on HD95 component (composite)
-        hd_norm: float = 50.0,            # HD95 normalisation in px
+        hd_norm: float = 50.0,            # HD95 normalisation in px — tune to 2× expected HD95
     ):
         assert action_type in ('discrete', 'continuous')
         assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
@@ -100,19 +122,20 @@ class SegmentationEnv:
         self.init_mask = init_mask.astype(np.uint8)
         self.H, self.W = image.shape
 
-        self.action_type       = action_type
-        self.max_steps         = max_steps
-        self.shift_px          = shift_px
-        self.sdt_clip          = sdt_clip
-        self.reward_clip       = reward_clip
-        self.stop_eps_dice     = stop_eps_dice
-        self.stop_eps_hd       = stop_eps_hd
-        self.stop_n            = stop_n
-        self.cont_action_scale = cont_action_scale
-        self.reward_mode       = reward_mode
-        self.reward_alpha      = reward_alpha
-        self.reward_beta       = reward_beta
-        self.hd_norm           = hd_norm
+        self.action_type      = action_type
+        self.max_steps        = max_steps
+        self.shift_px         = shift_px
+        self.sdt_clip         = sdt_clip
+        self.reward_clip      = reward_clip
+        self.stop_eps_dice    = stop_eps_dice
+        self.stop_eps_hd      = stop_eps_hd
+        self.stop_n           = stop_n
+        self.cont_morph_scale = cont_morph_scale
+        self.cont_trans_scale = cont_trans_scale
+        self.reward_mode      = reward_mode
+        self.reward_alpha     = reward_alpha
+        self.reward_beta      = reward_beta
+        self.hd_norm          = hd_norm
 
         self.reset()
 
@@ -201,10 +224,45 @@ class SegmentationEnv:
         raise ValueError(f'Bad discrete action: {a}')
 
     def _apply_continuous(self, a) -> np.ndarray:
-        # a is (dy_norm, dx_norm) in [-action_scale, +action_scale] of image space
-        dy = int(round(float(a[0]) * self.H))
-        dx = int(round(float(a[1]) * self.W))
-        return shifted(self.mask, dy, dx)
+        """
+        3-component continuous action — morphological op then translation.
+
+        a[0]  morph   ∈ [-cont_morph_scale, +cont_morph_scale]
+              Threshold on the normalised SDT (values in [-1, +1]):
+                thresh = -morph
+                new_mask = (SDT >= thresh)
+              +morph (positive) → thresh < 0 → includes exterior pixels → DILATE
+              -morph (negative) → thresh > 0 → excludes boundary pixels → ERODE
+               morph = 0        → thresh = 0 → SDT >= 0 ≡ original mask (identity)
+              At sdt_clip=20, morph=0.25 corresponds to ±5 px boundary shift.
+
+        a[1]  dy_norm  ∈ [-cont_trans_scale, +cont_trans_scale]
+              Fractional y-translation: dy_px = round(a[1] × H).
+        a[2]  dx_norm  ∈ [-cont_trans_scale, +cont_trans_scale]
+              Fractional x-translation: dx_px = round(a[2] × W).
+
+        This gives DDPG agents meaningful morphological power — dilate/erode the
+        boundary — which the old translation-only 2-component design lacked.
+        The discrete DQN family still uses explicit dilate/erode/shift primitives.
+        """
+        morph = float(a[0])
+        dy    = int(round(float(a[1]) * self.H))
+        dx    = int(round(float(a[2]) * self.W))
+
+        # ── Morphological step via SDT threshold ─────────────────────────────
+        # SDT in env.py is normalised to [-1, +1] (by sdt_clip).
+        # Interior pixels: sdt > 0.  Exterior pixels: sdt < 0.
+        # At morph = 0: thresh = 0 → (sdt >= 0) ≡ the original mask exactly.
+        sdt    = signed_dt(self.mask, self.sdt_clip)   # (H, W) ∈ [-1, +1]
+        thresh = -morph                                 # invert so +morph → dilate
+        morphed = (sdt >= thresh).astype(np.uint8)
+
+        # Guard: catastrophic erosion can empty the mask; keep original in that case.
+        if not morphed.any():
+            morphed = self.mask.copy()
+
+        # ── Translation step ─────────────────────────────────────────────────
+        return shifted(morphed, dy, dx)
 
     def _state(self) -> np.ndarray:
         sdt = signed_dt(self.mask, self.sdt_clip)
