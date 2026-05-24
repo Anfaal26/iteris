@@ -49,14 +49,37 @@ def dice_score(m1: np.ndarray, m2: np.ndarray, eps: float = 1e-6) -> float:
     return (2.0 * inter + eps) / (m1.sum() + m2.sum() + eps)
 
 
+def _largest_cc(mask: np.ndarray) -> np.ndarray:
+    """Return a binary mask keeping only the largest connected component.
+
+    Stray isolated U-Net / GT pixels far from the main structure inflate HD95
+    catastrophically (a single pixel in the image corner → ~200 px distance to
+    the real boundary).  Keeping only the largest CC removes these artefacts
+    before edge / EDT computation.
+    """
+    labeled, n = ndi.label(mask.astype(bool))
+    if n == 0:
+        return mask.astype(bool)
+    sizes = np.bincount(labeled.ravel())
+    sizes[0] = 0             # ignore background
+    return (labeled == sizes.argmax()).astype(bool)
+
+
 def hd95_px(m1: np.ndarray, m2: np.ndarray) -> float:
-    """95th-percentile Hausdorff distance in pixels."""
-    if not m1.any() and not m2.any():
+    """95th-percentile Hausdorff distance in pixels.
+
+    Applies largest-connected-component filtering before edge extraction to
+    prevent stray isolated pixels (U-Net FP fragments far from the structure)
+    from inflating HD95 to hundreds of pixels.
+    """
+    m1b = _largest_cc(m1)
+    m2b = _largest_cc(m2)
+    if not m1b.any() and not m2b.any():
         return 0.0
-    if not m1.any() or not m2.any():
+    if not m1b.any() or not m2b.any():
         return float('nan')
-    edges_1 = m1 ^ ndi.binary_erosion(m1, STRUCT)
-    edges_2 = m2 ^ ndi.binary_erosion(m2, STRUCT)
+    edges_1 = m1b ^ ndi.binary_erosion(m1b, STRUCT)
+    edges_2 = m2b ^ ndi.binary_erosion(m2b, STRUCT)
     if not edges_1.any() or not edges_2.any():
         return 0.0
     dt_2 = ndi.distance_transform_edt(~edges_2)
@@ -139,31 +162,49 @@ class SegmentationEnv:
 
         self.reset()
 
-    def _compute_reward(self, prev_dice, new_dice, prev_hd, new_hd):
-        """Dataset-tuned reward shaping. Returns RAW reward (will be clipped)."""
+    def _compute_reward(self, new_dice: float, new_hd: float) -> float:
+        """Dataset-tuned reward shaping. Returns RAW reward (will be clipped).
+
+        IMPORTANT — baseline is the EPISODE START, not the previous step.
+
+        Using r_t = Dice_t − Dice_0 (rather than the step-wise Δ Dice_t − Dice_{t-1})
+        eliminates the oscillation trap that plagues step-wise delta rewards:
+
+        Step-wise problem: the agent gets +reward for reversing any bad move,
+        so it learns an oscillating "fix your own mistake" policy that never
+        accumulates real improvement.  Empirically this produces a cyclic
+        policy that degrades the final mask vs the U-Net init.
+
+        Episode-start baseline fix:
+          • Staying at init: r = 0 (neutral) every step
+          • Improving:       r > 0 every step spent in the improved state
+          • Degrading:       r < 0 every step spent below init
+          • Oscillating:     net ≈ 0 total reward — no incentive
+          • Best strategy:   reach an improved state ASAP and no-op there
+        """
+        dice_0 = self.dice_history[0]   # Dice of init_mask vs GT, fixed at reset()
+
         if self.reward_mode == 'dice_delta':
-            # General-purpose: pure Dice improvement. CAMUS, HAM10000, Kvasir.
-            return new_dice - prev_dice
+            # General-purpose: pure Dice improvement over episode start.
+            return new_dice - dice_0
 
         if self.reward_mode == 'dice_hd_composite':
-            # Boundary-precision: weights both Dice gain AND HD95 improvement.
-            # Suited for thin / topologically-complex structures (DRIVE vessels,
-            # CAMUS LV_epi at the apex). HD improvement is +ve when HD95 drops.
-            r_dice = new_dice - prev_dice
-            if (np.isnan(prev_hd) or np.isnan(new_hd) or
-                np.isinf(prev_hd) or np.isinf(new_hd)):
+            # Boundary-precision: Dice gain + HD95 improvement, both vs episode start.
+            hd95_0 = self.hd95_history[0]   # HD95 of init_mask vs GT at reset()
+            r_dice = new_dice - dice_0
+            if (np.isnan(hd95_0) or np.isnan(new_hd) or
+                np.isinf(hd95_0) or np.isinf(new_hd)):
                 r_hd = 0.0
             else:
-                r_hd = float(np.clip((prev_hd - new_hd) / self.hd_norm, -1.0, 1.0))
+                # positive when HD95 has IMPROVED (decreased) vs episode start
+                r_hd = float(np.clip((hd95_0 - new_hd) / self.hd_norm, -1.0, 1.0))
             return self.reward_alpha * r_dice + self.reward_beta * r_hd
 
         if self.reward_mode == 'iou_delta':
-            # IoU is less sensitive to area than Dice — better signal for small
-            # targets where Dice fluctuates wildly (BRISC tumours <2% area).
-            # IoU = Dice / (2 − Dice)
-            prev_iou = prev_dice / max(2.0 - prev_dice, 1e-6)
-            new_iou  = new_dice  / max(2.0 - new_dice,  1e-6)
-            return new_iou - prev_iou
+            # IoU variant — suited for very small targets (BRISC).
+            iou_0  = dice_0   / max(2.0 - dice_0,   1e-6)
+            iou_t  = new_dice / max(2.0 - new_dice,  1e-6)
+            return iou_t - iou_0
 
         raise ValueError(f'Unknown reward_mode: {self.reward_mode}')
 
@@ -191,8 +232,12 @@ class SegmentationEnv:
         Only 2 scipy calls (pred erosion + pred EDT) instead of the 4 that the
         standalone hd95_px() function uses.  Must call _precompute_gt_quantities()
         first (done automatically in reset()).
+
+        Applies largest-CC filtering to m1 to prevent stray isolated U-Net /
+        agent pixels from inflating the HD95 baseline at episode start and
+        corrupting the composite reward signal.
         """
-        m1b = m1.astype(bool)
+        m1b = _largest_cc(m1)               # drop stray isolated pixels
         if not m1b.any() and not self._gt_edge_any:
             return 0.0
         if not m1b.any() or not self._gt_edge_any:
@@ -218,9 +263,6 @@ class SegmentationEnv:
         return self._state()
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
-        prev_dice = self.dice_history[-1]
-        prev_hd95 = self.hd95_history[-1]
-
         if self.action_type == 'discrete':
             self.mask = self._apply_discrete(int(action))
         else:
@@ -237,8 +279,9 @@ class SegmentationEnv:
         else:
             new_hd95 = float('nan')                   # skip — not needed
 
-        # Dataset-tuned reward (mode set in cfg), clipped BEFORE buffer push
-        raw_reward = self._compute_reward(prev_dice, new_dice, prev_hd95, new_hd95)
+        # Reward vs episode-start baseline (avoids step-wise oscillation trap).
+        # See _compute_reward() docstring for the full rationale.
+        raw_reward = self._compute_reward(new_dice, new_hd95)
         reward = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
 
         self.dice_history.append(new_dice)
