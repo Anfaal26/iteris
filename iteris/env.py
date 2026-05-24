@@ -167,11 +167,54 @@ class SegmentationEnv:
 
         raise ValueError(f'Unknown reward_mode: {self.reward_mode}')
 
+    # ── GT precomputation (called once per episode in reset()) ───────────────
+
+    def _precompute_gt_quantities(self) -> None:
+        """Cache GT edge mask and GT EDT — GT is constant for the whole episode.
+
+        Saves 2 scipy calls (binary_erosion + distance_transform_edt) on every
+        single env.step() invocation.  For dice_hd_composite mode that trims
+        each step from 4 scipy calls down to 2; for dice_delta it eliminates
+        HD95 entirely (0 scipy calls for the GT side).
+        """
+        gt_bool = self.gt.astype(bool)
+        gt_edge = gt_bool ^ ndi.binary_erosion(gt_bool, STRUCT)
+        self._gt_edge     = gt_edge
+        self._gt_edge_any = bool(gt_edge.any())
+        # EDT on the complement of the edge — distance from any non-edge pixel
+        # to the nearest GT boundary pixel.  Used in d_12 (pred→GT direction).
+        self._gt_edt      = ndi.distance_transform_edt(~gt_edge)
+
+    def _hd95_vs_gt(self, m1: np.ndarray) -> float:
+        """HD95 between mask m1 and GT, reusing precomputed GT quantities.
+
+        Only 2 scipy calls (pred erosion + pred EDT) instead of the 4 that the
+        standalone hd95_px() function uses.  Must call _precompute_gt_quantities()
+        first (done automatically in reset()).
+        """
+        m1b = m1.astype(bool)
+        if not m1b.any() and not self._gt_edge_any:
+            return 0.0
+        if not m1b.any() or not self._gt_edge_any:
+            return float('nan')
+        edge_1 = m1b ^ ndi.binary_erosion(m1b, STRUCT)
+        if not edge_1.any():
+            return 0.0
+        dt_1  = ndi.distance_transform_edt(~edge_1)
+        d_12  = self._gt_edt[edge_1]        # pred boundary → nearest GT boundary
+        d_21  = dt_1[self._gt_edge]         # GT boundary → nearest pred boundary
+        return float(np.percentile(np.concatenate([d_12, d_21]), 95))
+
     def reset(self) -> np.ndarray:
         self.mask = self.init_mask.copy()
         self.t    = 0
+        self._precompute_gt_quantities()    # 2 scipy calls, once per episode
         self.dice_history = [dice_score(self.mask, self.gt)]
-        self.hd95_history = [hd95_px(self.mask, self.gt)]
+        # HD95 only tracked when the reward mode actually needs it
+        if self.reward_mode != 'dice_delta':
+            self.hd95_history = [self._hd95_vs_gt(self.mask)]
+        else:
+            self.hd95_history = [float('nan')]
         return self._state()
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
@@ -185,7 +228,14 @@ class SegmentationEnv:
 
         self.t += 1
         new_dice = dice_score(self.mask, self.gt)
-        new_hd95 = hd95_px(self.mask, self.gt)
+
+        # HD95 is expensive — skip entirely when reward_mode doesn't use it.
+        # dice_delta and iou_delta rewards don't need HD95, so we save 2 scipy
+        # calls per step (pred erosion + pred EDT).
+        if self.reward_mode == 'dice_hd_composite':
+            new_hd95 = self._hd95_vs_gt(self.mask)   # 2 scipy calls (GT side cached)
+        else:
+            new_hd95 = float('nan')                   # skip — not needed
 
         # Dataset-tuned reward (mode set in cfg), clipped BEFORE buffer push
         raw_reward = self._compute_reward(prev_dice, new_dice, prev_hd95, new_hd95)
@@ -196,10 +246,21 @@ class SegmentationEnv:
 
         done = self.t >= self.max_steps
         if not done and len(self.dice_history) > self.stop_n:
-            dd = [abs(self.dice_history[-i-1] - self.dice_history[-i-2]) for i in range(self.stop_n)]
-            dh = [abs(self.hd95_history[-i-1] - self.hd95_history[-i-2]) for i in range(self.stop_n)]
-            if all(d < self.stop_eps_dice for d in dd) and all(h < self.stop_eps_hd for h in dh):
-                done = True
+            dd = [abs(self.dice_history[-i-1] - self.dice_history[-i-2])
+                  for i in range(self.stop_n)]
+            dice_stopped = all(d < self.stop_eps_dice for d in dd)
+
+            if self.reward_mode == 'dice_hd_composite':
+                # Both Dice and HD95 must have converged
+                dh = [abs(self.hd95_history[-i-1] - self.hd95_history[-i-2])
+                      for i in range(self.stop_n)]
+                hd_stopped = all(
+                    (np.isnan(h) or h < self.stop_eps_hd) for h in dh
+                )
+                done = dice_stopped and hd_stopped
+            else:
+                # dice_delta / iou_delta: Dice-only convergence check
+                done = dice_stopped
 
         info = {
             'dice': new_dice,
