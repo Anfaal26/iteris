@@ -38,6 +38,9 @@ stop_n:            3
 # LA baseline Dice 0.896 — meaningful spread of init dices; hard mining
 # focuses training on shape-variable cases (elongated atria, poor views).
 hard_mining_scale: 5.0
+action_penalty:    0.002            # subtract from reward for every non-no-op action;
+                                    # breaks dilate/erode oscillation: cycle net ≈ 0,
+                                    # improve-then-hold trajectory stays strongly positive
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:

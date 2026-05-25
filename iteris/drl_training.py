@@ -199,6 +199,7 @@ def run_drl_training(
         stop_eps_dice     = cfg.get('stop_eps_dice', 0.001),
         stop_eps_hd       = cfg.get('stop_eps_hd', 0.5),
         stop_n            = cfg.get('stop_n', 3),
+        action_penalty    = cfg.get('action_penalty', 0.0),
     )
     state_builder = _make_state_builder(train_caches, env_kwargs['sdt_clip'])
 

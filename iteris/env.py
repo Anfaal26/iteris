@@ -136,6 +136,10 @@ class SegmentationEnv:
         reward_alpha: float = 0.5,        # weight on Dice component (composite)
         reward_beta: float  = 0.5,        # weight on HD95 component (composite)
         hd_norm: float = 50.0,            # HD95 normalisation in px — tune to 2× expected HD95
+        # ── action penalty ────────────────────────────────────────────────────
+        action_penalty: float = 0.0,      # subtract this from reward for every non-no-op action
+                                          # breaks dilate/erode oscillation: cycle net-reward ≈ 0,
+                                          # while dilate→no-op×stop_n→done stays strongly positive
     ):
         assert action_type in ('discrete', 'continuous')
         assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
@@ -159,6 +163,7 @@ class SegmentationEnv:
         self.reward_alpha     = reward_alpha
         self.reward_beta      = reward_beta
         self.hd_norm          = hd_norm
+        self.action_penalty   = action_penalty
 
         self.reset()
 
@@ -282,6 +287,34 @@ class SegmentationEnv:
         # Reward vs episode-start baseline (avoids step-wise oscillation trap).
         # See _compute_reward() docstring for the full rationale.
         raw_reward = self._compute_reward(new_dice, new_hd95)
+
+        # ── Action penalty ────────────────────────────────────────────────────
+        # Subtract action_penalty for every non-no-op action.  Breaks the
+        # dilate/erode oscillation in Q-value space:
+        #
+        #   Oscillation (dilate→erode→dilate…):
+        #     Each dilate: r = +improvement - penalty  ≈ +0.003
+        #     Each erode:  r = 0            - penalty  = -0.002
+        #     Discounted sum per 2-cycle ≈ 0 (nearly cancels)
+        #
+        #   Improve-and-hold (dilate→no-op×stop_n→done):
+        #     Dilate: r = +improvement - penalty  ≈ +0.003
+        #     No-ops: r = +improvement            ≈ +0.005 each (no penalty)
+        #     Discounted sum ≈ 0.003 + 3×0.005×γ  ≈ +0.018  (much better)
+        #
+        #   → Q(state, dilate-then-noop) >> Q(state, oscillate)
+        #   → no-op becomes the dominant action once an improvement is found
+        #
+        # For continuous agents: ||a|| < 0.01 counts as no-op (OU noise at rest
+        # is ~0.001–0.005, well below this threshold).
+        if self.action_penalty > 0.0:
+            if self.action_type == 'discrete':
+                _is_noop = (int(action) == 6)
+            else:
+                _is_noop = bool(np.abs(np.asarray(action, dtype=np.float32)).max() < 0.01)
+            if not _is_noop:
+                raw_reward -= self.action_penalty
+
         reward = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
 
         self.dice_history.append(new_dice)

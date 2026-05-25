@@ -44,6 +44,9 @@ stop_n:            3
 # samples (dice=0.85 → ~2×, dice=0.75 → ~5×) while keeping easy samples in
 # the mix so the agent still learns "no-op on already-good states".
 hard_mining_scale: 5.0
+action_penalty:    0.002            # subtract from reward for every non-no-op action;
+                                    # breaks dilate/erode oscillation: cycle net ≈ 0,
+                                    # improve-then-hold trajectory stays strongly positive
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.
