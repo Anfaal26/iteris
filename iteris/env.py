@@ -289,21 +289,43 @@ class SegmentationEnv:
 
         done = self.t >= self.max_steps
         if not done and len(self.dice_history) > self.stop_n:
-            dd = [abs(self.dice_history[-i-1] - self.dice_history[-i-2])
-                  for i in range(self.stop_n)]
-            dice_stopped = all(d < self.stop_eps_dice for d in dd)
+            dice_0 = self.dice_history[0]
+
+            # ── Criterion A: Convergence ─────────────────────────────────────
+            # Dice (and HD95 for composite mode) has stopped changing between
+            # consecutive steps.  This handles the "mask settled" case.
+            dd = [abs(self.dice_history[-k-1] - self.dice_history[-k-2])
+                  for k in range(self.stop_n)]
+            dice_converged = all(d < self.stop_eps_dice for d in dd)
+
+            # ── Criterion B: Improvement maintained ──────────────────────────
+            # All of the last stop_n Dice values are above the episode-start
+            # Dice by at least stop_eps_dice.  This terminates the dilate/erode
+            # oscillation trap: if BOTH oscillation states are above Dice_0 the
+            # episode would otherwise run all max_steps, wasting compute and
+            # filling the buffer with repetitive transitions.
+            #
+            # Why this fixes the oscillation:
+            #   dilate→0.941, erode→0.929, dilate→0.941 … both > init 0.925
+            #   After stop_n=3 consecutive above-init steps → done=True at step 3
+            #   Final mask is the current (improved) mask, not a random phase.
+            #   Agent learns: "reach improvement + maintain it → episode ends"
+            #   → no-op at an improved state is strictly better than oscillating
+            #     (no-op keeps Dice high AND fills the stop_n counter faster).
+            dice_improved = all(
+                self.dice_history[-k-1] > dice_0 + self.stop_eps_dice
+                for k in range(self.stop_n)
+            )
 
             if self.reward_mode == 'dice_hd_composite':
-                # Both Dice and HD95 must have converged
-                dh = [abs(self.hd95_history[-i-1] - self.hd95_history[-i-2])
-                      for i in range(self.stop_n)]
-                hd_stopped = all(
+                dh = [abs(self.hd95_history[-k-1] - self.hd95_history[-k-2])
+                      for k in range(self.stop_n)]
+                hd_converged = all(
                     (np.isnan(h) or h < self.stop_eps_hd) for h in dh
                 )
-                done = dice_stopped and hd_stopped
+                done = (dice_converged and hd_converged) or dice_improved
             else:
-                # dice_delta / iou_delta: Dice-only convergence check
-                done = dice_stopped
+                done = dice_converged or dice_improved
 
         info = {
             'dice': new_dice,
