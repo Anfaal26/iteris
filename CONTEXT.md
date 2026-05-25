@@ -40,7 +40,6 @@ Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 ste
 | Agent | Action space | Key detail |
 |---|---|---|
 | DQN | Discrete (7) | Baseline Q-learner, CNN Q-head, ε-greedy, replay buffer |
-| DDQN | Discrete (7) | Decoupled action selection / evaluation — reduces overestimation |
 | Dueling DQN | Discrete (7) | V(s) + A(s,a) split head — better at no-op credit assignment |
 | DDPG | Continuous (3D) | OU noise, morph + dy + dx, τ=0.005 soft target update |
 | PPO | Discrete (7) | On-policy clipped surrogate — planned; requires rollout buffer |
