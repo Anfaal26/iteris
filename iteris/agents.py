@@ -32,6 +32,10 @@ class DQNAgent:
     """
     DQN (vanilla / Double / Dueling) for discrete-action boundary refinement.
 
+    The discrete action space has 13 actions in env v3 (4 directional dilate +
+    4 directional erode + 4 whole-mask shifts + no-op).  ``num_actions`` is
+    set by the training loop from ``SegmentationEnv.NUM_DISCRETE_ACTIONS``.
+
     Toggle behaviour via:
         double=True   → Double DQN target computation
         dueling=True  → use DuelingQNetwork instead of QNetwork
@@ -42,7 +46,7 @@ class DQNAgent:
     def __init__(
         self,
         in_channels: int = 4,
-        num_actions: int = 7,
+        num_actions: int = 13,
         lr: float = 1e-4,
         gamma: float = 0.99,
         tau: float = 0.005,
@@ -172,12 +176,17 @@ class DDPGAgent:
     """
     DDPG with mid-layer action injection, actor-freeze warmup, OU noise.
 
-    The continuous action is now 3-component: (morph, dy_norm, dx_norm).
+    Sprint-1 mask-space continuous action is 3-component:
+        (morph, dy_norm, dx_norm)
     ``action_scale`` is a list ``[morph_scale, trans_scale, trans_scale]``
     that sets the per-component output range of the actor (tanh × scale).
     ``ou_sigma`` can be a scalar (same noise for all components) or a list
     with per-component values — use a list to keep noise proportional to
     each component's range (e.g., [0.025, 0.002, 0.002]).
+
+    Sprint-2 contour DDPG will introduce a separate ``DDPGContourAgent``
+    with a (K, 2)-shaped action — implemented as a sibling class so this one
+    keeps the simple mask-space contract for direct comparison.
     """
     action_type = 'continuous'
 
@@ -323,7 +332,7 @@ class MSADuelingDQNAgent(DQNAgent):
     def __init__(
         self,
         in_channels: int   = 4,
-        num_actions: int   = 7,
+        num_actions: int   = 13,
         lr:          float = 1e-4,
         gamma:       float = 0.99,
         tau:         float = 0.005,

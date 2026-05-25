@@ -44,9 +44,12 @@ stop_n:            3
 # samples (dice=0.85 → ~2×, dice=0.75 → ~5×) while keeping easy samples in
 # the mix so the agent still learns "no-op on already-good states".
 hard_mining_scale: 5.0
-action_penalty:    0.002            # subtract from reward for every non-no-op action;
-                                    # breaks dilate/erode oscillation: cycle net ≈ 0,
-                                    # improve-then-hold trajectory stays strongly positive
+
+# Sprint-1 note: discrete agents now use the 13-action directional space
+# (4 dir-dilate + 4 dir-erode + 4 shift + no-op).  No action_penalty, no
+# window/band restriction — global ops kept locally targeted by the directional
+# SEs themselves.  Continuous DDPG stays on the 3-D (morph, dy, dx) action
+# until Sprint 2 brings in contour-control-point DDPG.
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.

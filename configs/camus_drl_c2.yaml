@@ -38,9 +38,9 @@ stop_n:            3
 # LV_epi baseline Dice 0.872 — still benefits from preferring harder samples
 # where boundary correction is achievable (apex regions, thin walls).
 hard_mining_scale: 5.0
-action_penalty:    0.002            # subtract from reward for every non-no-op action;
-                                    # breaks dilate/erode oscillation: cycle net ≈ 0,
-                                    # improve-then-hold trajectory stays strongly positive
+
+# Sprint-1 note: discrete uses 13-action directional; DDPG stays on 3-D mask-
+# space morph until Sprint-2 contour DDPG lands.
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:

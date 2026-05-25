@@ -48,7 +48,7 @@ class CNNBackbone(nn.Module):
 
 class QNetwork(nn.Module):
     """Vanilla DQN Q-network."""
-    def __init__(self, in_channels=4, num_actions=7, embed_dim=256):
+    def __init__(self, in_channels=4, num_actions=13, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.head = nn.Sequential(
@@ -67,7 +67,7 @@ class DuelingQNetwork(nn.Module):
     Mean-centred (NOT max-centred) — this is the form that keeps V(s) and
     A(s, a) identifiable. Using max produces V/A drift.
     """
-    def __init__(self, in_channels=4, num_actions=7, embed_dim=256):
+    def __init__(self, in_channels=4, num_actions=13, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.value_head = nn.Sequential(
@@ -90,7 +90,7 @@ class Actor(nn.Module):
     """
     DDPG actor — tanh output with per-component scaling.
 
-    Outputs a 3-component action:
+    Outputs a 3-component action (mask-space DDPG):
         out[0] : morph   — SDT threshold shift (dilate / erode)
         out[1] : dy_norm — fractional y-translation
         out[2] : dx_norm — fractional x-translation

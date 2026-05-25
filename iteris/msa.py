@@ -136,7 +136,7 @@ class MSADuelingQNetwork(nn.Module):
     def __init__(
         self,
         in_channels: int = 4,
-        num_actions: int = 7,
+        num_actions: int = 13,
         embed_dim:   int = 256,
         num_heads:   int = 4,
         key_dim:     int = 64,

@@ -23,10 +23,15 @@ import pandas as pd
 import torch
 from tqdm.auto import trange
 
-from .env     import SegmentationEnv, signed_dt
+from .env     import SegmentationEnv, signed_dt, dice_score
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
                        MSADuelingDQNAgent, MSADDPGAgent
+
+
+# Action-space contract — kept in sync with env.SegmentationEnv (v3).
+NUM_DISCRETE_ACTIONS  = SegmentationEnv.NUM_DISCRETE_ACTIONS    # 13
+CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 5
 
 
 AGENT_REGISTRY = {
@@ -199,7 +204,6 @@ def run_drl_training(
         stop_eps_dice     = cfg.get('stop_eps_dice', 0.001),
         stop_eps_hd       = cfg.get('stop_eps_hd', 0.5),
         stop_n            = cfg.get('stop_n', 3),
-        action_penalty    = cfg.get('action_penalty', 0.0),
     )
     state_builder = _make_state_builder(train_caches, env_kwargs['sdt_clip'])
 
@@ -213,17 +217,19 @@ def run_drl_training(
         if issubclass(agent_cls, _MSA_AGENT_CLASSES) else {}
     )
     if action_type == 'discrete':
-        agent = agent_cls(num_actions=7, lr=cfg.get('lr', 1e-4), **common, **msa_kwargs)
+        agent = agent_cls(num_actions=NUM_DISCRETE_ACTIONS,
+                          lr=cfg.get('lr', 1e-4), **common, **msa_kwargs)
     else:
         common.pop('lr', None)
         _legacy_scale = cfg.get('cont_action_scale', 0.02)
         morph_scale   = cfg.get('cont_morph_scale', 0.25)
         trans_scale   = cfg.get('cont_trans_scale', _legacy_scale)
+        # 3-component: [morph, dy, dx] — see env.SegmentationEnv docstring.
         action_scale  = [morph_scale, trans_scale, trans_scale]
         # ou_sigma from config may be scalar (legacy) or list (per-component)
         ou_sigma_raw  = cfg.get('ou_sigma', None)   # None → DDPGAgent default (10% of scale)
         agent = agent_cls(
-            action_dim         = 3,
+            action_dim         = CONTINUOUS_ACTION_DIM,
             action_scale       = action_scale,
             actor_lr           = cfg.get('actor_lr',  1e-4),
             critic_lr          = cfg.get('critic_lr', 1e-3),
@@ -240,9 +246,15 @@ def run_drl_training(
     buffer = ReplayBuffer(
         capacity   = cfg.get('buffer_size', 10000),
         mask_shape = (H, H),
-        action_dim = 3 if action_type == 'continuous' else None,   # 3-component: morph+dy+dx
+        # 3-component continuous action: (morph, dy_norm, dx_norm).  Sprint 2
+        # contour DDPG will use a (K, 2)-flattened layout via a dedicated
+        # continuous-contour buffer; the mask-space buffer stays 3-D.
+        action_dim = CONTINUOUS_ACTION_DIM if action_type == 'continuous' else None,
         discrete   = (action_type == 'discrete'),
-        cache_sdt  = cfg.get('cache_sdt', True),
+        # cache_sdt is FORCED ON: Sprint 3's spatial-Q-map MSA-Dueling needs the
+        # per-transition SDT to mask invalid actions when computing the Bellman
+        # target.  Storing it for all agents now avoids a painful retrofit.
+        cache_sdt  = True,
     )
 
     # ── Pre-fill buffer with random rollouts ──────────────────────────────────
@@ -259,13 +271,13 @@ def run_drl_training(
         prev_state = env.reset()           # state = stack([img, mask, SDT, init])
         while True:
             if action_type == 'discrete':
-                a = np.random.randint(7)
+                a = np.random.randint(NUM_DISCRETE_ACTIONS)
             else:
-                # 3-component: (morph, dy_norm, dx_norm) — each component has its own range
+                # 3-component: (morph, dy_norm, dx_norm)
                 a = np.array([
-                    np.random.uniform(-_morph_scale, _morph_scale),
-                    np.random.uniform(-_trans_scale, _trans_scale),
-                    np.random.uniform(-_trans_scale, _trans_scale),
+                    np.random.uniform(-_morph_scale,  _morph_scale),
+                    np.random.uniform(-_trans_scale,  _trans_scale),
+                    np.random.uniform(-_trans_scale,  _trans_scale),
                 ], dtype=np.float32)
             prev_mask = env.mask.copy()
             prev_sdt  = prev_state[2]      # SDT slot of state tensor
