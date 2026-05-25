@@ -8,7 +8,7 @@
 
 **Iteris** is a research-paper + UI dual deliverable from a 5-week Taylor's University capstone (PRJ63504).
 
-The research builds and compares six **Deep Reinforcement Learning** agents that refine medical image segmentation masks produced by a U-Net baseline. The UI is a research demo that visualises how each agent iteratively improves a segmentation over up to 20 steps.
+The research builds and compares Deep Reinforcement Learning agents that refine medical image segmentation masks produced by a U-Net baseline. The UI is a research demo that visualises how each agent iteratively improves a segmentation over up to 20 steps.
 
 **Identity**
 
@@ -31,33 +31,35 @@ Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 ste
 **Datasets**
 | Dataset | Modality | Structures | Role |
 |---|---|---|---|
-| **CAMUS** | Cardiac ultrasound | LV endo / LV epi / Left atrium | Primary training set, ~500 patients |
-| **CHAOS** | CT + MRI | Liver / Kidneys / Spleen | Cross-modal transfer eval (Week 4) |
-| ACDC, BraTS, ISIC, DRIVE | Various | Various | Stretch — transfer/few-shot only |
+| **CAMUS** | Cardiac ultrasound | LV endo / LV epi / Left atrium | Primary cardiac set, ~500 patients, 3-class |
+| **BRISC** | Brain MRI | Tumour (binary) | Secondary set, 9 586 image pairs, single-class |
 
 **Baseline model:** Attention Residual U-Net (ResNet-34 encoder, attention gates, transposed-conv decoder).
 
-**DRL agents (6 total)**
+**DRL agents**
 | Agent | Action space | Key detail |
 |---|---|---|
-| DQN | Discrete (7) | CNN policy, replay 10k, ε 1.0→0.05 |
-| DDQN | Discrete (7) | Decoupled action selection / evaluation |
-| Dueling DQN | Discrete (7) | V(s) + A(s,a) split head |
-| DDPG | Continuous (2D) | OU noise, τ=0.005 |
-| MSA-Dueling DQN | Discrete + attention | 4-head MSA, 64-dim keys |
-| MSA-DDPG | Continuous + attention | 4-head MSA in actor |
+| DQN | Discrete (7) | Baseline Q-learner, CNN Q-head, ε-greedy, replay buffer |
+| DDQN | Discrete (7) | Decoupled action selection / evaluation — reduces overestimation |
+| Dueling DQN | Discrete (7) | V(s) + A(s,a) split head — better at no-op credit assignment |
+| DDPG | Continuous (3D) | OU noise, morph + dy + dx, τ=0.005 soft target update |
+| PPO | Discrete (7) | On-policy clipped surrogate — planned; requires rollout buffer |
+| MSA-\[Best\] | Same as base | 4-head multi-scale attention on top of best discrete/continuous agent |
+
+> **MSA selection:** After Dueling, DDPG, and PPO training is complete, the top-performing agent type gets an MSA variant (MSA-Dueling or MSA-DDPG). Both MSA variants are pre-implemented and ready to run.
 
 **RL Environment (locked v2 contract)**
 - **State:** `(4, 256, 256)` float32
   - ch 0: image (normalised [0,1])
   - ch 1: current binary mask for the target class
   - ch 2: signed distance transform of current mask, normalised ±1
-  - ch 3: **U-Net init mask** (fixed throughout episode — gives agent its "starting point" reference)
+  - ch 3: U-Net init mask (fixed throughout episode — gives agent its "starting point" reference)
 - **Discrete actions (7):** dilate · erode · shift ↑ · shift ↓ · shift ← · shift → · no-op
-- **Continuous actions (2):** (dy, dx) ∈ [-0.1, 0.1] (fractional translation)
-- **Reward:** `r_t = Dice(mask_t, GT) - Dice(mask_{t-1}, GT)` (first-order delta — telescopes to total Δ Dice)
-- **Episode end:** step ≥ 20, OR composite early-stop: |ΔDice| < 0.001 AND |ΔHD95| < 0.5 px for 3 consecutive steps
-- **Formulation:** per-class binary agents (one episode per structure). Final multi-class mask = union of per-class refinements.
+- **Continuous actions (3):** (morph, dy\_norm, dx\_norm) — morphological shift on SDT + fractional translation
+- **Reward (episode-start baseline):** `r_t = metric(t) − metric(0)` — no step-wise oscillation trap
+- **Reward modes:** `dice_hd_composite` (cardiac, boundary precision) · `iou_delta` (BRISC, small targets)
+- **Episode end:** step ≥ 20, OR convergence: |ΔDice| < stop\_eps for stop\_n consecutive steps, OR improvement-maintained: all last stop\_n Dice > Dice\_0 + stop\_eps
+- **Formulation:** per-class binary agents; final multi-class mask = union of per-class refinements
 
 **Evaluation metrics:** Dice · IoU · HD · HD95 · Wilcoxon signed-rank tests (p<0.05) · 5-fold CV.
 
@@ -66,110 +68,204 @@ Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 ste
 ## 3. Current Status (live)
 
 **Week 1 — DONE** ✓
-- Attention Residual U-Net trained on CAMUS
-- Achieved test results:
-  - LV endo Dice **0.9378** (target was ≥ 0.85)
-  - LV epi Dice **0.8723**
-  - LA Dice **0.8958**
-  - Mean Dice **0.9020**, mean HD95 ~6 px (~2.3 mm)
-- Outputs available: `camus_best.pt` checkpoint, per-patient scores CSV, predicted masks per test sample, learning curves PNG.
+
+*CAMUS Baseline (Attention Residual U-Net — cardiac ultrasound)*
+| Structure | Dice | HD95 |
+|---|---|---|
+| LV endo | **0.9378** | ~6 px |
+| LV epi | **0.8723** | — |
+| Left atrium | **0.8958** | — |
+| **Mean** | **0.9020** | ~6 px (~2.3 mm) |
+
+Checkpoint: `camus_best.pt` · val Dice 0.9020 · target was ≥ 0.85 ✓
+
+*BRISC Baseline (Attention Residual U-Net — brain tumour MRI)*
+| Structure | Dice (val) | Dice (test) | HD95 (test) |
+|---|---|---|---|
+| Tumour | 0.8290 | **0.8351** | 8.36 px |
+
+Checkpoint: `brisc_best.pt` · trained 60 epochs · target was ≥ 0.80 ✓  
+Dataset: 9 586 pairs, images resized 512→256, z-score normalised, variable aspect ratios.  
+Notable: per-patient HD95 varies widely (1.4 px → 78 px) — boundary refinement has strong upside.
 
 **Week 2 — IN PROGRESS**
-- `SegmentationEnv` v2 written + validated (state, reward, action set all locked)
-- Compute benchmark complete on T4
-- Next: random-action baseline, then DQN/DDQN/Dueling agents
 
-**Weeks 3–5 — PLANNED**
-- W3: DDPG + MSA variants on CAMUS
-- W4: Unified eval harness · ablations · CHAOS cross-modal transfer · stats
-- W5: Paper draft + Iteris UI deployment
+DRL environment v2 locked and validated. Reward architecture overhauled:
+- Episode-start baseline reward (eliminates step-wise oscillation trap)
+- Improvement-maintained early stopping (terminates dilate/erode 2-cycles)
+- Largest-CC filtering on HD95 (removes stray U-Net FP pixels inflating to 200+ px)
+- Per-class YAML configs for CAMUS (3 classes) and BRISC (1 class)
+
+Current: DDQN running on CAMUS LV\_endo. Remaining agents queued.
+
+Agents to implement (in order): DQN · DDQN · Dueling · DDPG · (PPO) · MSA-\[best\]  
+Platforms: Kaggle T4 GPU · notebooks `06a/b/c` (CAMUS) · notebook `07` (BRISC)
+
+**Week 3 — PLANNED: Full training runs**
+
+- All 5–6 agents × 2 datasets × per-class (CAMUS: 3 configs, BRISC: 1 config)
+- Checkpoint each best val Dice agent per run
+- Generate per-step episode traces for UI playback (20-step `.npy` stacks)
+- Ablation: reward mode · buffer size · epsilon schedule
+
+**Week 4 — PLANNED: Evaluation + stats**
+
+- Unified eval harness over all checkpoints
+- Wilcoxon signed-rank vs U-Net baseline (per-class)
+- 5-fold cross-validation
+- Failure case curation for Dataset Explorer
+
+**Week 5 — PLANNED: Paper + UI deployment**
+
+- Paper draft targeting IEEE JBHI
+- Iteris UI deployed on Hugging Face Spaces or Render
 
 **File outputs the UI will consume**
-- `camus_best.pt` — U-Net baseline checkpoint (loaded once at backend startup)
-- `<agent>_camus.pt` — six DRL agent checkpoints (loaded once each)
-- `camus_test_scores.csv` — per-patient metrics for U-Net (extend per agent in Week 2+)
-- `camus_pred_masks/*.npy` — U-Net predicted masks per test sample (used as RL env init state)
-- `<agent>_episode_traces/*.npy` — per-step masks for 20-step playback (generated Week 3)
+- `camus_best.pt` / `brisc_best.pt` — U-Net baseline checkpoints
+- `<agent>_camus_c<n>_best.pt` / `<agent>_brisc_tumor_best.pt` — DRL checkpoints
+- `*_test_results.json` — per-agent test metrics
+- `<agent>_episode_traces/*.npy` — per-step masks for playback (generated Week 3)
 
 ---
 
 ## 4. The UI Brief
 
-**Backend:** FastAPI + PyTorch. Loads 1 U-Net + 6 DRL agents at startup.
-**Frontend:** HTML/CSS/JS or React. Canvas-based image viewer.
+**Backend:** FastAPI + PyTorch. Loads U-Net + DRL agents at startup.  
+**Frontend:** React + Three.js (landing), Canvas-based viewer (workspace).  
 **Hosting target:** Hugging Face Spaces or Render (free tier).
 
 **Endpoints**
 - `POST /predict` — upload image, return baseline + all-agent predictions
-- `GET /models` — list available models with metadata (name, family, val Dice, training dataset)
-- `POST /compare` — return side-by-side or wipe-comparison data for selected models
-- `GET /trace/{agent}/{sample_id}` — return the 20 per-step masks for iteration playback
+- `GET /models` — list available models with metadata (name, family, val Dice, dataset)
+- `POST /compare` — return wipe-comparison data for selected models
+- `GET /trace/{agent}/{sample_id}` — return per-step masks for iteration playback
 
-**Pages**
+**Pages / Sections**
 | Page | Purpose |
 |---|---|
+| **Landing** | Dark hero with 3D element + 2 CTAs → Research hub or Workspace |
+| **Research Hub** | Paper stats, methodology, training curves, ablation results |
 | **Workspace** | Upload + model select (left) · canvas viewer (centre) · results panel (right) |
 | **Wipe Comparison** | Draggable divider: U-Net vs DRL agent, shared zoom/pan |
 | **Iteration Playback** | Step scrubber 0–20, transport controls, reward sparkline, per-step annotations |
 | **Side-by-Side** | 3 model columns, shared zoom/pan, dynamic "Best Dice" badge, metric bar chart |
-| **Model Library** | All 7 models, expandable training curves, filter by family/metric/dataset |
-| **Dataset Explorer** | CAMUS + CHAOS grid, difficulty tags, curated examples including 1 deliberate failure case |
+| **Model Library** | All agents, expandable training curves, filter by family/metric/dataset |
+| **Dataset Explorer** | CAMUS + BRISC grid, difficulty tags, 1 deliberate failure case per dataset |
 
 **Key components**
 - **Preprocessing status:** step indicator with elapsed ms per stage (no spinner)
-- **Model cards:** Dice / IoU / HD / HD95 pills; active card has teal left border
+- **Model cards:** Dice / IoU / HD / HD95 pills; active card has accent left border
 - **Results panel:** metric cards with green/amber/red benchmark coding · per-structure table
-- **W/L controls:** Window / Level sliders + modality presets (CT / MRI / US) — **non-negotiable**
+- **W/L controls:** Window / Level sliders + modality presets (MRI / US) — non-negotiable
 - **Viewer:** scroll-zoom up to 8×, drag-pan, minimap, pixel coord + intensity readout on hover
 - **Export:** PNG mask · JSON metrics · shareable session link
-- **Demo mode:** 5–6 preloaded test samples for zero-upload demos
+- **Demo mode:** 5–6 preloaded test samples (CAMUS cardiac + BRISC tumour) for zero-upload demos
 
 **Accessibility:** WCAG 2.1 AA · full keyboard navigation · colour-blind pattern overlays · Reduce Motion mode.
 
 ---
 
-## 5. Design System (locked)
+## 5. Design System
 
-**Theme**
-- Light default: `#F7F8FA` background · `#FFFFFF` surface
-- "Reading Room" dark mode toggle
-- Accent: `#0A7EA4` teal
-- Text: `#0F1923` primary · `#64748B` secondary · `#E2E8F0` borders
+### Theme — Dark Primary
+
+Iteris is a research workstation. The dark theme foregrounds the medical images (greyscale scans read best against near-black) and gives the product a distinctive, credible aesthetic.
+
+| Token | Value | Usage |
+|---|---|---|
+| `surface-base` | `#0B0F1A` | Page background — deep navy, not pure black |
+| `surface-card` | `#131929` | Cards, panels, modals |
+| `surface-raised` | `#1C2438` | Hover states, active rows, dropdowns |
+| `border` | `#2A3550` | Dividers, card outlines |
+| `text-primary` | `#E8EDF5` | Headlines, values |
+| `text-secondary` | `#8A9BB8` | Labels, captions, metadata |
+| `accent` | `#3B82F6` | Primary interactive — blue replaces old teal in dark context |
+| `accent-glow` | `rgba(59,130,246,0.15)` | Button halos, focus rings |
 
 **Semantic colours**
-- Success `#16A34A` · Warning `#D97706` · Error `#DC2626` · Uncertainty `#7C3AED`
+- Success `#22C55E` · Warning `#F59E0B` · Error `#EF4444` · Uncertainty `#A78BFA`
 
-**Structure mask colours** (used ONLY on masks — never reused in UI chrome)
+**Structure mask colours** (sacred — used ONLY on masks, never reused in UI chrome)
 - LV endo `#00C9A7` · LV epi `#F59E0B` · LA `#F87171`
-- Liver `#818CF8` · Kidneys `#34D399` · Spleen `#FB923C`
-- (Expansion palette — RV `#60A5FA` · Myocardium `#A78BFA` · Brain tumour core `#F43F5E` · Retinal vessel `#22D3EE` · Skin lesion `#FBBF24` · Liver tumour `#EF4444` · Pancreas `#8B5CF6`)
+- Brain tumour `#F43F5E`
+- (Expansion: RV `#60A5FA` · Myocardium `#A78BFA` · Retinal vessel `#22D3EE` · Skin lesion `#FBBF24`)
 
 **Typography**
-- Sora (headings) · DM Sans (body) · JetBrains Mono (metrics)
+- Sora (headings, landing hero) · DM Sans (body, UI) · JetBrains Mono (metrics, JSON output)
 
 **Motion**
-- **Zero animation on clinical output (masks, predictions)**
-- 100–200 ms ease-out on UI chrome only
+- **Zero animation on clinical output** (masks, predictions, metric readouts)
+- Landing hero: 3D element rotates at 0.3 rpm, subtle particle drift (pauses on Reduce Motion)
+- UI chrome: 150 ms ease-out only
+
+---
+
+### Landing Page — Design Specification
+
+The landing page is the only page with expressive design. Everything beyond it is a workstation.
+
+**Hero section (100 vh, dark `#0B0F1A`)**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  iteris                                         [Research] [Try] │  ← minimal nav
+│                                                                   │
+│          ╔══════════════════════════════╗                        │
+│          ║   [  3D ELEMENT — right ¾  ] ║                        │
+│  See how ║   Rotating 3D brain/heart   ║                        │
+│  AI       ║   mesh or abstract neural   ║                        │
+│  learns  ║   particle cloud in         ║                        │
+│  to see. ║   Three.js / WebGL          ║                        │
+│          ╚══════════════════════════════╝                        │
+│                                                                   │
+│   [ Try Iteris → ]   [ Explore Research ↓ ]                     │
+│    (accent fill)       (ghost, outline)                          │
+│                                                                   │
+│   ↓ scroll                                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+3D element options (choose one):
+- **Option A (preferred):** Three.js particle cloud that morphs between a rough tumour boundary and a refined one — literally shows the DRL refinement concept.
+- **Option B:** Rotating stylised brain MRI cross-section with glowing contour lines animated in steps (0→20).
+- **Option C:** Abstract neural attention map — coloured blobs shifting and focusing, suggestive of the MSA mechanism.
+
+**Scroll sections (below hero, full-width, `#0B0F1A` bg)**
+
+1. **The Problem** — Two-column: left text ("U-Net boundaries drift. Pixels get missed."), right: animated before/after mask wipe (U-Net vs GT, no agent — sets up the problem).
+2. **Our Approach** — Animated pipeline diagram: `scan → U-Net → DRL agent (steps 1–N) → refined mask`. Each stage lights up in sequence on scroll entry.
+3. **Results Snapshot** — Dark card grid with key numbers:
+   - CAMUS Mean Dice **0.902** · BRISC Tumour Dice **0.835** (baseline) → DRL target improvement
+   - HD95 reduction numbers once training completes
+4. **How It Works** — 3 icon tiles: `1. Upload scan` · `2. Pick agent` · `3. Watch it learn`
+5. **CTA footer** — Repeats both buttons. "Not a clinical tool. Research demo only."
+
+**Branch destinations**
+- **Try Iteris →** → `/workspace` (the segmentation workstation)
+- **Explore Research ↓** → `/research` (paper abstract, methodology, result tables, training curves, model library)
 
 ---
 
 ## 6. Tools & Stack
 
 - **Training:** PyTorch · MONAI (transforms, losses, metrics) · scipy.ndimage (env-side mask ops)
-- **Compute:** Kaggle T4 GPU (P100 dropped — current PyTorch lacks Pascal kernels)
+- **Compute:** Kaggle T4 GPU
+- **Frontend (landing):** React + Three.js for 3D element
+- **Frontend (workspace):** React + Canvas (no Three.js — pure 2D image viewer)
 - **Tracking:** W&B for live training metrics · CSV exports for paper figures
 - **Repo:** github.com/Anfaal26/iteris (private)
-- **Versioning:** All hyperparameters in YAML configs · no hardcoded values · fixed seeds (PyTorch + NumPy + Python random)
+- **Versioning:** All hyperparameters in YAML configs · no hardcoded values · fixed seeds (42)
 
 ---
 
 ## 7. Non-negotiables for the UI
 
-1. **Never present output as clinical.** The product is a research demo. Every page header must communicate this.
+1. **Never present output as clinical.** The product is a research demo. Every page must communicate this.
 2. **Window/Level controls are required** for medical imaging credibility.
-3. **Iteration playback is the differentiator.** The DRL→U-Net step-by-step view is what makes this project novel; it must be the most polished page.
-4. **Failure cases must be included** in Dataset Explorer. Hiding them undermines the research framing.
-5. **Mask colours are sacred** — they encode anatomical class. Do not reuse them in buttons, accents, or chrome.
+3. **Iteration playback is the differentiator.** DRL step-by-step view is the most polished page.
+4. **Failure cases must be included** in Dataset Explorer. Hiding them undermines research framing.
+5. **Mask colours are sacred** — they encode anatomical/pathological class. Never reuse in buttons or chrome.
+6. **The landing page 3D element must pause/disable** under `prefers-reduced-motion`.
 
 ---
 
@@ -178,10 +274,11 @@ Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 ste
 | Risk | UI mitigation |
 |---|---|
 | User mistakes demo output for clinical use | Persistent "Research demo · not for clinical use" banner |
-| Agents fail catastrophically on out-of-distribution input | Show uncertainty pills · gate Export behind a "low confidence" warning |
-| Iteration playback feels like animation, not signal | Step scrubber (not auto-play) · reward sparkline shows what each step "earned" |
+| Agents fail catastrophically on out-of-distribution input | Uncertainty pills · gate Export behind a "low confidence" warning |
+| Iteration playback feels like animation, not signal | Step scrubber (not auto-play) · reward sparkline shows what each step earned |
 | User can't tell which agent is best | "Best Dice" badge dynamically updates · benchmark colour-coding on metric cards |
+| 3D landing element distracts from tool | 3D stays on landing only; workspace is purely functional |
 
 ---
 
-*Last updated when committed. For the current Week 1 results, see `camus_best_summary.json` in the latest Kaggle output.*
+*Last updated 2026-05-25. CAMUS + BRISC Week 1 baselines complete. DRL training in progress (Week 2).*
