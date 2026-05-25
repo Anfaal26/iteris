@@ -129,7 +129,7 @@ def resolve_agent_config(cfg: dict, agent_name: str) -> dict:
     Parameters
     ----------
     cfg        : dict returned by ``load_drl_class_config``
-    agent_name : one of 'DDQN' | 'DUELING' | 'DDPG' | 'MSA-DUELING' | 'MSA-DDPG'
+    agent_name : one of 'DQN' | 'DDQN' | 'DUELING' | 'DDPG' | 'MSA-DUELING' | 'MSA-DDPG'
 
     Returns
     -------

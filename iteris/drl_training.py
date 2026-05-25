@@ -146,6 +146,41 @@ def run_drl_training(
     train_caches = _build_state_caches(train_samples, image_size)
     val_caches   = _build_state_caches(val_samples,   image_size)
 
+    # ── Hard sample mining ────────────────────────────────────────────────────
+    # Problem: most training samples already have high init Dice (e.g. 0.93 for
+    # CAMUS LV_endo). On those, every action except no-op degrades performance.
+    # The Q-network is overwhelmed by "everything is bad" signal from the easy
+    # majority and never properly learns to refine the rare hard samples where
+    # improvement is actually achievable.
+    #
+    # Fix: exponential weighting that preferentially samples lower-init-Dice
+    # cases. Weight ∝ exp((1-init_dice) * hard_mining_scale).
+    #   scale=0  → uniform (off)
+    #   scale=5  → mild: dice=0.75 gets ~2.5× more training than dice=0.93
+    #   scale=10 → strong: dice=0.75 gets ~7× more training than dice=0.93
+    #
+    # Keeps easy samples in the mix (they teach "no-op when already good"),
+    # but amplifies learning signal from samples where improvement is possible.
+    _hard_mining_scale = cfg.get('hard_mining_scale', 0.0)
+    if _hard_mining_scale > 0:
+        _init_dices = np.array([
+            dice_score(train_caches['init_mask'][i], train_caches['gt_mask'][i])
+            for i in range(len(train_samples))
+        ])
+        _raw = (1.0 - _init_dices) * _hard_mining_scale
+        _raw -= _raw.max()   # numerical stability before exp
+        _sample_weights = np.exp(_raw)
+        _sample_weights /= _sample_weights.sum()
+        hard_pct = (_init_dices < 0.90).mean() * 100
+        print(f'[drl] Hard sample mining ON: scale={_hard_mining_scale:.1f} | '
+              f'init_dice mean={_init_dices.mean():.4f} | '
+              f'hard (<0.90): {hard_pct:.1f}% of train')
+        def _sample_idx():
+            return int(np.random.choice(len(train_samples), p=_sample_weights))
+    else:
+        def _sample_idx():
+            return np.random.randint(len(train_samples))
+
     # cont_action_scale is the legacy single-scale key (old per-agent configs).
     # New per-class configs supply cont_morph_scale / cont_trans_scale separately.
     _legacy_scale = cfg.get('cont_action_scale', 0.02)
@@ -218,7 +253,7 @@ def run_drl_training(
     _trans_scale  = cfg.get('cont_trans_scale', _legacy_scale)
 
     while len(buffer) < prefill_steps:
-        idx = np.random.randint(len(train_samples))
+        idx = _sample_idx()
         env = _make_env(train_caches, idx, env_kwargs)
         prev_state = env.reset()           # state = stack([img, mask, SDT, init])
         while True:
@@ -261,7 +296,7 @@ def run_drl_training(
 
     step = 0
     while step < train_steps:
-        idx = np.random.randint(len(train_samples))
+        idx = _sample_idx()
         env = _make_env(train_caches, idx, env_kwargs)
         state = env.reset()
 

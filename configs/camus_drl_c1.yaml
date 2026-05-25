@@ -38,9 +38,34 @@ stop_eps_dice:     0.0005
 stop_eps_hd:       0.3
 stop_n:            3
 
+# ── Hard sample mining ────────────────────────────────────────────────────────
+# At Dice 0.93, most train samples are already near-perfect and no discrete
+# action can improve them.  Weighting ∝ exp((1-init_dice)*scale) boosts hard
+# samples (dice=0.85 → ~2×, dice=0.75 → ~5×) while keeping easy samples in
+# the mix so the agent still learns "no-op on already-good states".
+hard_mining_scale: 5.0
+
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.
 agents:
+
+  DQN:
+    agent_type:          DQN
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 25000
+    train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
   DDQN:
     agent_type:          DDQN

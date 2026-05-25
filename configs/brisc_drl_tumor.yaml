@@ -37,6 +37,12 @@ stop_eps_dice:     0.001          # at Dice 0.835 a 0.001 step gain is real sign
 stop_eps_hd:       0.5
 stop_n:            3
 
+# ── Hard sample mining ────────────────────────────────────────────────────────
+# BRISC mean init Dice ~0.835 — more natural spread than CAMUS, but still
+# beneficial to upweight the hard tail (dice<0.75, often partial-view tumours).
+# Lower scale than CAMUS (3 vs 5) because the distribution is already harder.
+hard_mining_scale: 3.0
+
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
 
