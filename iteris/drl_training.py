@@ -23,15 +23,25 @@ import pandas as pd
 import torch
 from tqdm.auto import trange
 
-from .env     import SegmentationEnv, signed_dt, dice_score
+from .env     import SegmentationEnv, SegmentationEnvBRISC, signed_dt, dice_score
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
                        MSADuelingDQNAgent, MSADDPGAgent
 
 
-# Action-space contract — kept in sync with env.SegmentationEnv (v3).
-NUM_DISCRETE_ACTIONS  = SegmentationEnv.NUM_DISCRETE_ACTIONS    # 13
-CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 5
+# ─── Environment registry ────────────────────────────────────────────────────
+# Different datasets have different structure scales that warrant different
+# action-space designs.  Selected via cfg['env_class']:
+#   'default'           → SegmentationEnv          (13 actions, CAMUS-scale)
+#   'brisc_small_target'→ SegmentationEnvBRISC    ( 9 actions, BRISC-scale)
+# Continuous DDPG always uses the base SegmentationEnv (BRISC variant is
+# discrete-only; Sprint 2 will add contour DDPG for the continuous case).
+ENV_REGISTRY = {
+    'default':            SegmentationEnv,
+    'brisc_small_target': SegmentationEnvBRISC,
+}
+
+CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
 
 
 AGENT_REGISTRY = {
@@ -77,8 +87,9 @@ def _make_state_builder(caches: dict, sdt_clip: float):
     return build
 
 
-def _make_env(caches: dict, idx: int, env_kwargs: dict) -> SegmentationEnv:
-    return SegmentationEnv(
+def _make_env(caches: dict, idx: int, env_kwargs: dict,
+              env_cls=SegmentationEnv) -> SegmentationEnv:
+    return env_cls(
         image     = caches['image'][idx],
         gt_mask   = caches['gt_mask'][idx],
         init_mask = caches['init_mask'][idx],
@@ -95,8 +106,12 @@ def _save_agent(agent, history, best_dice, path):
 
 
 @torch.no_grad()
-def evaluate_agent(agent, samples_or_caches, env_kwargs) -> dict:
-    """Greedy policy evaluation over a sample list. Returns aggregate metrics."""
+def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv) -> dict:
+    """Greedy policy evaluation over a sample list. Returns aggregate metrics.
+
+    ``env_cls`` must match the env class used at training time — otherwise the
+    agent's num_actions head will mismatch the env's discrete action space.
+    """
     if isinstance(samples_or_caches, dict):
         caches = samples_or_caches
         n = len(caches['image'])
@@ -108,7 +123,7 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs) -> dict:
 
     init_d, final_d, final_h = [], [], []
     for i in range(n):
-        env = _make_env(caches, i, env_kwargs)
+        env = _make_env(caches, i, env_kwargs, env_cls=env_cls)
         state = env.reset()
         init_d.append(env.dice_history[0])
         while True:
@@ -146,6 +161,25 @@ def run_drl_training(
     agent_cls, action_type = AGENT_REGISTRY[cfg['agent_type'].upper()]
     image_size = cfg['image_size']
     H = image_size
+
+    # ── Environment class selection ──────────────────────────────────────────
+    # Continuous (DDPG family) always uses the base SegmentationEnv — the
+    # BRISC subclass only customises the discrete action space.  Discrete
+    # agents pick from ENV_REGISTRY via cfg['env_class'] (default = base 13-
+    # action env, 'brisc_small_target' = 9-action BRISC env).
+    env_class_name = cfg.get('env_class', 'default')
+    if action_type == 'continuous':
+        env_cls = SegmentationEnv
+    else:
+        if env_class_name not in ENV_REGISTRY:
+            raise ValueError(
+                f"Unknown env_class '{env_class_name}'. "
+                f"Available: {list(ENV_REGISTRY)}"
+            )
+        env_cls = ENV_REGISTRY[env_class_name]
+    num_actions_for_cls = env_cls.NUM_DISCRETE_ACTIONS
+    print(f"[drl] env_class={env_class_name} ({env_cls.__name__}) "
+          f"| discrete actions={num_actions_for_cls} | action_type={action_type}")
 
     # ── Caches ───────────────────────────────────────────────────────────────
     train_caches = _build_state_caches(train_samples, image_size)
@@ -189,23 +223,26 @@ def run_drl_training(
     # cont_action_scale is the legacy single-scale key (old per-agent configs).
     # New per-class configs supply cont_morph_scale / cont_trans_scale separately.
     _legacy_scale = cfg.get('cont_action_scale', 0.02)
-    env_kwargs = dict(
-        action_type       = action_type,
-        max_steps         = cfg.get('max_steps', 20),
-        shift_px          = cfg.get('shift_px', 2),
-        sdt_clip          = cfg.get('sdt_clip', 20.0),
-        reward_clip       = cfg.get('reward_clip', 1.0),
-        cont_morph_scale  = cfg.get('cont_morph_scale', 0.25),
-        cont_trans_scale  = cfg.get('cont_trans_scale', _legacy_scale),
-        reward_mode       = cfg.get('reward_mode', 'dice_delta'),
-        reward_alpha      = cfg.get('reward_alpha', 0.5),
-        reward_beta       = cfg.get('reward_beta', 0.5),
-        hd_norm           = cfg.get('hd_norm', 50.0),
-        stop_eps_dice     = cfg.get('stop_eps_dice', 0.001),
-        stop_eps_hd       = cfg.get('stop_eps_hd', 0.5),
-        stop_n            = cfg.get('stop_n', 3),
+    # action_type is always passed; everything else only goes through if the
+    # cfg explicitly sets it.  This lets the chosen env class (e.g. BRISC)
+    # apply its own defaults for max_steps / stop_n / stop_eps_dice rather
+    # than being clobbered by hardcoded base-env defaults from this dict.
+    env_kwargs = {'action_type': action_type}
+    _env_optional_keys = (
+        'max_steps', 'shift_px', 'sdt_clip', 'reward_clip',
+        'cont_morph_scale', 'cont_trans_scale',
+        'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
+        'stop_eps_dice', 'stop_eps_hd', 'stop_n',
+        'fail_thresh', 'fail_n',                # BRISC env extras
     )
-    state_builder = _make_state_builder(train_caches, env_kwargs['sdt_clip'])
+    for _k in _env_optional_keys:
+        if _k in cfg:
+            env_kwargs[_k] = cfg[_k]
+    # cont_trans_scale legacy fallback (old configs use cont_action_scale)
+    if 'cont_trans_scale' not in env_kwargs and 'cont_action_scale' in cfg:
+        env_kwargs['cont_trans_scale'] = cfg['cont_action_scale']
+    # state_builder needs sdt_clip even if not in cfg (env class default applies).
+    state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
     # ── Agent ─────────────────────────────────────────────────────────────────
     common = dict(in_channels=4, gamma=cfg.get('gamma', 0.99),
@@ -217,7 +254,9 @@ def run_drl_training(
         if issubclass(agent_cls, _MSA_AGENT_CLASSES) else {}
     )
     if action_type == 'discrete':
-        agent = agent_cls(num_actions=NUM_DISCRETE_ACTIONS,
+        # num_actions is env-class-dependent (13 default, 9 BRISC) — agent's
+        # output head must match exactly or argmax will produce invalid indices.
+        agent = agent_cls(num_actions=num_actions_for_cls,
                           lr=cfg.get('lr', 1e-4), **common, **msa_kwargs)
     else:
         common.pop('lr', None)
@@ -267,11 +306,11 @@ def run_drl_training(
 
     while len(buffer) < prefill_steps:
         idx = _sample_idx()
-        env = _make_env(train_caches, idx, env_kwargs)
+        env = _make_env(train_caches, idx, env_kwargs, env_cls=env_cls)
         prev_state = env.reset()           # state = stack([img, mask, SDT, init])
         while True:
             if action_type == 'discrete':
-                a = np.random.randint(NUM_DISCRETE_ACTIONS)
+                a = np.random.randint(num_actions_for_cls)
             else:
                 # 3-component: (morph, dy_norm, dx_norm)
                 a = np.array([
@@ -310,7 +349,7 @@ def run_drl_training(
     step = 0
     while step < train_steps:
         idx = _sample_idx()
-        env = _make_env(train_caches, idx, env_kwargs)
+        env = _make_env(train_caches, idx, env_kwargs, env_cls=env_cls)
         state = env.reset()
 
         if action_type == 'continuous':
@@ -342,7 +381,7 @@ def run_drl_training(
 
             # Periodic eval
             if step % eval_every == 0:
-                metrics = evaluate_agent(agent, val_caches, env_kwargs)
+                metrics = evaluate_agent(agent, val_caches, env_kwargs, env_cls=env_cls)
                 metrics['step']    = step
                 metrics['epsilon'] = epsilon if epsilon is not None else None
                 history.append(metrics)
