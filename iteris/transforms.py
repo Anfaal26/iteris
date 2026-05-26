@@ -126,10 +126,19 @@ def build_transforms(cfg: dict, split: str = 'train'):
     ]
 
     # Binarise labels for datasets stored as 0/255 PNGs (BRISC, HAM10000,
-    # Kvasir, DRIVE). Multi-class datasets like CAMUS leave this off.
+    # Kvasir, DRIVE).  Multi-class datasets like CAMUS leave this off.
+    #
+    # Threshold at midpoint (127), NOT zero.  BRISC labels were shipped with
+    # JPEG-compression artifacts: pixel values 1-7 scattered through the
+    # "background" region (decay 291→176→95→31→13 px) alongside the real
+    # tumour values 249-251+, with a clean gap between them.  ``x > 0`` would
+    # catch every compression-noise pixel as foreground, producing ~30 false
+    # components per image (96.4% of CCs are ≤9 px speckle); ``x > 127``
+    # cleanly separates the two clusters.  On the cleanly-binary datasets
+    # (HAM10000, Kvasir, DRIVE) it's equivalent to ``x > 0``.
     if cfg.get('binarize_labels', False):
         from monai.transforms import Lambdad
-        base.append(Lambdad(keys=['label'], func=lambda x: x > 0))
+        base.append(Lambdad(keys=['label'], func=lambda x: x > 127))
 
     base += [
         build_intensity_transform(cfg),
