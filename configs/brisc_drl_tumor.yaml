@@ -1,4 +1,4 @@
-# BRISC DRL — Brain Tumour MRI (class 1: tumor)
+﻿# BRISC DRL — Brain Tumour MRI (class 1: tumor)
 #
 # Load with:
 #   from iteris.config import load_drl_class_config, resolve_agent_config
@@ -16,9 +16,10 @@
 #     whole-mask shifts almost always hurt when the U-Net already located the
 #     tumour correctly.
 #
-# DDPG family (DDPG / MSA-DDPG) — uses base SegmentationEnv
-#   • 3-D continuous (morph, dy, dx) — Sprint-2 contour DDPG will replace this
-#   • max_steps=20, hard_mining_scale=3.0 (kept for continuous baseline)
+# DDPG family (DDPG) — uses base SegmentationEnv
+#   • 3-D continuous (morph, dy, dx)
+#   • max_steps=20, hard_mining_scale=3.0 (continuous baseline; small-target
+#     limitations apply — DDPG on BRISC is informative as the continuous baseline)
 
 target_class:        1
 class_name:          tumor
@@ -168,8 +169,7 @@ agents:
     checkpoint_dir:      /kaggle/working
 
   # ──────────────────────────────────────────────────────────────────────────
-  # DDPG family — uses base SegmentationEnv (continuous baseline pending
-  # Sprint-2 contour DDPG)
+  # DDPG family — uses base SegmentationEnv (3-D continuous baseline)
   # ──────────────────────────────────────────────────────────────────────────
 
   DDPG:
@@ -178,29 +178,6 @@ agents:
     cont_morph_scale:    0.15        # ±2.25 px dilation/erosion  (at sdt_clip=15)
     cont_trans_scale:    0.01        # ±2.56 px translation        (at H=256)
     ou_sigma:            [0.015, 0.001, 0.001]   # [morph, dy, dx]
-    ou_theta:            0.15
-    actor_lr:            1.0e-4
-    critic_lr:           1.0e-3
-    gamma:               0.99
-    tau:                 0.005
-    actor_freeze_steps:  2000
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000
-    prefill_steps:       2000
-    train_steps:         100000
-    eval_every:          2500
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-
-  MSA-DDPG:
-    agent_type:          MSA-DDPG
-    num_heads:           4
-    key_dim:             64
-    cont_morph_scale:    0.15
-    cont_trans_scale:    0.01
-    ou_sigma:            [0.015, 0.001, 0.001]
     ou_theta:            0.15
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3

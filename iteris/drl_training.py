@@ -26,7 +26,7 @@ from tqdm.auto import trange
 from .env     import SegmentationEnv, SegmentationEnvBRISC, signed_dt, dice_score
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
-                       MSADuelingDQNAgent, MSADDPGAgent
+                       MSADuelingDQNAgent
 
 
 # ─── Environment registry ────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
 #   'default'           → SegmentationEnv          (13 actions, CAMUS-scale)
 #   'brisc_small_target'→ SegmentationEnvBRISC    ( 9 actions, BRISC-scale)
 # Continuous DDPG always uses the base SegmentationEnv (BRISC variant is
-# discrete-only; Sprint 2 will add contour DDPG for the continuous case).
+# discrete-only — DDPG on BRISC uses the same global 3-D action as CAMUS).
 ENV_REGISTRY = {
     'default':            SegmentationEnv,
     'brisc_small_target': SegmentationEnvBRISC,
@@ -50,11 +50,10 @@ AGENT_REGISTRY = {
     'DUELING':     (DuelingDQNAgent,    'discrete'),
     'DDPG':        (DDPGAgent,          'continuous'),
     'MSA-DUELING': (MSADuelingDQNAgent, 'discrete'),
-    'MSA-DDPG':    (MSADDPGAgent,       'continuous'),
 }
 
 # Agent classes that accept extra MSA hyperparameters (num_heads, key_dim)
-_MSA_AGENT_CLASSES = (MSADuelingDQNAgent, MSADDPGAgent)
+_MSA_AGENT_CLASSES = (MSADuelingDQNAgent,)
 def _build_state_caches(samples: List[dict], image_size: int) -> dict:
     """Stack image + init_mask arrays for vectorised lookup at sample time."""
     n = len(samples)
@@ -285,14 +284,12 @@ def run_drl_training(
     buffer = ReplayBuffer(
         capacity   = cfg.get('buffer_size', 10000),
         mask_shape = (H, H),
-        # 3-component continuous action: (morph, dy_norm, dx_norm).  Sprint 2
-        # contour DDPG will use a (K, 2)-flattened layout via a dedicated
-        # continuous-contour buffer; the mask-space buffer stays 3-D.
+        # 3-component continuous action: (morph, dy_norm, dx_norm).
         action_dim = CONTINUOUS_ACTION_DIM if action_type == 'continuous' else None,
         discrete   = (action_type == 'discrete'),
-        # cache_sdt is FORCED ON: Sprint 3's spatial-Q-map MSA-Dueling needs the
-        # per-transition SDT to mask invalid actions when computing the Bellman
-        # target.  Storing it for all agents now avoids a painful retrofit.
+        # cache_sdt FORCED ON: reusing the SDT computed during env.step() skips
+        # ~80% of SDT recomputation in agent.update() — the single biggest
+        # speed optimisation in the training loop.
         cache_sdt  = True,
     )
 

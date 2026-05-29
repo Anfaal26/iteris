@@ -18,7 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic
-from .msa         import MSADuelingQNetwork, MSAActor as _MSAActor
+from .msa         import MSADuelingQNetwork
 
 
 def _soft_update(target_net: nn.Module, source_net: nn.Module, tau: float):
@@ -176,17 +176,12 @@ class DDPGAgent:
     """
     DDPG with mid-layer action injection, actor-freeze warmup, OU noise.
 
-    Sprint-1 mask-space continuous action is 3-component:
-        (morph, dy_norm, dx_norm)
+    The continuous action is 3-component: (morph, dy_norm, dx_norm).
     ``action_scale`` is a list ``[morph_scale, trans_scale, trans_scale]``
     that sets the per-component output range of the actor (tanh × scale).
     ``ou_sigma`` can be a scalar (same noise for all components) or a list
     with per-component values — use a list to keep noise proportional to
     each component's range (e.g., [0.025, 0.002, 0.002]).
-
-    Sprint-2 contour DDPG will introduce a separate ``DDPGContourAgent``
-    with a (K, 2)-shaped action — implemented as a sibling class so this one
-    keeps the simple mask-space contract for direct comparison.
     """
     action_type = 'continuous'
 
@@ -364,66 +359,3 @@ class MSADuelingDQNAgent(DQNAgent):
         self.opt = torch.optim.Adam(self.q.parameters(), lr=lr)
 
 
-class MSADDPGAgent(DDPGAgent):
-    """
-    DDPG with a Multi-Head Self-Attention backbone in the actor.
-
-    The actor's CNN global-average-pool is replaced by spatial-token
-    self-attention (4 heads, 64-dim keys per CONTEXT.md).  The critic retains
-    the standard CNN backbone ("MSA in actor" only).
-
-    All 3-component action semantics (morph, dy, dx) and per-component
-    action_scale / ou_sigma from DDPGAgent are preserved — only the actor
-    network backbone changes.
-
-    Args
-    ----
-    num_heads : int   Number of attention heads (default 4).
-    key_dim   : int   Per-head key/query/value dimension (default 64).
-    All other args mirror DDPGAgent.
-    """
-
-    def __init__(
-        self,
-        in_channels:        int   = 4,
-        action_dim:         int   = 3,
-        action_scale              = None,   # list [morph_scale, trans_scale, trans_scale]
-        actor_lr:           float = 1e-4,
-        critic_lr:          float = 1e-3,
-        gamma:              float = 0.99,
-        tau:                float = 0.005,
-        ou_theta:           float = 0.15,
-        ou_sigma                  = None,   # scalar or per-component list
-        actor_freeze_steps: int   = 2000,
-        embed_dim:          int   = 256,
-        num_heads:          int   = 4,
-        key_dim:            int   = 64,
-        device:             torch.device = None,
-    ):
-        # Initialise base agent (creates CNN Actor + Critic; we replace actor below)
-        super().__init__(
-            in_channels=in_channels,
-            action_dim=action_dim,
-            action_scale=action_scale,
-            actor_lr=actor_lr,
-            critic_lr=critic_lr,
-            gamma=gamma,
-            tau=tau,
-            ou_theta=ou_theta,
-            ou_sigma=ou_sigma,
-            actor_freeze_steps=actor_freeze_steps,
-            embed_dim=embed_dim,
-            device=device,
-        )
-        # action_scale_np already set by DDPGAgent.__init__; pass same list to MSAActor
-        action_scale_list = self.action_scale_np.tolist()
-
-        # Swap CNN actor for MSA actor (critic keeps CNN backbone per spec)
-        self.actor = _MSAActor(
-            in_channels, action_dim, action_scale_list, embed_dim, num_heads, key_dim
-        ).to(self.device)
-        self.actor_target = deepcopy(self.actor).eval()
-        for p in self.actor_target.parameters():
-            p.requires_grad_(False)
-        # Rebind actor optimizer to the MSA network's parameters
-        self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)

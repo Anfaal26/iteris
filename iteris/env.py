@@ -1,43 +1,30 @@
 """
-Boundary-refinement segmentation environment for DRL agents (v3-discrete / v2-continuous).
+Boundary-refinement segmentation environment for DRL agents.
 
 One agent operates on one target class at a time (per-class binary formulation).
 The episode starts from the U-Net baseline mask (warm-start) and refines toward
 GT over up to 20 steps.
 
 ────────────────────────────────────────────────────────────────────────────────
-Sprint 1 (Nov 2026): directional discrete + reverted continuous
+Action spaces
 ────────────────────────────────────────────────────────────────────────────────
 
-Background — why discrete needed the refactor:
-  v2 used a single global isotropic dilate / erode.  When the U-Net init is
-  near-optimal (CAMUS LV_endo Dice ~ 0.94) the boundary is locally wrong in
-  different directions: left edge too small, right edge too big, apex correct.
-  A global dilate helps the left edge but hurts the right edge and the apex —
-  almost always net-negative ΔDice.  No reward shaping or action penalty can
-  rescue this: the action space genuinely had no good move on near-optimal
-  samples.
-
-  DISCRETE (DQN family) — 13 actions, directional structuring elements:
+DISCRETE (DQN family) — 13 actions, directional structuring elements:
     0–3   directional dilate  (push boundary out 1 px in one cardinal direction)
     4–7   directional erode   (pull boundary in 1 px from one cardinal direction)
     8–11  whole-mask shift    (translate ±shift_px in one cardinal direction)
     12    no-op
     3-element SEs (e.g. [[1],[1],[0]] for NORTH) make each op affect only the
     boundary segment facing that direction.  1-px ops self-restrict to the
-    immediate boundary band — no extra band_px knob needed.
+    immediate boundary band so each action has a small, locally-targeted blast
+    radius.  See SegmentationEnvBRISC at the bottom of this file for a 9-action
+    variant (no shifts) tuned to small-target datasets like BRISC.
 
-  CONTINUOUS (DDPG family) — 3-component action (deliberately kept simple):
+CONTINUOUS (DDPG family) — 3-component action:
     a[0]  morph    ∈ [-cont_morph_scale, +cont_morph_scale]   SDT threshold shift
     a[1]  dy_norm  ∈ [-cont_trans_scale, +cont_trans_scale]   global y-translation
     a[2]  dx_norm  ∈ [-cont_trans_scale, +cont_trans_scale]   global x-translation
-    Global isotropic morph has the same fundamental limitation as v2's discrete:
-    the right algorithmic answer for DDPG is a contour-control-point action
-    space (Sprint 2), not a window-selector bolted on top of continuous values.
-    Until Sprint 2 lands, DDPG uses the same 3-component action as v2 — this
-    keeps the algorithm coherent at the cost of staying on the limited action
-    space.  DDPG results on the current action space serve as the "global
-    continuous" baseline; Sprint-2 contour DDPG is the algorithmic upgrade.
+    Global isotropic SDT-threshold morph plus a small global translation.
 
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -383,11 +370,6 @@ class SegmentationEnv:
         a[2]  dx_norm ∈ [-cont_trans_scale, +cont_trans_scale]
               Fractional x-translation: dx_px = round(a[2] · W).
 
-        Sprint-2 note: this is global isotropic morph (same fundamental
-        limitation as the v2 discrete dilate/erode).  Contour-control-point
-        DDPG in Sprint 2 will replace this with a (K, 2) continuous action
-        over K boundary points — the algorithmically-correct continuous action
-        for boundary refinement.
         """
         morph = float(a[0])
         dy    = int(round(float(a[1]) * self.H))
@@ -482,8 +464,8 @@ class SegmentationEnvBRISC(SegmentationEnv):
     ]
 
     # Continuous action interface inherited unchanged from base class —
-    # this env is intended for the DQN family.  For continuous BRISC,
-    # use the base SegmentationEnv (Sprint 2 will introduce contour DDPG).
+    # this env is intended for the DQN family.  Continuous DDPG on BRISC
+    # uses the base SegmentationEnv (same global 3-D action as CAMUS).
 
     def __init__(
         self,

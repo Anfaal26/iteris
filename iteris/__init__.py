@@ -17,4 +17,4 @@ from .metrics import dice_score, hd95_batch
 from .env     import SegmentationEnv
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
-                       MSADuelingDQNAgent, MSADDPGAgent
+                       MSADuelingDQNAgent

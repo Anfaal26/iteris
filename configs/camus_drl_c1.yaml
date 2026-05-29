@@ -1,4 +1,4 @@
-# CAMUS DRL — Class 1: LV_endo (left ventricular endocardium)
+﻿# CAMUS DRL — Class 1: LV_endo (left ventricular endocardium)
 #
 # Load with:
 #   from iteris.config import load_drl_class_config, resolve_agent_config
@@ -44,12 +44,6 @@ stop_n:            3
 # samples (dice=0.85 → ~2×, dice=0.75 → ~5×) while keeping easy samples in
 # the mix so the agent still learns "no-op on already-good states".
 hard_mining_scale: 5.0
-
-# Sprint-1 note: discrete agents now use the 13-action directional space
-# (4 dir-dilate + 4 dir-erode + 4 shift + no-op).  No action_penalty, no
-# window/band restriction — global ops kept locally targeted by the directional
-# SEs themselves.  Continuous DDPG stays on the 3-D (morph, dy, dx) action
-# until Sprint 2 brings in contour-control-point DDPG.
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.
@@ -140,29 +134,6 @@ agents:
     cont_trans_scale:    0.02        # ±5 px translation        (at H=256)
     # Per-component OU noise — proportional to each scale
     ou_sigma:            [0.025, 0.002, 0.002]   # [morph, dy, dx]
-    ou_theta:            0.15
-    actor_lr:            1.0e-4
-    critic_lr:           1.0e-3
-    gamma:               0.99
-    tau:                 0.005
-    actor_freeze_steps:  2000
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000
-    prefill_steps:       2000
-    train_steps:         100000
-    eval_every:          2500
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-
-  MSA-DDPG:
-    agent_type:          MSA-DDPG
-    num_heads:           4
-    key_dim:             64
-    cont_morph_scale:    0.25
-    cont_trans_scale:    0.02
-    ou_sigma:            [0.025, 0.002, 0.002]
     ou_theta:            0.15
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3

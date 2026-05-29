@@ -17,15 +17,10 @@ Architecture:
     → mean-pool over tokens                         (B, attn_dim)
     → linear → ReLU                                 (B, embed_dim)
 
-Two MSA-specific network heads:
+One MSA-specific network head:
     MSADuelingQNetwork — Dueling DQN head on MSABackbone
-    MSAActor           — DDPG actor head on MSABackbone
 
 Per CONTEXT.md spec: "4-head MSA, 64-dim keys" (attn_dim = 4 × 64 = 256).
-The standard CNN-backed Critic from drl_networks.py is reused unchanged
-for MSA-DDPG — the spec says "MSA in actor" only, and the critic's
-state–action interface is identical regardless of which backbone the
-actor uses.
 """
 
 import torch
@@ -159,44 +154,3 @@ class MSADuelingQNetwork(nn.Module):
         return v + (a - a.mean(dim=1, keepdim=True))
 
 
-class MSAActor(nn.Module):
-    """
-    DDPG actor with MSA backbone — drop-in replacement for Actor.
-
-    Outputs a 3-component action (morph, dy_norm, dx_norm) with per-component
-    scaling stored as a registered buffer (mirrors the CNN Actor interface).
-    The MSA backbone gives the actor explicit cross-position attention over the
-    8×8 spatial token grid before computing the action — better boundary
-    awareness than the plain CNN Actor's global-average-pool.
-
-    Retains the DDPG convention of small-uniform final-layer init [-3e-3, +3e-3]
-    to prevent tanh saturation during the actor-freeze warmup period.
-    """
-
-    def __init__(
-        self,
-        in_channels:  int   = 4,
-        action_dim:   int   = 3,
-        action_scale        = None,   # list [morph_scale, trans_scale, trans_scale]
-        embed_dim:    int   = 256,
-        num_heads:    int   = 4,
-        key_dim:      int   = 64,
-    ):
-        super().__init__()
-        if action_scale is None:
-            action_scale = [0.25, 0.02, 0.02]   # [morph, dy, dx]
-        self.backbone = MSABackbone(in_channels, embed_dim, num_heads, key_dim)
-        self.fc1 = nn.Linear(embed_dim, 128)
-        self.fc2 = nn.Linear(128, action_dim)
-        # Per-component scale as a buffer — auto-moves with model.to(device)
-        self.register_buffer(
-            'action_scale',
-            torch.tensor(action_scale, dtype=torch.float32),
-        )
-        # Small-uniform init on the output layer only (standard DDPG practice)
-        nn.init.uniform_(self.fc2.weight, -3e-3, 3e-3)
-        nn.init.uniform_(self.fc2.bias,   -3e-3, 3e-3)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = F.relu(self.fc1(self.backbone(x)))
-        return torch.tanh(self.fc2(h)) * self.action_scale   # element-wise scale
