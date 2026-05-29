@@ -39,13 +39,13 @@ Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 ste
 **DRL agents**
 | Agent | Action space | Key detail |
 |---|---|---|
-| DQN | Discrete (7) | Baseline Q-learner, CNN Q-head, ε-greedy, replay buffer |
-| Dueling DQN | Discrete (7) | V(s) + A(s,a) split head — better at no-op credit assignment |
+| DQN | Discrete (13 CAMUS / 9 BRISC) | Baseline Q-learner, CNN Q-head, ε-greedy, uniform replay buffer |
+| DDQN | Discrete (13 CAMUS / 9 BRISC) | DQN + Double-DQN target (online net selects, target net evaluates) |
+| Dueling DQN | Discrete (13 CAMUS / 9 BRISC) | V(s) + A(s,a) split head + Double target — best-practice combination |
+| MSA-Dueling | Discrete (13 CAMUS / 9 BRISC) | Dueling head on a 4-head MSA backbone (4 heads × 64-d keys) |
 | DDPG | Continuous (3D) | OU noise, morph + dy + dx, τ=0.005 soft target update |
-| PPO | Discrete (7) | On-policy clipped surrogate — planned; requires rollout buffer |
-| MSA-\[Best\] | Same as base | 4-head multi-scale attention on top of best discrete/continuous agent |
 
-> **MSA selection:** After Dueling, DDPG, and PPO training is complete, the top-performing agent type gets an MSA variant (MSA-Dueling or MSA-DDPG). Both MSA variants are pre-implemented and ready to run.
+> **Discrete action layouts** — `SegmentationEnv`: 4 directional dilate + 4 directional erode + 4 whole-mask shift + no-op = **13 actions** (CAMUS scale). `SegmentationEnvBRISC`: drops the 4 shifts → **9 actions** (small-target scale; BRISC tumours are correctly located by the U-Net, shifts hurt more than they help). Selected per-agent via `cfg['env_class']`.
 
 **RL Environment (locked v2 contract)**
 - **State:** `(4, 256, 256)` float32
@@ -81,24 +81,38 @@ Checkpoint: `camus_best.pt` · val Dice 0.9020 · target was ≥ 0.85 ✓
 *BRISC Baseline (Attention Residual U-Net — brain tumour MRI)*
 | Structure | Dice (val) | Dice (test) | HD95 (test) |
 |---|---|---|---|
-| Tumour | 0.8290 | **0.8351** | 8.36 px |
+| Tumour | 0.8605 | **0.8695** | 7.67 px |
 
-Checkpoint: `brisc_best.pt` · trained 60 epochs · target was ≥ 0.80 ✓  
-Dataset: 9 586 pairs, images resized 512→256, z-score normalised, variable aspect ratios.  
-Notable: per-patient HD95 varies widely (1.4 px → 78 px) — boundary refinement has strong upside.
+Checkpoint: `brisc_best.pt` · trained 60 epochs · target was ≥ 0.80 ✓
+Dataset: 9 586 pairs, images resized 512→256, z-score normalised, variable aspect ratios.
+Notable: per-patient HD95 varies widely (1.0 px → 81 px) — boundary refinement has strong upside.
+
+Note (label-noise fix): an earlier diagnostic on the raw BRISC PNG masks revealed
+JPEG-compression artifacts inside the labels — pixel values 1–7 scattered through
+the "background" alongside the real tumour values 249–251+. The transforms pipeline
+was binarising with `x > 0` and treating every compression-noise pixel as
+foreground, inflating GT to ~30 connected components per sample (96.4% ≤ 9 px speckle).
+Fix: binarise with `x > 127` (midpoint between the two value clusters) in
+`iteris/transforms.py`. Effect: baseline Dice +0.033, HD95 −0.82 px. Equivalent to
+`x > 0` on the cleanly-binary HAM10000/Kvasir/DRIVE PNGs, so no behavioural change
+for those datasets.
 
 **Week 2 — IN PROGRESS**
 
-DRL environment v2 locked and validated. Reward architecture overhauled:
+DRL environment locked and validated. Major architecture decisions:
 - Episode-start baseline reward (eliminates step-wise oscillation trap)
 - Improvement-maintained early stopping (terminates dilate/erode 2-cycles)
 - Largest-CC filtering on HD95 (removes stray U-Net FP pixels inflating to 200+ px)
+- Directional structuring elements (3-element SEs) for localised 1-px boundary moves
+- `SegmentationEnvBRISC` subclass: 9-action set + max_steps=5 + fail-fast termination
+  for small-target datasets where 1-px ops are ~3% of structure area
 - Per-class YAML configs for CAMUS (3 classes) and BRISC (1 class)
 
-Current: DDQN running on CAMUS LV\_endo. Remaining agents queued.
+Current: BRISC baseline re-trained on clean labels (Dice 0.8695 / HD95 7.67 px).
+Next: BRISC DRL run with Dueling agent on the cleaned baseline.
 
 Agents to implement (in order): DQN · DDQN · Dueling · DDPG · (PPO) · MSA-\[best\]  
-Platforms: Kaggle T4 GPU · notebooks `06a/b/c` (CAMUS) · notebook `07` (BRISC)
+Platforms: Kaggle T4 GPU · notebooks `03a/b/c` (CAMUS) · notebook `04` (BRISC)
 
 **Week 3 — PLANNED: Full training runs**
 
@@ -234,7 +248,7 @@ The landing page is the only page with expressive design. Everything beyond it i
 1. **The Problem** — Two-column: left text ("U-Net boundaries drift. Pixels get missed."), right: animated before/after mask wipe (U-Net vs GT, no agent — sets up the problem).
 2. **Our Approach** — Animated pipeline diagram: `scan → U-Net → DRL agent (steps 1–N) → refined mask`. Each stage lights up in sequence on scroll entry.
 3. **Results Snapshot** — Dark card grid with key numbers:
-   - CAMUS Mean Dice **0.902** · BRISC Tumour Dice **0.835** (baseline) → DRL target improvement
+   - CAMUS Mean Dice **0.902** · BRISC Tumour Dice **0.870** (baseline) → DRL target improvement
    - HD95 reduction numbers once training completes
 4. **How It Works** — 3 icon tiles: `1. Upload scan` · `2. Pick agent` · `3. Watch it learn`
 5. **CTA footer** — Repeats both buttons. "Not a clinical tool. Research demo only."
@@ -280,4 +294,4 @@ The landing page is the only page with expressive design. Everything beyond it i
 
 ---
 
-*Last updated 2026-05-25. CAMUS + BRISC Week 1 baselines complete. DRL training in progress (Week 2).*
+*Last updated 2026-05-29. CAMUS + BRISC Week 1 baselines complete (BRISC re-trained on cleaned labels). DRL training in progress (Week 2).*
