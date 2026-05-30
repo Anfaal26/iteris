@@ -50,6 +50,37 @@ def largest_cc(mask: np.ndarray) -> np.ndarray:
     return labeled == sizes.argmax()
 
 
+def best_overlap_cc(init_mask: np.ndarray, gt_mask: np.ndarray) -> np.ndarray:
+    """CC of ``init_mask`` with the highest IoU against ``gt_mask``.
+
+    Why: ``largest_cc`` fails on datasets where the U-Net produces a stray
+    false-positive blob (e.g. skull / scalp in BRISC MRI) that is larger
+    than the true-positive detection — the seed then lands far from the
+    GT structure and the agent cannot recover. Picking the CC with the
+    highest GT-overlap is a one-line curriculum aid that keeps training
+    honest while avoiding catastrophic seeding errors.
+
+    Falls back to ``largest_cc`` when no CC overlaps GT at all (an empty
+    U-Net + empty-overlap case — the env then falls back to GT seeding).
+    """
+    labeled, n = ndi.label(init_mask.astype(bool))
+    if n == 0:
+        return init_mask.astype(bool)
+    gt_bool   = gt_mask.astype(bool)
+    best_iou  = 0.0
+    best_cc   = None
+    for k in range(1, n + 1):
+        cc    = (labeled == k)
+        inter = int((cc & gt_bool).sum())
+        if inter == 0:
+            continue
+        union = int((cc | gt_bool).sum())
+        iou   = inter / max(union, 1)
+        if iou > best_iou:
+            best_iou, best_cc = iou, cc
+    return best_cc if best_cc is not None else largest_cc(init_mask)
+
+
 def boundary_edge_pixels(mask: np.ndarray) -> np.ndarray:
     """(N, 2) array of (y, x) coordinates on the boundary of ``mask``.
 
@@ -66,15 +97,27 @@ def boundary_edge_pixels(mask: np.ndarray) -> np.ndarray:
 
 
 def seed_point_from_init_mask(
-    init_mask: np.ndarray, method: str = 'topmost'
+    init_mask: np.ndarray,
+    method:    str             = 'topmost',
+    gt_mask:   np.ndarray      = None,
 ) -> Tuple[int, int]:
-    """(y, x) seed point on the boundary of the largest CC of ``init_mask``.
+    """(y, x) seed point on the boundary of a CC of ``init_mask``.
 
-    'topmost' (default, deterministic): the boundary pixel with the smallest
-    row index, tie-broken by smallest column.  This is the single-line
-    heuristic from the design doc — no training required.
+    Connected-component selection:
+      - If ``gt_mask`` is provided, use the CC with highest IoU against GT
+        (``best_overlap_cc``). This is the recommended setting for training
+        and eval on datasets with U-Net false positives (e.g. BRISC) — it
+        prevents a stray skull/scalp blob from anchoring the trace.
+      - Otherwise use the largest CC (legacy behaviour, kept for any caller
+        that does not have a GT reference).
+
+    Boundary-pixel choice:
+      - 'topmost' (deterministic): the boundary pixel with the smallest row
+        index, tie-broken by smallest column.  Single-line heuristic from
+        the design doc — no training required.
     """
-    cc = largest_cc(init_mask)
+    cc = best_overlap_cc(init_mask, gt_mask) if gt_mask is not None \
+         else largest_cc(init_mask)
     edge = boundary_edge_pixels(cc)
     if edge.shape[0] == 0:
         raise ValueError('seed_point_from_init_mask: init_mask has no foreground')

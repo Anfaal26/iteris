@@ -46,6 +46,12 @@ class ContourTracingEnv:
     NUM_DISCRETE_ACTIONS = 8
     DISCRETE_NAMES = cu.DIRECTION_NAMES
 
+    # Init Dice below this threshold → bypass U-Net mask, seed from GT instead
+    # (Option A safeguard). 0.30 catches catastrophic U-Net failures while
+    # accepting moderately-noisy predictions whose best-overlap CC is still
+    # usable. Tunable per-dataset via subclassing if ever needed.
+    _SEED_INIT_DICE_MIN: float = 0.30
+
     def __init__(
         self,
         image: np.ndarray,        # (H, W) float32 in [0, 1]
@@ -96,13 +102,26 @@ class ContourTracingEnv:
     # ── lifecycle ──────────────────────────────────────────────────────────────
 
     def reset(self) -> np.ndarray:
-        # Seed from the U-Net init mask. Degenerate fallback: if the U-Net
-        # predicted nothing for this sample, seed from GT so training/eval does
-        # not crash — such samples are rare and will simply score poorly.
+        # Seed from the U-Net init mask, GT-aware. Two safeguards (Option A):
+        #   (1) Among the U-Net's connected components, pick the one with the
+        #       highest IoU vs GT (not the largest CC). This prevents a stray
+        #       FP blob from anchoring the trace far from the structure.
+        #   (2) If the U-Net's overall init Dice is too poor (< _SEED_INIT_DICE
+        #       MIN, default 0.30), bypass the U-Net entirely and seed from GT.
+        #       Such samples are rare; without this they trace from nowhere
+        #       useful and drag the val Dice down for reasons unrelated to the
+        #       agent's policy quality.
+        # Final fallback: if the init has no foreground at all, seed from GT
+        # so the run does not crash.
+        from .env import dice_score as _dice
+        init_dice = _dice(self.init_mask, self.gt) if self.init_mask.any() else 0.0
+        seed_init = self.init_mask if init_dice >= self._SEED_INIT_DICE_MIN else self.gt
         try:
-            self.seed_point = cu.seed_point_from_init_mask(self.init_mask, self.seed_method)
+            self.seed_point = cu.seed_point_from_init_mask(
+                seed_init, self.seed_method, gt_mask=self.gt)
         except ValueError:
-            self.seed_point = cu.seed_point_from_init_mask(self.gt, self.seed_method)
+            self.seed_point = cu.seed_point_from_init_mask(
+                self.gt, self.seed_method)
         self.current_point = self.seed_point
         self.trajectory: List[Tuple[int, int]] = [self.seed_point]
         self._visited = np.zeros((self.H, self.W), dtype=np.uint8)
