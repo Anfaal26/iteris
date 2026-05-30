@@ -6,20 +6,23 @@
 #   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
 #   results  = run_drl_training(cfg, train_samples, val_samples)
 #
-# ── Two action-space designs for two algorithm families ──────────────────────
+# ── Three algorithms, two paradigms ──────────────────────────────────────────
 #
-# DQN family (DQN / DDQN / DUELING / MSA-DUELING) — uses SegmentationEnvBRISC
-#   • 9-action discrete (4 dir-dilate + 4 dir-erode + no-op, NO shifts)
-#   • max_steps=5, stop_n=2, stop_eps_dice=0.005, fail-fast at -0.05 Dice
-#   • hard_mining_scale=0 (off — caused generalisation failure on small targets)
-#   • Reason: 30-px tumours need short episodes and a tight action set;
-#     whole-mask shifts almost always hurt when the U-Net already located the
-#     tumour correctly.
+# Refinement (mask morphology) — DQN / DuelingDDQN / DDPG:
+#   DQN family — uses SegmentationEnvBRISC (9 actions, no shifts)
+#     • max_steps=5, stop_n=2, stop_eps_dice=0.005, fail-fast at -0.05 Dice
+#     • hard_mining_scale=0 (off — caused generalisation failure on small targets)
+#     • Reason: 30-px tumours need short episodes and a tight action set;
+#       whole-mask shifts almost always hurt when the U-Net already located the
+#       tumour correctly.
+#   DDPG family — uses base SegmentationEnv (3-D continuous: morph, dy, dx)
+#     • max_steps=20, hard_mining_scale=3.0 (continuous baseline)
 #
-# DDPG family (DDPG) — uses base SegmentationEnv
-#   • 3-D continuous (morph, dy, dx)
-#   • max_steps=20, hard_mining_scale=3.0 (continuous baseline; small-target
-#     limitations apply — DDPG on BRISC is informative as the continuous baseline)
+# Boundary tracing — DQN_TRACE / DuelingDDQN_TRACE:
+#   Uses ContourTracingEnv (8 directional actions, 64×64 patch state).
+#   The agent walks the GT boundary step-by-step — the trajectory IS the
+#   segmentation. Distinct paradigm from morphology refinement; runs the same
+#   DQN / DuelingDDQN algorithms over a different env + reward.
 
 target_class:        1
 class_name:          tumor
@@ -88,33 +91,7 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
-
-  DDQN:
-    agent_type:          DDQN
-    env_class:           brisc_small_target
-    max_steps:           5
-    stop_n:              2
-    stop_eps_dice:       0.005
-    fail_thresh:         0.05
-    fail_n:              2
-    hard_mining_scale:   0.0
-    lr:                  1.0e-4
-    gamma:               0.95
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         30000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 12000
-    train_steps:         30000
-    eval_every:          1500
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-
-  DUELING:
+  DuelingDDQN:
     agent_type:          DUELING
     env_class:           brisc_small_target
     max_steps:           5
@@ -140,38 +117,6 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
-
-  MSA-DUELING:
-    agent_type:          MSA-DUELING
-    env_class:           brisc_small_target
-    max_steps:           5
-    stop_n:              2
-    stop_eps_dice:       0.005
-    fail_thresh:         0.05
-    fail_n:              2
-    hard_mining_scale:   0.0
-    num_heads:           4
-    key_dim:             64
-    lr:                  1.0e-4
-    gamma:               0.95
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         30000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 12000
-    train_steps:         30000
-    eval_every:          1500
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # DDPG family — uses base SegmentationEnv (3-D continuous baseline)
-  # ──────────────────────────────────────────────────────────────────────────
-
   DDPG:
     agent_type:          DDPG
     # env_class implicitly 'default' (continuous always uses base env)
@@ -233,7 +178,7 @@ agents:
     seed:                   42
     checkpoint_dir:         /kaggle/working
 
-  DUELING_TRACE:
+  DuelingDDQN_TRACE:
     agent_type:             DUELING
     env_class:              contour_tracing
     patch_size:             64
@@ -258,38 +203,6 @@ agents:
     epsilon_end:            0.05
     epsilon_decay_steps:    15000
     train_steps:            25000
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
-
-  DDQN_TRACE:
-    agent_type:             DDQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       200      # ~2× expected perimeter (~100 px)
-    closure_tolerance:      4        # looser: irregular tumour boundaries
-    min_perimeter_steps:    30       # smaller: tumours are smaller than LV/LA
-    boundary_bonus_distance: 1.5
-    reward_boundary_bonus:  0.5
-    reward_closure:         5.0
-    reward_offimage:       -10.0
-    reward_length_penalty: -5.0
-    max_distance_penalty:   10.0
-    seed_method:            topmost
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            40000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    15000
-    train_steps:            25000    # gradient updates; each iteration steps 16 envs
     num_envs:               16
     grad_updates:           1
     eval_every:             5000

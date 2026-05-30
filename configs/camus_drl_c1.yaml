@@ -66,30 +66,7 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
-
-  DDQN:
-    agent_type:          DDQN
-    lr:                  1.0e-4
-    gamma:               0.99
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000    # 10000→50000: retains 5× more experience so early
-                                  # diverse exploration is not overwritten by late
-                                  # oscillation transitions
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 25000    # 40000→25000: reach low-ε while buffer still has
-                                  # diverse signal; avoids 30k steps of pure greedy
-                                  # oscillation reinforcing the wrong policy
-    train_steps:         50000
-    eval_every:          2000
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-
-  DUELING:
+  DuelingDDQN:
     agent_type:          DUELING
     lr:                  1.0e-4
     gamma:               0.99
@@ -106,27 +83,6 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
-
-  MSA-DUELING:
-    agent_type:          MSA-DUELING
-    num_heads:           4
-    key_dim:             64
-    lr:                  1.0e-4
-    gamma:               0.99
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 25000
-    train_steps:         50000
-    eval_every:          2000
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-
   DDPG:
     agent_type:          DDPG
     # 3-component action: (morph, dy_norm, dx_norm)
@@ -188,7 +144,7 @@ agents:
     checkpoint_dir:         /kaggle/working
 
   # ── DUELING_TRACE: dueling Q-network tracer (V + A heads, best for exploration) ──
-  DUELING_TRACE:
+  DuelingDDQN_TRACE:
     agent_type:             DUELING
     env_class:              contour_tracing
     patch_size:             64
@@ -217,40 +173,5 @@ agents:
     grad_updates:           1
     eval_every:             5000
     val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
-
-  DDQN_TRACE:
-    agent_type:             DDQN
-    env_class:              contour_tracing
-    # ── tracing env (LV_endo: closed contour, expected perimeter ~250 px) ──
-    patch_size:             64
-    max_trace_length:       400      # ~1.5× expected perimeter
-    closure_tolerance:      3
-    min_perimeter_steps:    50
-    boundary_bonus_distance: 1.5
-    reward_boundary_bonus:  0.5
-    reward_closure:         5.0
-    reward_offimage:       -10.0
-    reward_length_penalty: -5.0
-    max_distance_penalty:   10.0
-    seed_method:            topmost
-    # ── agent (smaller net: 64² patch input, 8 actions) ──
-    lr:                     1.0e-4
-    gamma:                  0.99
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    18000
-    train_steps:            30000    # gradient updates; each iteration steps 16 envs
-    # ── training-speed (options 1 + 3) ──
-    num_envs:               16       # vectorised batch width
-    grad_updates:           1        # gradient updates per batched env-step
-    eval_every:             5000
-    val_subset:             50       # in-training eval subset; full val at the end
     seed:                   42
     checkpoint_dir:         /kaggle/working

@@ -115,7 +115,10 @@ def resolve_agent_config(cfg: dict, agent_name: str) -> dict:
         reward_mode:  dice_hd_composite
         ...                              # env / reward params (shared)
         agents:
-          DDQN:
+          DQN:
+            lr: 1.0e-4
+            ...
+          DuelingDDQN:
             lr: 1.0e-4
             ...
           DDPG:
@@ -129,7 +132,9 @@ def resolve_agent_config(cfg: dict, agent_name: str) -> dict:
     Parameters
     ----------
     cfg        : dict returned by ``load_drl_class_config``
-    agent_name : one of 'DQN' | 'DDQN' | 'DUELING' | 'DDPG' | 'MSA-DUELING'
+    agent_name : selector key matching a block under ``cfg['agents']``,
+                 e.g. 'DQN' | 'DuelingDDQN' | 'DDPG' | 'DQN_TRACE' | 'DuelingDDQN_TRACE'
+                 (matched case-insensitively).
 
     Returns
     -------
@@ -140,13 +145,20 @@ def resolve_agent_config(cfg: dict, agent_name: str) -> dict:
     KeyError  if agent_name is not present in cfg['agents']
     """
     agents   = cfg.get('agents', {})
-    agent_key = agent_name.upper()
     available = list(agents.keys())
-    if agent_key not in agents:
-        raise KeyError(
-            f"Agent '{agent_key}' not found in config. "
-            f"Available: {available}"
-        )
+    # Match the selector key case-insensitively so 'DuelingDDQN' resolves
+    # whether the user types 'DuelingDDQN', 'duelingddqn', or 'DUELINGDDQN'.
+    if agent_name in agents:
+        agent_key = agent_name
+    else:
+        lowered = {k.lower(): k for k in agents}
+        if agent_name.lower() in lowered:
+            agent_key = lowered[agent_name.lower()]
+        else:
+            raise KeyError(
+                f"Agent '{agent_name}' not found in config. "
+                f"Available: {available}"
+            )
     # Start from top-level (env / reward / class params), strip 'agents' block
     merged = {k: v for k, v in cfg.items() if k != 'agents'}
     # Layer agent-specific hyperparams on top (override where keys conflict)
