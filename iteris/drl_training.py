@@ -27,8 +27,7 @@ from .env         import (SegmentationEnv,
                           signed_dt, dice_score, hd95_px)
 from .env_contour import ContourTracingEnv, VectorisedContourEnv
 from .buffer      import ReplayBuffer, ContourReplayBuffer
-from .agents      import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
-                         MSADuelingDQNAgent
+from .agents      import DQNAgent, DuelingDQNAgent, DDPGAgent
 
 
 # ─── Environment registry ────────────────────────────────────────────────────
@@ -51,15 +50,14 @@ CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
 
 
 AGENT_REGISTRY = {
-    'DQN':         (DQNAgent,           'discrete'),
-    'DDQN':        (DDQNAgent,          'discrete'),
-    'DUELING':     (DuelingDQNAgent,    'discrete'),
-    'DDPG':        (DDPGAgent,          'continuous'),
-    'MSA-DUELING': (MSADuelingDQNAgent, 'discrete'),
+    'DQN':     (DQNAgent,        'discrete'),    # boundary tracing (patch net)
+    'DUELING': (DuelingDQNAgent, 'discrete'),    # boundary tracing (patch dueling)
+    'DDPG':    (DDPGAgent,       'continuous'),  # continuous mask-morph baseline
 }
+# DDQN and MSA-DUELING agents were archived in the boundary-tracing paradigm
+# shift — see iteris/archive/agents_legacy.py and iteris/archive/msa.py.
 
-# Agent classes that accept extra MSA hyperparameters (num_heads, key_dim)
-_MSA_AGENT_CLASSES = (MSADuelingDQNAgent,)
+
 def _build_state_caches(samples: List[dict], image_size: int) -> dict:
     """Stack image + init_mask arrays for vectorised lookup at sample time."""
     n = len(samples)
@@ -241,11 +239,6 @@ def _run_contour_training(cfg: dict, train_samples: List[dict],
     agent_cls, action_type = AGENT_REGISTRY[cfg['agent_type'].upper()]
     if action_type != 'discrete':
         raise ValueError('contour_tracing supports discrete agents only')
-    if issubclass(agent_cls, _MSA_AGENT_CLASSES):
-        raise NotImplementedError(
-            'MSA backbone on the tracing patch is out of scope for v1 — '
-            'use a DQN/DDQN/DUELING *_TRACE agent.'
-        )
 
     train_caches = _build_state_caches(train_samples, cfg['image_size'])
     val_caches   = _build_state_caches(val_samples,   cfg['image_size'])
@@ -488,19 +481,17 @@ def run_drl_training(
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
     # ── Agent ─────────────────────────────────────────────────────────────────
+    # This non-tracing path is reached only by DDPG (continuous). The discrete
+    # branch below is retained for completeness but no shipped config routes a
+    # discrete agent here — discrete RL dispatches to _run_contour_training.
     common = dict(in_channels=4, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
                   embed_dim=cfg.get('embed_dim', 256), device=device)
-    # Extra kwargs for MSA variants (ignored by all base-class agents)
-    msa_kwargs = (
-        dict(num_heads=cfg.get('num_heads', 4), key_dim=cfg.get('key_dim', 64))
-        if issubclass(agent_cls, _MSA_AGENT_CLASSES) else {}
-    )
     if action_type == 'discrete':
-        # num_actions is env-class-dependent (13 default, 9 BRISC) — agent's
-        # output head must match exactly or argmax will produce invalid indices.
+        # num_actions is env-class-dependent — agent's output head must match
+        # exactly or argmax will produce invalid indices.
         agent = agent_cls(num_actions=num_actions_for_cls,
-                          lr=cfg.get('lr', 1e-4), **common, **msa_kwargs)
+                          lr=cfg.get('lr', 1e-4), **common)
     else:
         common.pop('lr', None)
         _legacy_scale = cfg.get('cont_action_scale', 0.02)
@@ -519,7 +510,6 @@ def run_drl_training(
             ou_sigma           = ou_sigma_raw,
             actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
             **common,
-            **msa_kwargs,
         )
 
     # ── Buffer ────────────────────────────────────────────────────────────────

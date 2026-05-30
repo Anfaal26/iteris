@@ -1,4 +1,11 @@
 """
+ARCHIVED — retired when the agent set was reduced to DQN / DuelingDDQN
+(boundary tracing) + DDPG (continuous baseline). MSA was the planned
+"run on the best base later" variant; it is not wired into any config,
+notebook, or the agent registry. To resurrect: move back to iteris/msa.py,
+restore MSADuelingDQNAgent (see archive/agents_legacy.py), and re-add the
+'MSA-DUELING' AGENT_REGISTRY entry + a config/notebook selector.
+────────────────────────────────────────────────────────────────────────────────
 Multi-Head Self-Attention (MSA) modules for DRL agents.
 
 MSABackbone replaces CNNBackbone's global-average-pool with spatial-token

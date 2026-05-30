@@ -14,7 +14,7 @@ from .losses import build_loss
 from .metrics import dice_score, hd95_batch
 
 # DRL (Week 2+) exports
-from .env     import SegmentationEnv
-from .buffer  import ReplayBuffer
-from .agents  import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
-                       MSADuelingDQNAgent
+from .env          import SegmentationEnv
+from .env_contour  import ContourTracingEnv, VectorisedContourEnv
+from .buffer       import ReplayBuffer, ContourReplayBuffer
+from .agents       import DQNAgent, DuelingDQNAgent, DDPGAgent
