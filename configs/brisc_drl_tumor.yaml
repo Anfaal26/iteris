@@ -6,23 +6,19 @@
 #   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
 #   results  = run_drl_training(cfg, train_samples, val_samples)
 #
-# ── Three algorithms, two paradigms ──────────────────────────────────────────
+# ── Algorithms ───────────────────────────────────────────────────────────────
 #
-# Refinement (mask morphology) — DQN / DuelingDDQN / DDPG:
-#   DQN family — uses SegmentationEnvBRISC (9 actions, no shifts)
-#     • max_steps=5, stop_n=2, stop_eps_dice=0.005, fail-fast at -0.05 Dice
-#     • hard_mining_scale=0 (off — caused generalisation failure on small targets)
-#     • Reason: 30-px tumours need short episodes and a tight action set;
-#       whole-mask shifts almost always hurt when the U-Net already located the
-#       tumour correctly.
-#   DDPG family — uses base SegmentationEnv (3-D continuous: morph, dy, dx)
-#     • max_steps=20, hard_mining_scale=3.0 (continuous baseline)
+# Discrete (boundary tracing — the active paradigm):
+#   DQN          — 8 directional actions, 64×64 patch state, ContourTracingEnv.
+#                  Agent walks the GT boundary step-by-step; the trajectory IS
+#                  the segmentation.
+#   DuelingDDQN  — same env, V(s) + A(s,a) heads.
 #
-# Boundary tracing — DQN_TRACE / DuelingDDQN_TRACE:
-#   Uses ContourTracingEnv (8 directional actions, 64×64 patch state).
-#   The agent walks the GT boundary step-by-step — the trajectory IS the
-#   segmentation. Distinct paradigm from morphology refinement; runs the same
-#   DQN / DuelingDDQN algorithms over a different env + reward.
+# Continuous (kept as the paper's continuous baseline only):
+#   DDPG         — 3-D continuous action (morph, dy, dx) on base SegmentationEnv
+#                  (mask morphology). This is the only remaining mask-morph path
+#                  in the codebase; discrete refinement was retired in favour of
+#                  boundary tracing.
 
 target_class:        1
 class_name:          tumor
@@ -41,82 +37,28 @@ reward_alpha:  1.0                # not used for iou_delta; kept for composite a
 reward_beta:   0.0                # not used for iou_delta
 hd_norm:       17.0               # 2× mean HD95 (~8.36 px) — for ablation only
 
-# ── Environment (DDPG family defaults; DQN family overrides per-agent) ──────
+# ── Environment (DDPG continuous baseline) ──────────────────────────────────
+# These are only consumed by the DDPG SegmentationEnv path. The discrete
+# boundary-tracing agents have their own env params in their own blocks.
 image_size:        256
-max_steps:         20             # DDPG default — DQN agents override to 5
-shift_px:          1              # only relevant if shifts are in the action set
+max_steps:         20
+shift_px:          1
 sdt_clip:          15.0           # tighter than CAMUS (20) — small structures
 reward_clip:       1.0
 min_area_fraction: 0.005          # keep small tumours; ~12×12 px in 256×256
-stop_eps_dice:     0.001          # DDPG default — DQN agents override to 0.005
+stop_eps_dice:     0.001
 stop_eps_hd:       0.5
-stop_n:            3              # DDPG default — DQN agents override to 2
+stop_n:            3
 
-# ── Hard sample mining (DDPG family) ────────────────────────────────────────
-# Continuous DDPG with sub-pixel morph can benefit from hard mining since each
-# action is finer-grained and "be active" overfitting is less catastrophic.
-# DQN family OVERRIDES hard_mining_scale to 0 — see per-agent blocks.
+# ── Hard sample mining (DDPG only) ──────────────────────────────────────────
 hard_mining_scale: 3.0
 
 # ── Per-agent hyperparams ────────────────────────────────────────────────────
 agents:
 
   # ──────────────────────────────────────────────────────────────────────────
-  # DQN family — uses SegmentationEnvBRISC (9-action small-target env)
+  # DDPG — continuous baseline (mask morphology, SegmentationEnv)
   # ──────────────────────────────────────────────────────────────────────────
-
-  DQN:
-    agent_type:          DQN
-    # ── BRISC small-target env ──
-    env_class:           brisc_small_target   # 9 actions, no shifts
-    max_steps:           5                    # was 20: caps compounding damage
-    stop_n:              2                    # was 3: bail eagerly on convergence
-    stop_eps_dice:       0.005                # was 0.001: looser threshold for iou_delta
-    fail_thresh:         0.05                 # terminate if Dice drops 5pp below init
-    fail_n:              2                    # ...for 2 consecutive steps
-    hard_mining_scale:   0.0                  # off: caused "always-active" overfit
-    # ── Agent hyperparams — tuned for short episodes ──
-    lr:                  1.0e-4
-    gamma:               0.95                 # was 0.99: shorter episodes → less bootstrapping
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         30000                # was 50000: smaller because episodes are short
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 12000                # was 25000: faster decay for short episodes
-    train_steps:         30000                # was 50000: BRISC converges faster on the smaller env
-    eval_every:          1500
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-  DuelingDDQN:
-    agent_type:          DUELING
-    env_class:           brisc_small_target
-    max_steps:           5
-    stop_n:              2
-    stop_eps_dice:       0.005
-    fail_thresh:         0.05
-    fail_n:              2
-    hard_mining_scale:   0.0
-    # Dueling should win here: V(s) head captures "this state is bad regardless
-    # of action" cleanly, A head handles the small action-specific differences.
-    lr:                  1.0e-4
-    gamma:               0.95
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         30000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 12000
-    train_steps:         30000
-    eval_every:          1500
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
   DDPG:
     agent_type:          DDPG
     # env_class implicitly 'default' (continuous always uses base env)
@@ -146,7 +88,7 @@ agents:
   # trace.  Largest-CC only (multi-focal tumours are a documented v1 limitation).
   # Shorter perimeter (~100 px for a 30-px tumour) → smaller max_trace_length,
   # looser closure_tolerance (irregular shapes), smaller min_perimeter_steps.
-  DQN_TRACE:
+  DQN:
     agent_type:             DQN
     env_class:              contour_tracing
     patch_size:             64
@@ -178,7 +120,7 @@ agents:
     seed:                   42
     checkpoint_dir:         /kaggle/working
 
-  DuelingDDQN_TRACE:
+  DuelingDDQN:
     agent_type:             DUELING
     env_class:              contour_tracing
     patch_size:             64

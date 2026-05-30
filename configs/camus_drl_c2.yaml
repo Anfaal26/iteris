@@ -41,45 +41,6 @@ hard_mining_scale: 5.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
-
-  DQN:
-    agent_type:          DQN
-    lr:                  1.0e-4
-    gamma:               0.99
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 25000
-    train_steps:         60000
-    eval_every:          2000
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-  DuelingDDQN:
-    agent_type:          DUELING
-    lr:                  1.0e-4
-    gamma:               0.99
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000    # 10000→50000: retains 5× more experience so early
-                                  # diverse exploration is not overwritten by late
-                                  # oscillation transitions
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 25000    # 40000→25000: reach low-ε while buffer still has
-                                  # diverse signal; avoids long greedy oscillation
-                                  # reinforcing the wrong policy
-    train_steps:         60000
-    eval_every:          2000
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
   DDPG:
     agent_type:          DDPG
     cont_morph_scale:    0.25
@@ -105,7 +66,7 @@ agents:
   # See camus_drl_c1.yaml DDQN_TRACE for the rationale; LV_epi has the longest
   # CAMUS perimeter (~320 px) and a thin apex, so max_trace_length is larger.
 
-  DQN_TRACE:
+  DQN:
     agent_type:             DQN
     env_class:              contour_tracing
     patch_size:             64
@@ -137,7 +98,7 @@ agents:
     seed:                   42
     checkpoint_dir:         /kaggle/working
 
-  DuelingDDQN_TRACE:
+  DuelingDDQN:
     agent_type:             DUELING
     env_class:              contour_tracing
     patch_size:             64

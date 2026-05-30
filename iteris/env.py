@@ -17,8 +17,11 @@ DISCRETE (DQN family) — 13 actions, directional structuring elements:
     3-element SEs (e.g. [[1],[1],[0]] for NORTH) make each op affect only the
     boundary segment facing that direction.  1-px ops self-restrict to the
     immediate boundary band so each action has a small, locally-targeted blast
-    radius.  See SegmentationEnvBRISC at the bottom of this file for a 9-action
-    variant (no shifts) tuned to small-target datasets like BRISC.
+    radius.
+
+    Note: this discrete refinement path is retained only because DDPG shares
+    SegmentationEnv as its host env.  Discrete RL on segmentation now uses the
+    boundary-tracing paradigm (see iteris/env_contour.py).
 
 CONTINUOUS (DDPG family) — 3-component action:
     a[0]  morph    ∈ [-cont_morph_scale, +cont_morph_scale]   SDT threshold shift
@@ -394,129 +397,3 @@ class SegmentationEnv:
             sdt,
             self.init_mask.astype(np.float32),
         ], axis=0)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# BRISC-specific environment for small-target boundary refinement
-# ──────────────────────────────────────────────────────────────────────────────
-
-class SegmentationEnvBRISC(SegmentationEnv):
-    """
-    BRISC small-target environment for the DQN family.
-
-    Why a separate class:
-      The base 13-action env was designed around CAMUS-scale structures
-      (~100 px linear extent at 256²).  A 1-px directional op there is ~1%
-      of structure area — fine granularity.  On BRISC tumours (~30 px linear,
-      ~1.7% image area), the same 1-px op is ~3% per step, and over a 20-step
-      episode this compounds to ~60% worst-case Dice loss.  Empirically the
-      base env on BRISC produces ΔDice ≈ -0.05 to -0.10 — the agent learns
-      to grind through ~12 small bad moves per episode.
-
-    Three structural changes specifically for small targets:
-
-      1. ACTION SPACE CUT TO 9 (no whole-mask shifts):
-         BRISC tumours are correctly *located* by the U-Net (mean init
-         Dice 0.84) — the residual error is shape, not position.  Shifting a
-         correctly-located tumour by 1 px is almost always net-negative
-         because most of the boundary is already aligned.  Dropping the 4
-         shift actions removes a tempting bad-action class and shrinks the
-         exploration burden by ~30%.
-
-      2. MAX_STEPS=5 (was 20):
-         Each step is ~3% of tumour area in magnitude.  Capping at 5 steps
-         caps worst-case damage at ~15% Dice instead of ~60%, and the
-         agent now has 5 chances rather than 20 to compound bad moves.
-         Combined with the per-step early-stop and fail-fast termination
-         below, typical episodes are 2–3 steps.
-
-      3. FAIL-FAST TERMINATION:
-         If Dice has been below init by ≥ fail_thresh for fail_n consecutive
-         steps, end the episode immediately.  This catches the "compounding
-         degradation" trajectories that max_steps alone can't help — once
-         the agent has made 2 bad moves in a row, end the episode so the
-         buffer fills with short bad episodes rather than long catastrophic
-         ones, giving the Q-network clearer credit assignment.
-
-    Defaults overriden on top of the base class (config can still override):
-      max_steps     = 5    (was 20)
-      stop_n        = 2    (was 3)  — bail on 2 consecutive convergence steps
-      stop_eps_dice = 0.005 (was 0.001) — looser threshold matches iou_delta
-
-    The same agent classes (DQNAgent / DDQNAgent / DuelingDQNAgent /
-    MSADuelingDQNAgent) work unchanged — only ``num_actions`` is derived from
-    ``env_cls.NUM_DISCRETE_ACTIONS`` at agent construction time.  Dueling DQN
-    should win on this environment because its V(s) + A(s,a) decomposition
-    naturally captures the BRISC structure of "this state is bad regardless
-    of action" (V head) separate from the small action-specific differences
-    (A head).
-    """
-
-    NUM_DISCRETE_ACTIONS = 9
-    DILATE_N, DILATE_E, DILATE_S, DILATE_W = 0, 1, 2, 3
-    ERODE_N,  ERODE_E,  ERODE_S,  ERODE_W  = 4, 5, 6, 7
-    NOOP                                    = 8
-
-    DISCRETE_NAMES = [
-        'dil-N', 'dil-E', 'dil-S', 'dil-W',
-        'ero-N', 'ero-E', 'ero-S', 'ero-W',
-        'no-op',
-    ]
-
-    # Continuous action interface inherited unchanged from base class —
-    # this env is intended for the DQN family.  Continuous DDPG on BRISC
-    # uses the base SegmentationEnv (same global 3-D action as CAMUS).
-
-    def __init__(
-        self,
-        *args,
-        fail_thresh: float = 0.05,   # Dice drop from init that counts as "bad"
-        fail_n:      int   = 2,      # consecutive bad steps before terminating
-        **kwargs,
-    ):
-        # Small-target-friendly defaults — caller can still override via config
-        kwargs.setdefault('max_steps',     5)
-        kwargs.setdefault('stop_n',        2)
-        kwargs.setdefault('stop_eps_dice', 0.005)
-        super().__init__(*args, **kwargs)
-        self.fail_thresh = float(fail_thresh)
-        self.fail_n      = int(fail_n)
-
-    def _apply_discrete(self, a: int) -> np.ndarray:
-        """9-action BRISC discrete dispatcher (no whole-mask shifts)."""
-        # Directional dilate — push boundary out 1 px in one direction
-        if a == 0: return ndi.binary_dilation(self.mask, SE_N).astype(np.uint8)
-        if a == 1: return ndi.binary_dilation(self.mask, SE_E).astype(np.uint8)
-        if a == 2: return ndi.binary_dilation(self.mask, SE_S).astype(np.uint8)
-        if a == 3: return ndi.binary_dilation(self.mask, SE_W).astype(np.uint8)
-        # Directional erode — pull boundary in 1 px from one direction
-        if a == 4: return ndi.binary_erosion(self.mask, SE_N).astype(np.uint8)
-        if a == 5: return ndi.binary_erosion(self.mask, SE_E).astype(np.uint8)
-        if a == 6: return ndi.binary_erosion(self.mask, SE_S).astype(np.uint8)
-        if a == 7: return ndi.binary_erosion(self.mask, SE_W).astype(np.uint8)
-        # No-op
-        if a == 8: return self.mask
-        raise ValueError(f'Bad BRISC discrete action: {a}')
-
-    def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
-        """Base step + fail-fast termination on sustained degradation."""
-        state, reward, done, info = super().step(action)
-
-        # Already terminated by max_steps or convergence — nothing more to do.
-        if done:
-            return state, reward, done, info
-
-        # Fail-fast: end the episode if the last `fail_n` steps have all been
-        # at least `fail_thresh` below the episode-start Dice.  Need enough
-        # history to evaluate (must have taken at least fail_n steps).
-        if len(self.dice_history) > self.fail_n:
-            dice_0 = self.dice_history[0]
-            recent_bad = all(
-                self.dice_history[-k - 1] < dice_0 - self.fail_thresh
-                for k in range(self.fail_n)
-            )
-            if recent_bad:
-                done = True
-                info['terminated_early'] = True
-
-        return state, reward, done, info

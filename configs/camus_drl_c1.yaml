@@ -48,41 +48,6 @@ hard_mining_scale: 5.0
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.
 agents:
-
-  DQN:
-    agent_type:          DQN
-    lr:                  1.0e-4
-    gamma:               0.99
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 25000
-    train_steps:         50000
-    eval_every:          2000
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
-  DuelingDDQN:
-    agent_type:          DUELING
-    lr:                  1.0e-4
-    gamma:               0.99
-    tau:                 0.005
-    embed_dim:           256
-    batch_size:          64
-    buffer_size:         50000
-    prefill_steps:       2000
-    epsilon_start:       1.0
-    epsilon_end:         0.05
-    epsilon_decay_steps: 25000
-    train_steps:         50000
-    eval_every:          2000
-    cache_sdt:           true
-    seed:                42
-    checkpoint_dir:      /kaggle/working
   DDPG:
     agent_type:          DDPG
     # 3-component action: (morph, dy_norm, dx_norm)
@@ -111,7 +76,7 @@ agents:
   # above and this tracing agent coexist.  env_class routes run_drl_training to
   # the vectorised tracing loop.  See docs/CONTEXT_PARADIGM1.md.
   # ── DQN_TRACE: basic Q-network boundary tracer (no target-network double trick) ──
-  DQN_TRACE:
+  DQN:
     agent_type:             DQN
     env_class:              contour_tracing
     patch_size:             64
@@ -144,7 +109,7 @@ agents:
     checkpoint_dir:         /kaggle/working
 
   # ── DUELING_TRACE: dueling Q-network tracer (V + A heads, best for exploration) ──
-  DuelingDDQN_TRACE:
+  DuelingDDQN:
     agent_type:             DUELING
     env_class:              contour_tracing
     patch_size:             64

@@ -23,7 +23,7 @@ import pandas as pd
 import torch
 from tqdm.auto import trange
 
-from .env         import (SegmentationEnv, SegmentationEnvBRISC,
+from .env         import (SegmentationEnv,
                           signed_dt, dice_score, hd95_px)
 from .env_contour import ContourTracingEnv, VectorisedContourEnv
 from .buffer      import ReplayBuffer, ContourReplayBuffer
@@ -32,20 +32,19 @@ from .agents      import DQNAgent, DDQNAgent, DuelingDQNAgent, DDPGAgent, \
 
 
 # ─── Environment registry ────────────────────────────────────────────────────
-# Different datasets have different structure scales that warrant different
-# action-space designs.  Selected via cfg['env_class']:
-#   'default'           → SegmentationEnv          (13 actions, CAMUS-scale)
-#   'brisc_small_target'→ SegmentationEnvBRISC    ( 9 actions, BRISC-scale)
-# Continuous DDPG always uses the base SegmentationEnv (BRISC variant is
-# discrete-only — DDPG on BRISC uses the same global 3-D action as CAMUS).
-#   'contour_tracing'   → ContourTracingEnv      ( 8 actions, Paradigm 1)
-# The tracing env uses a distinct training path (vectorised envs, patch states,
-# rasterise-then-score eval) — see run_drl_training's dispatch to
-# _run_contour_training.
+# Selected via cfg['env_class']:
+#   'default'         → SegmentationEnv    (DDPG continuous baseline — mask
+#                                           morphology, kept for the paper's
+#                                           continuous comparison)
+#   'contour_tracing' → ContourTracingEnv  (8 directional actions, Paradigm 1 —
+#                                           the active paradigm for discrete RL)
+#
+# The BRISC small-target refinement env (SegmentationEnvBRISC) was archived
+# when the discrete paradigm shifted to boundary tracing; see
+# iteris/archive/env_brisc.py if you ever need to resurrect it.
 ENV_REGISTRY = {
-    'default':            SegmentationEnv,
-    'brisc_small_target': SegmentationEnvBRISC,
-    'contour_tracing':    ContourTracingEnv,
+    'default':         SegmentationEnv,
+    'contour_tracing': ContourTracingEnv,
 }
 
 CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
@@ -406,10 +405,11 @@ def run_drl_training(
     H = image_size
 
     # ── Environment class selection ──────────────────────────────────────────
-    # Continuous (DDPG family) always uses the base SegmentationEnv — the
-    # BRISC subclass only customises the discrete action space.  Discrete
-    # agents pick from ENV_REGISTRY via cfg['env_class'] (default = base 13-
-    # action env, 'brisc_small_target' = 9-action BRISC env).
+    # Continuous (DDPG) → base SegmentationEnv (mask morphology, the only
+    # remaining mask-morph path; kept as the paper's continuous baseline).
+    # Discrete agents pick from ENV_REGISTRY via cfg['env_class'].  Boundary
+    # tracing is handled by an earlier dispatch to _run_contour_training, so
+    # this branch effectively only sees 'default' (DDPG).
     env_class_name = cfg.get('env_class', 'default')
     if action_type == 'continuous':
         env_cls = SegmentationEnv
