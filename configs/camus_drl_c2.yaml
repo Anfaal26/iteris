@@ -148,3 +148,103 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
+
+  # ── Paradigm 1 — sequential boundary tracing (the agent draws the mask) ──────
+  # See camus_drl_c1.yaml DDQN_TRACE for the rationale; LV_epi has the longest
+  # CAMUS perimeter (~320 px) and a thin apex, so max_trace_length is larger.
+
+  DQN_TRACE:
+    agent_type:             DQN
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       480
+    closure_tolerance:      3
+    min_perimeter_steps:    60
+    boundary_bonus_distance: 1.5
+    reward_boundary_bonus:  0.5
+    reward_closure:         5.0
+    reward_offimage:       -10.0
+    reward_length_penalty: -5.0
+    max_distance_penalty:   10.0
+    seed_method:            topmost
+    lr:                     1.0e-4
+    gamma:                  0.99
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            50000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    20000
+    train_steps:            35000
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working
+
+  DUELING_TRACE:
+    agent_type:             DUELING
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       480
+    closure_tolerance:      3
+    min_perimeter_steps:    60
+    boundary_bonus_distance: 1.5
+    reward_boundary_bonus:  0.5
+    reward_closure:         5.0
+    reward_offimage:       -10.0
+    reward_length_penalty: -5.0
+    max_distance_penalty:   10.0
+    seed_method:            topmost
+    lr:                     1.0e-4
+    gamma:                  0.99
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            50000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    20000
+    train_steps:            35000
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working
+
+  DDQN_TRACE:
+    agent_type:             DDQN
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       480      # ~1.5× expected perimeter (~320 px)
+    closure_tolerance:      3
+    min_perimeter_steps:    60
+    boundary_bonus_distance: 1.5
+    reward_boundary_bonus:  0.5
+    reward_closure:         5.0
+    reward_offimage:       -10.0
+    reward_length_penalty: -5.0
+    max_distance_penalty:   10.0
+    seed_method:            topmost
+    lr:                     1.0e-4
+    gamma:                  0.99
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            50000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    20000
+    train_steps:            35000    # gradient updates; each iteration steps 16 envs
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working

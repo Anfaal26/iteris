@@ -193,3 +193,106 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Paradigm 1 — sequential boundary tracing (the agent draws the mask)
+  # ──────────────────────────────────────────────────────────────────────────
+  # Tumours are blobs, not contours, but every blob has a boundary the agent can
+  # trace.  Largest-CC only (multi-focal tumours are a documented v1 limitation).
+  # Shorter perimeter (~100 px for a 30-px tumour) → smaller max_trace_length,
+  # looser closure_tolerance (irregular shapes), smaller min_perimeter_steps.
+  DQN_TRACE:
+    agent_type:             DQN
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       200
+    closure_tolerance:      4        # looser: irregular tumour boundaries
+    min_perimeter_steps:    30
+    boundary_bonus_distance: 1.5
+    reward_boundary_bonus:  0.5
+    reward_closure:         5.0
+    reward_offimage:       -10.0
+    reward_length_penalty: -5.0
+    max_distance_penalty:   10.0
+    seed_method:            topmost
+    lr:                     1.0e-4
+    gamma:                  0.97
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            40000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    15000
+    train_steps:            25000
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working
+
+  DUELING_TRACE:
+    agent_type:             DUELING
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       200
+    closure_tolerance:      4
+    min_perimeter_steps:    30
+    boundary_bonus_distance: 1.5
+    reward_boundary_bonus:  0.5
+    reward_closure:         5.0
+    reward_offimage:       -10.0
+    reward_length_penalty: -5.0
+    max_distance_penalty:   10.0
+    seed_method:            topmost
+    lr:                     1.0e-4
+    gamma:                  0.97
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            40000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    15000
+    train_steps:            25000
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working
+
+  DDQN_TRACE:
+    agent_type:             DDQN
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       200      # ~2× expected perimeter (~100 px)
+    closure_tolerance:      4        # looser: irregular tumour boundaries
+    min_perimeter_steps:    30       # smaller: tumours are smaller than LV/LA
+    boundary_bonus_distance: 1.5
+    reward_boundary_bonus:  0.5
+    reward_closure:         5.0
+    reward_offimage:       -10.0
+    reward_length_penalty: -5.0
+    max_distance_penalty:   10.0
+    seed_method:            topmost
+    lr:                     1.0e-4
+    gamma:                  0.97
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            40000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    15000
+    train_steps:            25000    # gradient updates; each iteration steps 16 envs
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working

@@ -1,6 +1,6 @@
 # Paradigm 1 Implementation Plan — Sequential Boundary Tracing
 
-*Companion to CONTEXT_PARADIGM1.md. Authored 2026-05-29. Target completion: 2026-06-04.*
+*Companion to CONTEXT_PARADIGM1.md. Authored 2026-05-29. Revised 2026-05-29 to add training-speed work (vectorised envs, GT-EDT precompute, reduced eval frequency). Target completion: 2026-06-05.*
 
 This document is the day-by-day implementation contract. Each day produces a concrete deliverable that's individually testable. If any day slips, the rollback section at the end describes how to stop without breaking the existing refinement system.
 
@@ -8,16 +8,25 @@ This document is the day-by-day implementation contract. Each day produces a con
 
 | Day | Theme | Deliverable | Validation |
 |---|---|---|---|
-| 1 | Core env + utils | `ContourTracingEnv` + `contour_utils.py` | Unit-level smoke test: reset → 10 steps → done |
+| 1 | Core env + utils + GT-EDT | `ContourTracingEnv` + `contour_utils.py`; GT distance transform precomputed once at reset | Unit-level smoke test: reset → 10 steps → done; reward lookup is O(1) per step |
 | 2 | Reward + termination tuning | Distance reward, closure detection working end-to-end | Trace closes successfully on ≥ 1 synthetic sample |
 | 3 | Networks + buffer | `PatchQNetwork`, `PatchDuelingQNetwork`, `ContourReplayBuffer` | 100-step training cycle without errors |
-| 4 | Training loop + agent wiring | `drl_training.py` extended; env-type dispatch via config | End-to-end dry run on CAMUS c1 (600 steps) |
-| 5 | Notebooks + visualisation | Trace-replay viz, rasterise-to-mask eval, per-class configs | All 4 notebooks parse and run a 600-step dry run |
-| 6 | Debug + first real run | Full-length CAMUS c1 DDQN training run | Best val Dice ≥ 0.50 (proof of life; full performance comes later) |
+| 4 | Vectorised envs | `VectorisedContourEnv` (`reset_all`/`step_all`/`reset_done`); batched network forward pass | 16 envs step in lockstep; one batched forward replaces 16 single-env calls |
+| 5 | Training loop + agent wiring | `drl_training.py` extended; env-type dispatch via config; reduced eval frequency | End-to-end dry run on CAMUS c1 (600 steps) |
+| 6 | Notebooks + visualisation | Trace-replay viz, rasterise-to-mask eval, per-class configs | All 4 notebooks parse and run a 600-step dry run |
+| 7 | Debug + first real run | Full-length CAMUS c1 DDQN training run | Best val Dice ≥ 0.50 (proof of life; full performance comes later) |
 
 Buffer: 2 days for inevitable contour-closure edge cases that will only surface once a real agent starts exploring.
 
-## Day 1 — Core env + utils
+### Training-speed strategy (folded into the days above)
+
+Per-step episodes are 200–400 steps long (vs. 5–20 for refinement), so a naïve single-env loop would be ~20× slower per training step. Three optimisations keep a full CAMUS agent at ~1.5–2 hr on a T4 instead of ~10 hr:
+
+1. **Vectorised envs (Day 4)** — run 16 `ContourTracingEnv` instances in lockstep and do ONE batched network forward per step instead of 16. ~6–10× wall-clock win; this is the dominant lever.
+2. **GT distance-transform precompute (Day 1, must-have)** — `ndi.distance_transform_edt(~gt_boundary)` is computed ONCE in `reset()` and cached. The per-step reward becomes an O(1) array lookup `gt_edt[y, x]` instead of an O(boundary) nearest-pixel scan. This must land in Day 1 because the env is unusable at training speed without it.
+3. **Reduced eval frequency (Day 5, config)** — `eval_every: 5000` (was 1500–2000) and a 50-sample validation subset during training, with one full-val pass at the end. Cuts the eval tax from ~30% of wall time to ~5%.
+
+## Day 1 — Core env + utils + GT-EDT precompute
 
 ### Files created
 
@@ -39,8 +48,22 @@ def rasterise_trajectory(trajectory, H, W):
 def boundary_edge_pixels(mask):
     """Returns (N, 2) array of (y, x) coordinates of mask boundary."""
 
+def gt_boundary_edt(gt_mask):
+    """Precompute the GT-boundary Euclidean distance transform ONCE.
+
+    Returns a (H, W) float32 array where edt[y, x] = distance from (y, x) to
+    the nearest GT boundary pixel.  Computed in env.reset(); the per-step
+    distance reward is then the O(1) lookup edt[y, x] instead of an
+    O(N_boundary) nearest-pixel scan.  Speedup option 2.
+    """
+
 def distance_to_boundary(point, boundary_pixels):
-    """Euclidean distance from point to nearest boundary pixel."""
+    """Euclidean distance from point to nearest boundary pixel.
+
+    Fallback / reference path.  The training env uses gt_boundary_edt() for
+    the O(1) lookup; this is kept for tests and for the synthetic-circle
+    validation in Day 2.
+    """
 
 # 8-direction action lookup
 DIRECTIONS = np.array([
@@ -71,8 +94,12 @@ class ContourTracingEnv:
         seed_method='topmost',
     ): ...
 
-    def reset(self) -> np.ndarray: ...
-    def step(self, action) -> (state, reward, done, info): ...
+    def reset(self) -> np.ndarray:
+        """Seeds the trace, then caches gt_boundary_edt(gt_mask) ONCE so the
+        per-step reward is an O(1) lookup (speedup option 2)."""
+    def step(self, action) -> (state, reward, done, info):
+        """Per-step reward = -self._gt_edt[y, x] (clipped) + bonuses. No
+        nearest-pixel scan in the hot loop."""
     def _extract_patch(self) -> np.ndarray:
         """Returns (4, patch_size, patch_size): image, position, visited, init-edge."""
     def get_final_mask(self) -> np.ndarray:
@@ -153,7 +180,46 @@ agent.q_target = deepcopy(agent.q)
 # push 100 transitions to buffer, sample batch, call agent.update
 ```
 
-## Day 4 — Training loop + agent wiring
+## Day 4 — Vectorised environments
+
+### File created
+
+`iteris/env_contour.py` — add `VectorisedContourEnv` alongside `ContourTracingEnv`:
+
+```python
+class VectorisedContourEnv:
+    """Runs N ContourTracingEnv instances in lockstep for batched inference.
+
+    The single biggest training-speed win (option 1): one batched network
+    forward over (N, 4, 64, 64) replaces N separate (1, 4, 64, 64) calls.
+    """
+    def __init__(self, envs: list[ContourTracingEnv]): ...
+
+    def reset_all(self) -> np.ndarray:
+        """Returns (N, 4, 64, 64) — all envs reset."""
+
+    def step_all(self, actions) -> (states, rewards, dones, infos):
+        """actions: (N,) int. Steps every env once; returns stacked outputs."""
+
+    def reset_done(self, sampler) -> None:
+        """Re-seed any env that finished its episode with a fresh sample drawn
+        from `sampler()`, so the batch stays full without a Python-level
+        episode loop."""
+```
+
+Each env keeps its own trajectory, seed point, and cached GT-EDT. The wrapper
+owns only the batching. Auto-reset (`reset_done`) keeps all N slots busy: when
+an env returns `done=True`, its transition is still pushed to the buffer, then
+the slot is immediately re-seeded with a new sample so the next `step_all` runs
+a full batch.
+
+### Validation
+
+16 envs created from 16 different CAMUS samples; `reset_all()` returns
+`(16, 4, 64, 64)`; 50 calls to `step_all(random_actions)` run without shape
+errors; envs that close mid-batch are transparently re-seeded by `reset_done`.
+
+## Day 5 — Training loop + agent wiring
 
 ### Files modified
 
@@ -190,12 +256,17 @@ agents:
     reward_closure:       5.0
     reward_offimage:     -10.0
     reward_length_penalty: -5.0
+    # ── training-speed knobs (option 1 + 3) ──────────────────────────
+    num_envs:             16        # vectorised batch width (option 1)
+    eval_every:           5000      # was 1500–2000 (option 3)
+    val_subset:           50        # eval on a 50-sample subset during training
+    # full val pass runs once at the end regardless of val_subset
     # rest as before: lr, gamma, tau, embed_dim, etc.
 ```
 
 Per-agent block can now declare `env_class`, so `DDQN` (refinement) and `DDQN_TRACE` (tracing) coexist in the same config file. The notebook's `AGENT_NAME` selector picks one.
 
-### Dry-run validation (end of Day 4)
+### Dry-run validation (end of Day 5)
 
 `AGENT_NAME='DDQN_TRACE'` in `03a_camus_drl_lv_endo.ipynb`, run §3 with 600 train_steps:
 
@@ -207,7 +278,7 @@ Per-agent block can now declare `env_class`, so `DDQN` (refinement) and `DDQN_TR
 ✓ Dry run passed.
 ```
 
-## Day 5 — Notebooks + visualisation
+## Day 6 — Notebooks + visualisation
 
 ### Notebook updates (4 files)
 
@@ -223,11 +294,11 @@ Per-agent block can now declare `env_class`, so `DDQN` (refinement) and `DDQN_TR
 
 All 4 notebooks open cleanly in Jupyter locally, kernel runs §0 → §5 without errors. Smoke test for both `AGENT_NAME='DDQN'` (refinement, existing) and `AGENT_NAME='DDQN_TRACE'` (tracing, new).
 
-## Day 6 — Debug + first real run
+## Day 7 — Debug + first real run
 
 ### Real-data training
 
-`03a_camus_drl_lv_endo.ipynb` on Kaggle T4 with `AGENT_NAME='DDQN_TRACE'`, full training run (~3–4 hr expected, since episodes are 200–400 steps × 30000 train_steps × ~5 steps/sec).
+`03a_camus_drl_lv_endo.ipynb` on Kaggle T4 with `AGENT_NAME='DDQN_TRACE'`, full training run. With vectorised envs (16-wide batched inference) + GT-EDT precompute + reduced eval frequency, expect **~1.5–2 hr per CAMUS agent** rather than the ~10 hr a naïve single-env loop would take at 200–400 steps/episode.
 
 ### Success criteria (proof of life)
 
@@ -248,13 +319,13 @@ All 4 notebooks open cleanly in Jupyter locally, kernel runs §0 → §5 without
 
 ## Rollback plan
 
-If by **end of Day 4** the dry run does not run end-to-end:
+If by **end of Day 5** the dry run does not run end-to-end:
 
 - The new files (`env_contour.py`, `contour_utils.py`, patch network variants, contour buffer) are additions, not modifications to existing code. The existing refinement system is untouched.
 - Revert: `git revert` the contour-related commits, or simply do not select `*_TRACE` agent names. The existing `DDQN` agent on the refinement env continues to work.
-- Decision point: continue debugging on Day 5–6, or shelf the pivot and ship the refinement system as the only paradigm.
+- Decision point: continue debugging on Day 6–7, or shelf the pivot and ship the refinement system as the only paradigm.
 
-If **after Day 6**, traces don't close reliably (closure rate < 30%):
+If **after Day 7**, traces don't close reliably (closure rate < 30%):
 
 - This indicates a fundamental reward-shaping issue, not a code bug.
 - Mitigation 1: switch to 16-action skip neighbourhood (faster perimeter coverage).
@@ -275,9 +346,9 @@ These are not part of v1 and should not be touched during the 6 days:
 ## Definition of done (full plan)
 
 - All 4 active notebooks support `AGENT_NAME` ending in `_TRACE` for tracing-paradigm agents
-- `git log` shows 6 commits, one per day, each individually reverting cleanly
+- `git log` shows 7 commits, one per day, each individually reverting cleanly
 - Real training run on CAMUS c1 with DDQN_TRACE gives val Dice ≥ 0.60 and closure rate ≥ 60%
 - `CONTEXT.md` (top-level) updated to mention both paradigms
 - `docs/CONTEXT_PARADIGM1.md` and `docs/PLAN_PARADIGM1.md` updated with any deviations from the original plan
 
-After Day 6: extend to the other 3 datasets/classes (CAMUS c2, c3, BRISC) by changing config knobs only — no code changes expected.
+After Day 7: extend to the other 3 datasets/classes (CAMUS c2, c3, BRISC) by changing config knobs only — no code changes expected.

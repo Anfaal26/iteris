@@ -17,7 +17,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic
+from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic, \
+                           PatchQNetwork, PatchDuelingQNetwork
 from .msa         import MSADuelingQNetwork
 
 
@@ -53,6 +54,7 @@ class DQNAgent:
         double: bool = False,
         dueling: bool = False,
         embed_dim: int = 256,
+        patch: bool = False,
         device: torch.device = None,
     ):
         self.device      = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -61,8 +63,14 @@ class DQNAgent:
         self.tau         = tau
         self.double      = double
         self.dueling     = dueling
+        self.patch       = patch
 
-        NetCls = DuelingQNetwork if dueling else QNetwork
+        # patch=True selects the small-input variants for the tracing paradigm
+        # (4, 64, 64) state; otherwise the full-image (4, H, W) refinement nets.
+        if patch:
+            NetCls = PatchDuelingQNetwork if dueling else PatchQNetwork
+        else:
+            NetCls = DuelingQNetwork if dueling else QNetwork
         self.q        = NetCls(in_channels, num_actions, embed_dim).to(self.device)
         self.q_target = deepcopy(self.q).eval()
         for p in self.q_target.parameters():

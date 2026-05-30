@@ -151,6 +151,9 @@ def resolve_agent_config(cfg: dict, agent_name: str) -> dict:
     merged = {k: v for k, v in cfg.items() if k != 'agents'}
     # Layer agent-specific hyperparams on top (override where keys conflict)
     merged.update(agents[agent_key])
-    # Ensure agent_type is always set (it lives inside the agent block)
-    merged['agent_type'] = agent_key
+    # Ensure agent_type is set. Block-defined agent_type wins so a selector
+    # name can differ from the underlying algorithm — e.g. a 'DDQN_TRACE' block
+    # sets ``agent_type: DDQN`` (+ ``env_class: contour_tracing``), letting the
+    # refinement 'DDQN' and tracing 'DDQN_TRACE' agents coexist in one file.
+    merged.setdefault('agent_type', agent_key)
     return merged

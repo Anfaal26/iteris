@@ -46,6 +46,82 @@ class CNNBackbone(nn.Module):
         return F.relu(self.fc(x))
 
 
+class PatchCNNBackbone(nn.Module):
+    """
+    Encoder for the small (4, 64, 64) patch state of the tracing paradigm.
+
+    Same stride-2 + GroupNorm design as CNNBackbone, but the adaptive pool
+    target is 4×4 (not 8×8): four stride-2 convs already take a 64-px patch
+    down to 4×4, so pooling to 8 would upsample with no information gain.
+    embed_dim defaults to 128 — the input is 16× smaller in area and the action
+    space is 8 (not 13), so the head needs less capacity.
+    """
+
+    def __init__(self, in_channels: int = 4, embed_dim: int = 128):
+        super().__init__()
+        ch = (32, 64, 128, 128)
+        def block(ic, oc):
+            return nn.Sequential(
+                nn.Conv2d(ic, oc, 3, stride=2, padding=1, bias=False),
+                nn.GroupNorm(8, oc),
+                nn.ReLU(inplace=True),
+            )
+        self.conv = nn.Sequential(
+            block(in_channels, ch[0]),
+            block(ch[0],       ch[1]),
+            block(ch[1],       ch[2]),
+            block(ch[2],       ch[3]),
+        )
+        self.pool = nn.AdaptiveAvgPool2d(4)
+        self.fc   = nn.Linear(ch[3] * 4 * 4, embed_dim)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.pool(x).flatten(1)
+        return F.relu(self.fc(x))
+
+
+class PatchQNetwork(nn.Module):
+    """Vanilla DQN Q-network over the (4, patch, patch) tracing state.
+
+    Signature mirrors QNetwork (in_channels, num_actions, embed_dim) so the
+    agent classes can swap it in without code changes; ``patch_size`` is
+    accepted for documentation/interface parity (the backbone is size-agnostic
+    via adaptive pooling).
+    """
+    def __init__(self, in_channels=4, num_actions=8, embed_dim=128, patch_size=64):
+        super().__init__()
+        self.backbone = PatchCNNBackbone(in_channels, embed_dim)
+        self.head = nn.Sequential(
+            nn.Linear(embed_dim, 128), nn.ReLU(inplace=True),
+            nn.Linear(128, num_actions),
+        )
+
+    def forward(self, x):
+        return self.head(self.backbone(x))
+
+
+class PatchDuelingQNetwork(nn.Module):
+    """Dueling DQN over the tracing patch state — mean-centred advantage."""
+    def __init__(self, in_channels=4, num_actions=8, embed_dim=128, patch_size=64):
+        super().__init__()
+        self.backbone = PatchCNNBackbone(in_channels, embed_dim)
+        self.value_head = nn.Sequential(
+            nn.Linear(embed_dim, 128), nn.ReLU(inplace=True),
+            nn.Linear(128, 1),
+        )
+        self.adv_head = nn.Sequential(
+            nn.Linear(embed_dim, 128), nn.ReLU(inplace=True),
+            nn.Linear(128, num_actions),
+        )
+
+    def forward(self, x):
+        emb = self.backbone(x)
+        v   = self.value_head(emb)
+        a   = self.adv_head(emb)
+        return v + (a - a.mean(dim=1, keepdim=True))
+
+
 class QNetwork(nn.Module):
     """Vanilla DQN Q-network."""
     def __init__(self, in_channels=4, num_actions=13, embed_dim=256):
