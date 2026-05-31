@@ -1,171 +1,116 @@
-# Iteris — Implementation Plan v2
+# Iteris — Implementation Plan
 
-Strategic document for the codebase. Read before adding new features, datasets, or notebooks.
-
----
-
-## 1. Design Principles
-
-**1. Notebooks are thin.** All logic lives in `iteris/`. Notebooks are ~50 lines: import, configure, call high-level functions, display results. When a bug is found, fix one file — not seven notebooks.
-
-**2. Configs are YAML.** No hardcoded hyperparameters in Python. Every dataset has a YAML file in `configs/`. To switch datasets, point a notebook at a different YAML.
-
-**3. Pure-torch metrics.** No `scipy.ndimage` anywhere — Kaggle's bundled scipy breaks under numpy 2.x. Dice and HD95 are computed entirely in PyTorch.
-
-**4. Dataset-agnostic core.** `models.py`, `metrics.py`, `training.py`, `evaluation.py`, `losses.py` know nothing about CAMUS vs CHAOS. They consume `(image, label)` tensors and a `cfg` dict.
-
-**5. Dataset-specific edges.** `ingestion.py` has per-dataset builder functions (`build_camus_dicts`, `build_chaos_ct_dicts`). `transforms.py` switches preprocessing pipeline based on `cfg['normalize']`. That's the entire surface area for adding a new dataset.
+> Strategic document. Read before adding features, configs, or notebooks.
+> **Last updated:** 2026-06-01. Supersedes all prior plan documents.
 
 ---
 
-## 2. Module Responsibilities
+## 1. Engineering Principles
 
-| Module | Responsibility | Stable? |
+1. **Notebooks are thin.** All logic lives in `iteris/`. Notebooks are ~50 lines: import, configure, call, display. Fix bugs in one file, not seven notebooks.
+2. **Configs are YAML.** No hardcoded hyperparameters in Python. Every dataset/agent has a YAML in `configs/`.
+3. **Dataset-agnostic core.** `models.py`, `metrics.py`, `training.py` consume `(image, label)` tensors and a `cfg` dict — they know nothing about CAMUS vs BRISC.
+4. **Modality-aware edges.** `ingestion.py` has per-dataset builders. `transforms.py` switches preprocessing on `cfg['normalize']` (minmax / zscore / hu). This is the entire surface area for a new dataset.
+5. **Separate paradigm paths.** Tracing (`_run_contour_training`) and refinement (DDPG) dispatch at the top of `run_drl_training` based on `cfg['env_class']`. Neither path touches the other.
+
+---
+
+## 2. Current Status
+
+### Complete ✓
+
+| Item | Notes |
+|---|---|
+| CAMUS U-Net baseline | Dice 0.938/0.872/0.896 (c1/c2/c3) · checkpoint `camus_best.pt` |
+| BRISC U-Net baseline | Dice 0.835 test · checkpoint `brisc_best.pt` |
+| Boundary-tracing env | `ContourTracingEnv`, `VectorisedContourEnv`, GT-EDT precompute, 8-direction action |
+| Region-aware reward | Terminal Dice (+10·D) dominant; coverage bonus; conditional closure gate |
+| Seed Option A | Best-overlap CC + GT fallback at init_Dice < 0.30; centroid variant for BRISC |
+| Agent + network | `DQNAgent`, `DuelingDQNAgent` with `patch=True`; `PatchQNetwork`, `PatchDuelingQNetwork` |
+| Training loop | `_run_contour_training` — vectorised 16-env, prefill, ε-greedy, eval subset, checkpoint |
+| Viz + diagnostics | `contour_viz.py`, `dryrun_viz.py` |
+| BRISC 25k validation | DuelingDDQN: test Dice 0.806, HD95 8.76px, closure 87.6% — reward confirmed working |
+| Phase B fixes | CAMUS steps bumped (50k/60k), centroid seed, smoothness penalty, T_max 300 for BRISC |
+| BRISC per-type configs | Optional glioma/meningioma/pituitary configs with tuned T_max |
+
+### In Progress
+
+| Item | Blocker |
+|---|---|
+| BRISC DuelingDDQN at 50k | Upload latest Kaggle iteris-pkg dataset to `dfd9d54` → run §4 |
+| BRISC DQN at 50k | Same — within-paradigm comparison |
+
+### Pending (in order)
+
+| Item | Notes |
+|---|---|
+| CAMUS c1 DuelingDDQN 50k | First cardiac test with region-aware reward |
+| CAMUS c1 DQN 50k | Comparison |
+| CAMUS c2 (LVepi) and c3 (LA) | Same protocol |
+| DDPG baseline runs | Continuous baseline; mask morphology unchanged |
+
+---
+
+## 3. Kaggle Workflow
+
+### Updating iteris-pkg
+
+1. Locally: `git pull` (or `git push` after changes)
+2. Download repo zip or zip `iteris/` + `configs/` + `requirements.txt`
+3. Kaggle: `iteris-pkg` dataset → **New Version** → upload zip → Create
+4. In notebook: sidebar → `iteris-pkg` → **Update to latest version** → restart kernel
+
+### Running a training notebook
+
+1. Attach: dataset + `iteris-pkg` + baseline outputs (`camus-baseline-outputs` or `brisc-baseline-outputs-v2`)
+2. Settings: GPU T4, Persistence Files only, Internet On
+3. §0 install → §1 config (`AGENT_NAME='DQN'` or `'DuelingDDQN'` or `'DDPG'`) → §2 warm-start → §4 train
+4. Save Version → Save & Run All
+
+### Expected wall-clock (T4)
+
+| Run | Time |
+|---|---|
+| BRISC DQN/DuelingDDQN 50k steps | ~48 min |
+| CAMUS DQN/DuelingDDQN 50k/60k steps | ~60–75 min |
+| DDPG 100k–120k steps | ~3–4 hr |
+
+---
+
+## 4. Roadmap
+
+### Phase C — Paper quality (implement after BRISC 50k confirms reward works)
+
+| Item | What | Effort |
 |---|---|---|
-| `config.py` | Load YAML, expand paths, validate keys | ✅ |
-| `ingestion.py` | Walk filesystem → list of `{image, label, patient, ...}` dicts | One function per dataset |
-| `transforms.py` | Modality-aware MONAI pipeline (minmax / zscore / HU) | ✅ |
-| `splits.py` | Patient-level train/val/test split + label-fraction subsampling | ✅ |
-| `models.py` | `AttentionResUNet` — configurable `in_channels`, `num_classes` | ✅ |
-| `losses.py` | `DiceCELoss` (MONAI wrapper) — paper-standard combo | ✅ |
-| `metrics.py` | Pure-torch `dice_score()` and `hd95_batch()` | ✅ |
-| `training.py` | `train_epoch`, `eval_epoch`, `run_training()` orchestrator | ✅ |
-| `evaluation.py` | Test-set per-patient CSV + predicted mask export | ✅ |
-| `visualization.py` | Learning curves, qualitative overlays | ✅ |
-| `utils.py` | Seeding, logging helpers | ✅ |
+| **C1** | CAMUS `max_trace_length` reduction: c1 400→320, c2 480→360, c3 420→320 | YAML only |
+| **C2** | n-step returns (n=5) in `DQNAgent.update()` + `ContourReplayBuffer.sample()` | ~60 LOC; bigger win on CAMUS than BRISC |
+| **C3** | Full training matrix: DQN + DuelingDDQN × 3 CAMUS classes + BRISC | Kaggle runs |
+| **C4** | Unified eval harness: load all checkpoints, same test split, results table | ~1 notebook |
+| **C5** | Wilcoxon signed-rank tests vs U-Net baseline | `iteris/evaluation.py` extension |
+
+### Phase D — Paper writing only
+
+| Item | What |
+|---|---|
+| **D1** | LA results reported separately with mitral-valve-closure caveat |
+| **D2** | Optional: morphological post-processing on jagged BRISC masks (close-then-open); report both |
+| **D3** | Future work: learned First-P-Net seed; PPO comparison; skip-neighbourhood 16-action variant |
 
 ---
 
-## 3. Adding a New Dataset — Step-by-Step
+## 5. Adding a New Dataset
 
-Let's add ACDC as worked example.
-
-### Step 1 — Create config
-
-`configs/acdc.yaml`:
-```yaml
-dataset: ACDC
-modality: cardiac_mri
-data_root: /kaggle/input/acdc
-image_size: [256, 256]
-num_classes: 4
-class_names: [background, LV, RV, Myocardium]
-class_colors: ['#000000', '#00C9A7', '#60A5FA', '#A78BFA']
-spacing: [1.5, 1.5]
-normalize: zscore        # MRI → z-score normalisation
-label_frac: 1.0
-val_split: 0.15
-test_split: 0.10
-batch_size: 8
-epochs: 60
-lr: 1.0e-4
-weight_decay: 1.0e-5
-patience: 10
-seed: 42
-checkpoint_dir: /kaggle/working
-```
-
-### Step 2 — Add ingestion function
-
-`iteris/ingestion.py`:
-```python
-def build_acdc_dicts(data_root, ...):
-    """Walks ACDC dataset → returns list of {image, label, patient, frame}."""
-    ...
-```
-
-### Step 3 — Wire it up
-
-Add a single line to `iteris/ingestion.py::build_dataset_dicts(cfg)`:
-```python
-if cfg['dataset'] == 'ACDC':
-    return build_acdc_dicts(cfg['data_root'], ...)
-```
-
-### Step 4 — Copy notebook, swap config
-
-`notebooks/03_acdc_baseline.ipynb` — duplicate `01_camus_baseline.ipynb`, change the config path. Done.
+1. Add `configs/<dataset>.yaml` (set `normalize`, `num_classes`, `class_names`)
+2. Add `build_<dataset>_dicts()` in `iteris/ingestion.py` → wire into `build_dataset_dicts(cfg)`
+3. Add a U-Net baseline notebook (copy `01_camus_baseline.ipynb`, swap config)
+4. For DRL: add `configs/<dataset>_drl_c<n>.yaml` with agent blocks
 
 ---
 
-## 4. Kaggle Workflow
+## 6. Critical Don'ts
 
-### One-time setup
-
-1. Locally: edit code in `D:\iteris\iteris\*.py`
-2. Locally: commit + push to GitHub
-3. On Kaggle: upload the `iteris/` folder as a Kaggle Dataset named `iteris-pkg`
-4. On Kaggle: when you update code locally, re-upload `iteris-pkg` as a new dataset version
-
-### Each notebook starts the same way
-
-```python
-# Cell 1 — pull package
-import sys
-sys.path.insert(0, '/kaggle/input/iteris-pkg')
-
-# Cell 2 — load config + override Kaggle paths
-from iteris.config import load_config
-cfg = load_config('/kaggle/input/iteris-pkg/configs/camus.yaml')
-cfg['data_root'] = '/kaggle/input/datasets/anfaalhossain/camus/CAMUS'
-cfg['checkpoint_dir'] = '/kaggle/working'
-
-# Cell 3 — full pipeline
-from iteris.training import run_training
-from iteris.evaluation import evaluate_test_set
-results = run_training(cfg)
-test_results = evaluate_test_set(results['model'], results['test_loader'], cfg)
-```
-
-That's the full minimal notebook. Real notebooks add visualisation between steps.
-
----
-
-## 5. Pinned Dependencies (Kaggle Compatibility)
-
-In `requirements.txt`:
-```
-monai==1.4.0
-numpy<2.0           # scipy.ndimage breaks under numpy 2.x on Kaggle
-torch>=2.0
-pyyaml
-```
-
-The numpy pin is the critical one. Notebooks install via `!pip install -r /kaggle/input/iteris-pkg/requirements.txt --quiet --force-reinstall` followed by a manual kernel restart.
-
----
-
-## 6. What Stays in `archive/`
-
-- `week1_camus_baseline.ipynb` — old 30-cell monolith
-- `week2_00_env_validation.ipynb` — env validation (will be rewritten under new structure)
-
-Kept for reference. Don't run them.
-
----
-
-## 7. Next Steps After Baseline Lands
-
-In order:
-
-1. **CAMUS baseline** — verify the new structure produces ≥0.85 LV_endo Dice (matches old run)
-2. **CHAOS ingestion + transform** — add `build_chaos_ct_dicts` + HU window
-3. **CHAOS baseline** — same notebook pattern, swap config → train
-4. **Env validation v2** — rewrite under new structure as `notebooks/04_env_validation.ipynb`
-5. **Random-action baseline** — first DRL milestone
-6. **DQN / DDQN / Dueling DQN** — Week 2 agents
-7. **DDPG / MSA variants** — Week 3 agents
-8. **Unified eval harness + ablations** — Week 4
-9. **UI deployment** — Week 5
-
----
-
-## 8. Decision Log
-
-| Date | Decision | Why |
-|---|---|---|
-| 2026-05-08 | Restructure into `iteris/` package | Notebook-only structure didn't scale |
-| 2026-05-08 | Pure-torch metrics, drop scipy.ndimage | Kaggle numpy 2.x breaks scipy |
-| 2026-05-08 | Custom AttentionResUNet retained | 0.94 Dice on CAMUS, paper-credible |
-| 2026-05-08 | Kaggle Dataset distribution | Keeps repo private, no token plumbing |
-| 2026-05-08 | Per-class binary DRL agents | Literature-aligned, action space stays small |
+- Do not add `scipy.ndimage` to the reward path — use the precomputed GT-EDT (`self._gt_edt[y,x]`)
+- Do not restart the seeding discussion — best-overlap CC + GT fallback is settled (see CONTEXT.md §8)
+- Do not create files in root — use `iteris/`, `configs/`, `notebooks/`, `docs/`
+- Do not modify archived files in `iteris/archive/` unless resurrecting them intentionally

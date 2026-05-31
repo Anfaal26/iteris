@@ -1,296 +1,177 @@
 # Iteris — Project Context
 
-> **Use this file as the seed context for UI design work, fresh LLM sessions, or onboarding collaborators.** Self-contained snapshot of scope, progress, and the UI brief.
+> Single source of truth. All other context files have been condensed into this document.
+> **Last updated:** 2026-06-01. Prioritises recent decisions over earlier ones for conflicts.
 
 ---
 
 ## 1. What This Is
 
-**Iteris** is a research-paper + UI dual deliverable from a 5-week Taylor's University capstone (PRJ63504).
+**Iteris** is a Taylor's University capstone (PRJ63504) producing a **research paper** on DRL-based medical image segmentation via sequential boundary tracing.
 
-The research builds and compares Deep Reinforcement Learning agents that refine medical image segmentation masks produced by a U-Net baseline. The UI is a research demo that visualises how each agent iteratively improves a segmentation over up to 20 steps.
-
-**Identity**
-
-- Name: **Iteris**
-- Tagline: *"See how AI learns to see."*
-- Type: **Research demo workstation — not a clinical tool**
-- Differentiator: **DRL iteration playback** — watch an agent refine a boundary step by step
-
-**Target paper venues:** IEEE JBHI (primary) · MICCAI 2026 workshop · MedIA (prestige)
+- **Research question:** Can a discrete DRL agent trace a structure's boundary point-by-point and produce a segmentation that improves on a U-Net baseline?
+- **Paper venues:** IEEE JBHI (primary) · MICCAI 2026 workshop
+- **Repo:** `github.com/Anfaal26/iteris` · local: `D:\iteris\`
+- **UI work:** deferred — not in scope until training results are complete
 
 ---
 
-## 2. The Research Pipeline
+## 2. Datasets
 
-```
-Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 steps ──► Final mask
-   (image)        (init state)          (each step adjusts the boundary)
-```
+| Dataset | Modality | Classes | Baseline Dice | Notes |
+|---|---|---|---|---|
+| **CAMUS** | Cardiac ultrasound | LV-endo (c1), LV-epi (c2), LA (c3) | 0.938 / 0.872 / 0.896 | Primary; 3 per-class agents |
+| **BRISC** | Brain tumour T1+Gd MRI | tumor (binary; glioma/meningioma/pituitary in data) | 0.835 (test) | Single binary agent + optional per-type configs |
 
-**Datasets**
-| Dataset | Modality | Structures | Role |
-|---|---|---|---|
-| **CAMUS** | Cardiac ultrasound | LV endo / LV epi / Left atrium | Primary cardiac set, ~500 patients, 3-class |
-| **BRISC** | Brain MRI | Tumour (binary) | Secondary set, 9 586 image pairs, single-class |
+**BRISC is brain MRI, not ultrasound.** Preprocessing: z-score normalisation. Per-type breakdown available via `tumor_type_filter` in the per-class configs (`brisc_drl_glioma.yaml`, `_meningioma.yaml`, `_pituitary.yaml`). Active runs use the binary `brisc_drl_tumor.yaml`.
 
-**Baseline model:** Attention Residual U-Net (ResNet-34 encoder, attention gates, transposed-conv decoder).
+---
 
-**DRL agents**
-| Agent | Action space | Key detail |
+## 3. Active Agent Set
+
+| Selector key | Algorithm | Env / Paradigm |
 |---|---|---|
-| DQN | Discrete (13 CAMUS / 9 BRISC) | Baseline Q-learner, CNN Q-head, ε-greedy, uniform replay buffer |
-| Dueling DQN | Discrete (13 CAMUS / 9 BRISC) | V(s) + A(s,a) split head + Double target — best-practice combination |
-| DDPG | Continuous (3D) | OU noise, morph + dy + dx, τ=0.005 soft target update |
-| MSA-Best |(13 CAMUS / 9 BRISC) |Best performing headhead on a 4-head MSA backbone (4 heads × 64-d keys) |
+| `DQN` | DQNAgent (patch CNN) | `ContourTracingEnv` — boundary tracing |
+| `DuelingDDQN` | DuelingDQNAgent (V+A heads, double target) | `ContourTracingEnv` — boundary tracing |
+| `DDPG` | DDPGAgent (OU noise, continuous) | `SegmentationEnv` — mask morphology (continuous baseline only) |
 
-> **Discrete action layouts** — `SegmentationEnv`: 4 directional dilate + 4 directional erode + 4 whole-mask shift + no-op = **13 actions** (CAMUS scale). `SegmentationEnvBRISC`: drops the 4 shifts → **9 actions** (small-target scale; BRISC tumours are correctly located by the U-Net, shifts hurt more than they help). Selected per-agent via `cfg['env_class']`.
-
-**RL Environment (locked v2 contract)**
-- **State:** `(4, 256, 256)` float32
-  - ch 0: image (normalised [0,1])
-  - ch 1: current binary mask for the target class
-  - ch 2: signed distance transform of current mask, normalised ±1
-  - ch 3: U-Net init mask (fixed throughout episode — gives agent its "starting point" reference)
-- **Discrete actions (7):** dilate · erode · shift ↑ · shift ↓ · shift ← · shift → · no-op
-- **Continuous actions (3):** (morph, dy\_norm, dx\_norm) — morphological shift on SDT + fractional translation
-- **Reward (episode-start baseline):** `r_t = metric(t) − metric(0)` — no step-wise oscillation trap
-- **Reward modes:** `dice_hd_composite` (cardiac, boundary precision) · `iou_delta` (BRISC, small targets)
-- **Episode end:** step ≥ 20, OR convergence: |ΔDice| < stop\_eps for stop\_n consecutive steps, OR improvement-maintained: all last stop\_n Dice > Dice\_0 + stop\_eps
-- **Formulation:** per-class binary agents; final multi-class mask = union of per-class refinements
-
-**Evaluation metrics:** Dice · IoU · HD · HD95 · Wilcoxon signed-rank tests (p<0.05) · 5-fold CV.
+Retired / archived: `DDQNAgent`, `MSADuelingDQNAgent`, `msa.py`, `SegmentationEnvBRISC` — see `iteris/archive/` with resurrection notes.
 
 ---
 
-## 3. Current Status (live)
+## 4. The Boundary-Tracing Paradigm
 
-**Week 1 — DONE** ✓
+The discrete agents (`DQN`, `DuelingDDQN`) **trace each structure's boundary one pixel at a time**. The rasterised polygon IS the segmentation. The U-Net's role is reduced to providing a seed point.
 
-*CAMUS Baseline (Attention Residual U-Net — cardiac ultrasound)*
-| Structure | Dice | HD95 |
-|---|---|---|
-| LV endo | **0.9378** | ~6 px |
-| LV epi | **0.8723** | — |
-| Left atrium | **0.8958** | — |
-| **Mean** | **0.9020** | ~6 px (~2.3 mm) |
+### State `(4, 64, 64)` — local patch centred on current point
 
-Checkpoint: `camus_best.pt` · val Dice 0.9020 · target was ≥ 0.85 ✓
-
-*BRISC Baseline (Attention Residual U-Net — brain tumour MRI)*
-| Structure | Dice (val) | Dice (test) | HD95 (test) |
-|---|---|---|---|
-| Tumour | 0.8605 | **0.8695** | 7.67 px |
-
-Checkpoint: `brisc_best.pt` · trained 60 epochs · target was ≥ 0.80 ✓
-Dataset: 9 586 pairs, images resized 512→256, z-score normalised, variable aspect ratios.
-Notable: per-patient HD95 varies widely (1.0 px → 81 px) — boundary refinement has strong upside.
-
-Note (label-noise fix): an earlier diagnostic on the raw BRISC PNG masks revealed
-JPEG-compression artifacts inside the labels — pixel values 1–7 scattered through
-the "background" alongside the real tumour values 249–251+. The transforms pipeline
-was binarising with `x > 0` and treating every compression-noise pixel as
-foreground, inflating GT to ~30 connected components per sample (96.4% ≤ 9 px speckle).
-Fix: binarise with `x > 127` (midpoint between the two value clusters) in
-`iteris/transforms.py`. Effect: baseline Dice +0.033, HD95 −0.82 px. Equivalent to
-`x > 0` on the cleanly-binary HAM10000/Kvasir/DRIVE PNGs, so no behavioural change
-for those datasets.
-
-**Week 2 — IN PROGRESS**
-
-DRL environment locked and validated. Major architecture decisions:
-- Episode-start baseline reward (eliminates step-wise oscillation trap)
-- Improvement-maintained early stopping (terminates dilate/erode 2-cycles)
-- Largest-CC filtering on HD95 (removes stray U-Net FP pixels inflating to 200+ px)
-- Directional structuring elements (3-element SEs) for localised 1-px boundary moves
-- `SegmentationEnvBRISC` subclass: 9-action set + max_steps=5 + fail-fast termination
-  for small-target datasets where 1-px ops are ~3% of structure area
-- Per-class YAML configs for CAMUS (3 classes) and BRISC (1 class)
-
-Current: BRISC baseline re-trained on clean labels (Dice 0.8695 / HD95 7.67 px).
-Next: BRISC DRL run with Dueling agent on the cleaned baseline.
-
-Agents to implement (in order): DQN · DDQN · Dueling · DDPG · (PPO) · MSA-\[best\]  
-Platforms: Kaggle T4 GPU · notebooks `03a/b/c` (CAMUS) · notebook `04` (BRISC)
-
-**Week 3 — PLANNED: Full training runs**
-
-- All 5–6 agents × 2 datasets × per-class (CAMUS: 3 configs, BRISC: 1 config)
-- Checkpoint each best val Dice agent per run
-- Generate per-step episode traces for UI playback (20-step `.npy` stacks)
-- Ablation: reward mode · buffer size · epsilon schedule
-
-**Week 4 — PLANNED: Evaluation + stats**
-
-- Unified eval harness over all checkpoints
-- Wilcoxon signed-rank vs U-Net baseline (per-class)
-- 5-fold cross-validation
-- Failure case curation for Dataset Explorer
-
-**Week 5 — PLANNED: Paper + UI deployment**
-
-- Paper draft targeting IEEE JBHI
-- Iteris UI deployed on Hugging Face Spaces or Render
-
-**File outputs the UI will consume**
-- `camus_best.pt` / `brisc_best.pt` — U-Net baseline checkpoints
-- `<agent>_camus_c<n>_best.pt` / `<agent>_brisc_tumor_best.pt` — DRL checkpoints
-- `*_test_results.json` — per-agent test metrics
-- `<agent>_episode_traces/*.npy` — per-step masks for playback (generated Week 3)
-
----
-
-## 4. The UI Brief
-
-**Backend:** FastAPI + PyTorch. Loads U-Net + DRL agents at startup.  
-**Frontend:** React + Three.js (landing), Canvas-based viewer (workspace).  
-**Hosting target:** Hugging Face Spaces or Render (free tier).
-
-**Endpoints**
-- `POST /predict` — upload image, return baseline + all-agent predictions
-- `GET /models` — list available models with metadata (name, family, val Dice, dataset)
-- `POST /compare` — return wipe-comparison data for selected models
-- `GET /trace/{agent}/{sample_id}` — return per-step masks for iteration playback
-
-**Pages / Sections**
-| Page | Purpose |
+| Channel | Content |
 |---|---|
-| **Landing** | Dark hero with 3D element + 2 CTAs → Research hub or Workspace |
-| **Research Hub** | Paper stats, methodology, training curves, ablation results |
-| **Workspace** | Upload + model select (left) · canvas viewer (centre) · results panel (right) |
-| **Wipe Comparison** | Draggable divider: U-Net vs DRL agent, shared zoom/pan |
-| **Iteration Playback** | Step scrubber 0–20, transport controls, reward sparkline, per-step annotations |
-| **Side-by-Side** | 3 model columns, shared zoom/pan, dynamic "Best Dice" badge, metric bar chart |
-| **Model Library** | All agents, expandable training curves, filter by family/metric/dataset |
-| **Dataset Explorer** | CAMUS + BRISC grid, difficulty tags, 1 deliberate failure case per dataset |
+| 0 | Image patch |
+| 1 | Position marker (1 at patch centre) |
+| 2 | Visited mask (cumulative trace footprint) |
+| 3 | U-Net init-mask boundary (prior) |
 
-**Key components**
-- **Preprocessing status:** step indicator with elapsed ms per stage (no spinner)
-- **Model cards:** Dice / IoU / HD / HD95 pills; active card has accent left border
-- **Results panel:** metric cards with green/amber/red benchmark coding · per-structure table
-- **W/L controls:** Window / Level sliders + modality presets (MRI / US) — non-negotiable
-- **Viewer:** scroll-zoom up to 8×, drag-pan, minimap, pixel coord + intensity readout on hover
-- **Export:** PNG mask · JSON metrics · shareable session link
-- **Demo mode:** 5–6 preloaded test samples (CAMUS cardiac + BRISC tumour) for zero-upload demos
+### Action space — 8 directional moves (Freeman chain code)
+`N / NE / E / SE / S / SW / W / NW` — one pixel per step.
 
-**Accessibility:** WCAG 2.1 AA · full keyboard navigation · colour-blind pattern overlays · Reduce Motion mode.
+### Reward structure (region-aware, commit `5901de5`)
+
+```
+Per-step (dense):
+  -0.01                         step cost (time pressure)
+  +0.20 × n_new_covered         new GT-boundary pixels within 1.5px (one-shot per pixel)
+  -0.05 × min(dist, 5)          soft distance gradient toward boundary
+
+Terminal (dominant):
+  +10.0 × Dice(rasterised_mask, GT)   ← direct objective alignment
+  +2.0  × Dice  if closed AND Dice ≥ 0.20   (closure bonus, gated against empty loops)
+  -10.0                         off-image penalty
+  reward_smoothness_penalty     angular change penalty when |Δθ| > 45°
+```
+
+**Why this structure:** the old −distance + flat closure reward produced reward hacking (val Dice 0.018, agent closed minimum-length empty loops). Terminal Dice trains the agent on the exact metric used at evaluation.
+
+### Seed selection
+
+1. Compute `best_overlap_cc(init_mask, gt)` — CC with highest IoU against GT (not largest CC)
+2. If `init_Dice < 0.30`, fall back to GT seed (catches catastrophic U-Net failures)
+3. Select topmost boundary pixel of the chosen CC (CAMUS) or centroid-nearest pixel (BRISC)
 
 ---
 
-## 5. Design System
+## 5. Results to Date
 
-### Theme — Dark Primary
+### BRISC DuelingDDQN — 25k steps, region-aware reward
 
-Iteris is a research workstation. The dark theme foregrounds the medical images (greyscale scans read best against near-black) and gives the product a distinctive, credible aesthetic.
-
-| Token | Value | Usage |
+| Metric | Value | U-Net baseline |
 |---|---|---|
-| `surface-base` | `#0B0F1A` | Page background — deep navy, not pure black |
-| `surface-card` | `#131929` | Cards, panels, modals |
-| `surface-raised` | `#1C2438` | Hover states, active rows, dropdowns |
-| `border` | `#2A3550` | Dividers, card outlines |
-| `text-primary` | `#E8EDF5` | Headlines, values |
-| `text-secondary` | `#8A9BB8` | Labels, captions, metadata |
-| `accent` | `#3B82F6` | Primary interactive — blue replaces old teal in dark context |
-| `accent-glow` | `rgba(59,130,246,0.15)` | Button halos, focus rings |
+| Test Dice | **0.806** | 0.835 |
+| Test HD95 | **8.76 px** | 8.36 px |
+| Closure rate | **87.6%** | — |
+| Training time | **24 min** (T4) | — |
 
-**Semantic colours**
-- Success `#22C55E` · Warning `#F59E0B` · Error `#EF4444` · Uncertainty `#A78BFA`
+Learning curve was still rising at step 20k — 50k steps now configured. Projected final Dice: ~0.84 (at/above baseline).
 
-**Structure mask colours** (sacred — used ONLY on masks, never reused in UI chrome)
-- LV endo `#00C9A7` · LV epi `#F59E0B` · LA `#F87171`
-- Brain tumour `#F43F5E`
-- (Expansion: RV `#60A5FA` · Myocardium `#A78BFA` · Retinal vessel `#22D3EE` · Skin lesion `#FBBF24`)
+### BRISC DuelingDDQN — 25k steps, OLD reward (pre-redesign, for reference)
 
-**Typography**
-- Sora (headings, landing hero) · DM Sans (body, UI) · JetBrains Mono (metrics, JSON output)
+Val Dice peaked at 0.018 (step 15k) then fell. Confirmed reward hacking. Old reward retired.
 
-**Motion**
-- **Zero animation on clinical output** (masks, predictions, metric readouts)
-- Landing hero: 3D element rotates at 0.3 rpm, subtle particle drift (pauses on Reduce Motion)
-- UI chrome: 150 ms ease-out only
+### CAMUS — not yet run with region-aware reward.
 
 ---
 
-### Landing Page — Design Specification
+## 6. Key Config Values
 
-The landing page is the only page with expressive design. Everything beyond it is a workstation.
+| Config | train_steps | epsilon_decay | T_max | Notes |
+|---|---|---|---|---|
+| `brisc_drl_tumor.yaml` DQN/DuelingDDQN | 50k | 25k | 300 | Bumped after 25k run |
+| `camus_drl_c1.yaml` (LVendo) | 50k | 30k | 400 | ~1.8×/image coverage |
+| `camus_drl_c2.yaml` (LVepi) | 60k | 36k | 480 | Hardest class |
+| `camus_drl_c3.yaml` (LA) | 50k | 30k | 420 | Report separately (artificial mitral closure) |
+| All DDPG | 100k–120k | — | 20 steps | Mask morphology, unchanged |
 
-**Hero section (100 vh, dark `#0B0F1A`)**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  iteris                                         [Research] [Try] │  ← minimal nav
-│                                                                   │
-│          ╔══════════════════════════════╗                        │
-│          ║   [  3D ELEMENT — right ¾  ] ║                        │
-│  See how ║   Rotating 3D brain/heart   ║                        │
-│  AI       ║   mesh or abstract neural   ║                        │
-│  learns  ║   particle cloud in         ║                        │
-│  to see. ║   Three.js / WebGL          ║                        │
-│          ╚══════════════════════════════╝                        │
-│                                                                   │
-│   [ Try Iteris → ]   [ Explore Research ↓ ]                     │
-│    (accent fill)       (ghost, outline)                          │
-│                                                                   │
-│   ↓ scroll                                                       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-3D element options (choose one):
-- **Option A (preferred):** Three.js particle cloud that morphs between a rough tumour boundary and a refined one — literally shows the DRL refinement concept.
-- **Option B:** Rotating stylised brain MRI cross-section with glowing contour lines animated in steps (0→20).
-- **Option C:** Abstract neural attention map — coloured blobs shifting and focusing, suggestive of the MSA mechanism.
-
-**Scroll sections (below hero, full-width, `#0B0F1A` bg)**
-
-1. **The Problem** — Two-column: left text ("U-Net boundaries drift. Pixels get missed."), right: animated before/after mask wipe (U-Net vs GT, no agent — sets up the problem).
-2. **Our Approach** — Animated pipeline diagram: `scan → U-Net → DRL agent (steps 1–N) → refined mask`. Each stage lights up in sequence on scroll entry.
-3. **Results Snapshot** — Dark card grid with key numbers:
-   - CAMUS Mean Dice **0.902** · BRISC Tumour Dice **0.870** (baseline) → DRL target improvement
-   - HD95 reduction numbers once training completes
-4. **How It Works** — 3 icon tiles: `1. Upload scan` · `2. Pick agent` · `3. Watch it learn`
-5. **CTA footer** — Repeats both buttons. "Not a clinical tool. Research demo only."
-
-**Branch destinations**
-- **Try Iteris →** → `/workspace` (the segmentation workstation)
-- **Explore Research ↓** → `/research` (paper abstract, methodology, result tables, training curves, model library)
+All tracing: `num_envs=16`, `batch_size=64`, `embed_dim=128`, `eval_every=5000`, `val_subset=50`.
 
 ---
 
-## 6. Tools & Stack
+## 7. File Map
 
-- **Training:** PyTorch · MONAI (transforms, losses, metrics) · scipy.ndimage (env-side mask ops)
-- **Compute:** Kaggle T4 GPU
-- **Frontend (landing):** React + Three.js for 3D element
-- **Frontend (workspace):** React + Canvas (no Three.js — pure 2D image viewer)
-- **Tracking:** W&B for live training metrics · CSV exports for paper figures
-- **Repo:** github.com/Anfaal26/iteris (private)
-- **Versioning:** All hyperparameters in YAML configs · no hardcoded values · fixed seeds (42)
-
----
-
-## 7. Non-negotiables for the UI
-
-1. **Never present output as clinical.** The product is a research demo. Every page must communicate this.
-2. **Window/Level controls are required** for medical imaging credibility.
-3. **Iteration playback is the differentiator.** DRL step-by-step view is the most polished page.
-4. **Failure cases must be included** in Dataset Explorer. Hiding them undermines research framing.
-5. **Mask colours are sacred** — they encode anatomical/pathological class. Never reuse in buttons or chrome.
-6. **The landing page 3D element must pause/disable** under `prefers-reduced-motion`.
-
----
-
-## 8. Risks the UI Should Defuse
-
-| Risk | UI mitigation |
+| Path | Purpose |
 |---|---|
-| User mistakes demo output for clinical use | Persistent "Research demo · not for clinical use" banner |
-| Agents fail catastrophically on out-of-distribution input | Uncertainty pills · gate Export behind a "low confidence" warning |
-| Iteration playback feels like animation, not signal | Step scrubber (not auto-play) · reward sparkline shows what each step earned |
-| User can't tell which agent is best | "Best Dice" badge dynamically updates · benchmark colour-coding on metric cards |
-| 3D landing element distracts from tool | 3D stays on landing only; workspace is purely functional |
+| `iteris/env_contour.py` | `ContourTracingEnv` (reward + dynamics) + `VectorisedContourEnv` |
+| `iteris/contour_utils.py` | `DIRECTIONS`, `best_overlap_cc`, `seed_point_from_init_mask`, `gt_boundary_edt`, `rasterise_trajectory` |
+| `iteris/drl_training.py` | `_run_contour_training`, `_evaluate_contour`, `ENV_REGISTRY`, `AGENT_REGISTRY` |
+| `iteris/contour_viz.py` | Post-training viz (`plot_trace_comparison`, `plot_trajectory_playback`, etc.) |
+| `iteris/dryrun_viz.py` | `dryrun_report()` — plumbing health-check after §3 |
+| `iteris/agents.py` | `DQNAgent`, `DuelingDQNAgent`, `DDPGAgent` |
+| `iteris/drl_networks.py` | `PatchQNetwork`, `PatchDuelingQNetwork` (tracing); `QNetwork`, `DuelingQNetwork` (DDPG fallback) |
+| `iteris/buffer.py` | `ReplayBuffer` (DDPG), `ContourReplayBuffer` (tracing, float16 patches) |
+| `iteris/env.py` | `SegmentationEnv` — kept for DDPG only |
+| `iteris/warm_start.py` | U-Net inference → init masks; supports `tumor_type_filter` for BRISC |
+| `iteris/ingestion.py` | Dataset builders; BRISC parses `tumor_type` from filename |
+| `iteris/archive/` | Retired code with resurrection instructions |
+| `configs/camus_drl_c{1,2,3}.yaml` | CAMUS per-class DRL configs |
+| `configs/brisc_drl_tumor.yaml` | BRISC binary DRL config (primary) |
+| `configs/brisc_drl_{glioma,meningioma,pituitary}.yaml` | Optional per-type BRISC configs |
+| `notebooks/03{a,b,c}_camus_drl_*.ipynb` | CAMUS per-class training notebooks |
+| `notebooks/04_brisc_drl.ipynb` | BRISC training notebook |
 
 ---
 
-*Last updated 2026-05-29. CAMUS + BRISC Week 1 baselines complete (BRISC re-trained on cleaned labels). DRL training in progress (Week 2).*
+## 8. Settled Decisions (not for re-litigation)
+
+| Decision | Rationale |
+|---|---|
+| DDPG kept as mask-morph baseline | User explicit: "keep DDPG as it is." Continuous comparison for the paper. |
+| 8-direction discrete action | Validated by Edge-Sensitive LV + LV Contouring papers (Yin 2021, Mayy 2021). |
+| Terminal Dice as dominant reward | Trains on exactly the eval metric. Empirically resolved reward hacking. |
+| One-shot coverage invariant | Provably bounds coverage reward; can't be farmed. |
+| `DQN`, `DuelingDDQN`, `DDPG` selectors (no `_TRACE` suffix, no DDQN) | User direction. |
+| Dead code archived, not deleted | User direction. |
+| Best-overlap CC seed (uses GT) | Curriculum aid; documented as paper limitation (Section 9). |
+| BRISC is binary tumor segmentation | Active runs pool all tumor types. Per-type configs available for optional ablation. |
+
+---
+
+## 9. Known Limitations (paper disclosures)
+
+1. GT used at training time for seed selection and terminal reward. Not deployment-grade without retraining the seed selector against a U-Net confidence map.
+2. LA mitral-valve closure is artificial — report LA separately.
+3. Multi-focal lesions (BRISC) not supported — largest-overlap CC only.
+4. No on-policy comparison (PPO) — out of scope.
+5. Reward magnitudes tuned heuristically — systematic grid search is future work.
+
+---
+
+## 10. Decision Log
+
+| Date | Decision |
+|---|---|
+| 2026-05-29 | Paradigm 1 (boundary tracing) selected; refinement kept as DDPG-only paper baseline |
+| 2026-05-30 | Discrete refinement (SegmentationEnvBRISC, DDQN) archived; tracing is the only discrete paradigm |
+| 2026-05-30 | Selector set: `DQN`, `DuelingDDQN`, `DDPG` |
+| 2026-05-30 | Seed Option A: best-overlap CC + GT fallback at init_Dice < 0.30 |
+| 2026-05-30 | Region-aware reward redesign after BRISC reward-hacking confirmed empirically |
+| 2026-05-31 | BRISC confirmed as brain MRI (T1+Gd); z-score normalisation already correct; per-type configs added |
+| 2026-06-01 | BRISC T_max 200→300; centroid seed for BRISC; smoothness penalty added (Phase B complete) |
