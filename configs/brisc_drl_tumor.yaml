@@ -118,8 +118,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    15000
-    train_steps:            25000
+    epsilon_decay_steps:    25000   # 15k→25k: exploration covers full budget
+    train_steps:            50000   # 25k→50k: curve hadn't plateaued at 25k
     num_envs:               16
     grad_updates:           1
     eval_every:             5000
@@ -157,8 +157,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    15000
-    train_steps:            25000
+    epsilon_decay_steps:    25000   # 15k→25k: exploration covers full budget
+    train_steps:            50000   # 25k→50k: curve hadn't plateaued at 25k
     num_envs:               16
     grad_updates:           1
     eval_every:             5000
