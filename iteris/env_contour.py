@@ -80,6 +80,7 @@ class ContourTracingEnv:
         reward_closure_bonus: float    = 2.0,     # scales linearly with Dice once
                                                   # the min-Dice gate is passed.
         seed_method: str = 'topmost',
+        reward_smoothness_penalty: float   = -0.02,   # applied when |Δθ| > 45°
         action_type: str = 'discrete',   # accepted for interface parity; only 'discrete'
     ):
         assert action_type == 'discrete', 'ContourTracingEnv is discrete-only'
@@ -103,6 +104,7 @@ class ContourTracingEnv:
         self.reward_closure_min_dice = float(reward_closure_min_dice)
         self.reward_closure_bonus    = float(reward_closure_bonus)
         self.seed_method             = seed_method
+        self.reward_smoothness_penalty = float(reward_smoothness_penalty)
 
         # Static within an episode: init-mask boundary as a full (H, W) edge mask.
         edge_px = cu.boundary_edge_pixels(cu.largest_cc(self.init_mask))
@@ -155,6 +157,7 @@ class ContourTracingEnv:
         # trace (any step within coverage_tolerance counts).  Each pixel only
         # rewards once — prevents reward-farming by oscillating on one spot.
         self._covered = np.zeros((self.H, self.W), dtype=np.uint8)
+        self._prev_action: int = -1   # no previous action at episode start
         self.done = False
         return self._extract_patch()
 
@@ -214,6 +217,18 @@ class ContourTracingEnv:
         reward += self.reward_off_boundary * min(dist, self.reward_off_boundary_cap)
         info['dist']       = dist
         info['n_new_cov']  = int(n_new)
+
+        # (3) Directional smoothness — penalise sharp turns (|Δθ| > 45°).
+        #     Allows normal curvature; discourages zigzag traces.
+        if self._prev_action >= 0:
+            d_curr = cu.DIRECTIONS[a].astype(np.float64)
+            d_prev = cu.DIRECTIONS[self._prev_action].astype(np.float64)
+            cos_dt = np.dot(d_curr, d_prev) / (
+                np.linalg.norm(d_curr) * np.linalg.norm(d_prev))
+            dtheta = np.degrees(np.arccos(np.clip(cos_dt, -1.0, 1.0)))
+            if dtheta > 45.0:
+                reward += self.reward_smoothness_penalty * ((dtheta - 45.0) / 135.0)
+        self._prev_action = a
 
         # ── Terminal B/C: closure or timeout — score the enclosed REGION ──────
         done       = False

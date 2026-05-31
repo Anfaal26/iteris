@@ -94,8 +94,9 @@ agents:
     patch_size:             64
     max_trace_length:       200
     closure_tolerance:      4        # looser: irregular tumour boundaries
-    min_perimeter_steps:    30
-    seed_method:            topmost
+    min_perimeter_steps:    20
+
+    reward_smoothness_penalty: -0.02       # penalty per step when |delta_theta| > 45 deg
     # ── Region-aware reward (Paradigm-1 redesign) ──
     # Per-step (small, dense):
     coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
@@ -132,8 +133,9 @@ agents:
     patch_size:             64
     max_trace_length:       200
     closure_tolerance:      4
-    min_perimeter_steps:    30
-    seed_method:            topmost
+    min_perimeter_steps:    20
+
+    reward_smoothness_penalty: -0.02       # penalty per step when |delta_theta| > 45 deg
     # ── Region-aware reward (Paradigm-1 redesign) ──
     # Per-step (small, dense):
     coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel

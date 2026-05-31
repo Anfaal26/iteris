@@ -158,7 +158,7 @@ _CONTOUR_ENV_KEYS = (
     'coverage_tolerance', 'reward_step_cost', 'reward_coverage_bonus',
     'reward_off_boundary', 'reward_off_boundary_cap', 'reward_offimage',
     'reward_terminal_dice', 'reward_closure_min_dice', 'reward_closure_bonus',
-    'seed_method',
+    'seed_method', 'reward_smoothness_penalty',
 )
 
 

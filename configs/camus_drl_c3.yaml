@@ -73,7 +73,8 @@ agents:
     max_trace_length:       420
     closure_tolerance:      3
     min_perimeter_steps:    55
-    seed_method:            topmost
+
+    reward_smoothness_penalty: -0.02       # penalty per step when |delta_theta| > 45 deg
     # ── Region-aware reward (Paradigm-1 redesign) ──
     # Per-step (small, dense):
     coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
@@ -95,8 +96,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    18000
-    train_steps:            30000
+    epsilon_decay_steps:    30000
+    train_steps:            50000
     num_envs:               16
     grad_updates:           1
     eval_every:             5000
@@ -111,7 +112,8 @@ agents:
     max_trace_length:       420
     closure_tolerance:      3
     min_perimeter_steps:    55
-    seed_method:            topmost
+
+    reward_smoothness_penalty: -0.02       # penalty per step when |delta_theta| > 45 deg
     # ── Region-aware reward (Paradigm-1 redesign) ──
     # Per-step (small, dense):
     coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
@@ -133,8 +135,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    18000
-    train_steps:            30000
+    epsilon_decay_steps:    30000
+    train_steps:            50000
     num_envs:               16
     grad_updates:           1
     eval_every:             5000

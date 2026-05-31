@@ -126,7 +126,27 @@ def seed_point_from_init_mask(
         order = np.lexsort((edge[:, 1], edge[:, 0]))
         y, x = edge[order[0]]
         return int(y), int(x)
+    if method == 'centroid':
+        return centroid_boundary_seed(cc)
     raise ValueError(f'Unknown seed method: {method!r}')
+
+
+def centroid_boundary_seed(cc: np.ndarray) -> Tuple[int, int]:
+    """Boundary pixel of ``cc`` closest to the CC centroid.
+
+    Rotation/translation-invariant — consistent across lesion locations.
+    Designed for BRISC irregular lesions where topmost-pixel seeding fails.
+    """
+    ys, xs = np.nonzero(cc)
+    if ys.size == 0:
+        raise ValueError('centroid_boundary_seed: empty CC')
+    cy, cx = ys.mean(), xs.mean()
+    edge = boundary_edge_pixels(cc)
+    if edge.shape[0] == 0:
+        raise ValueError('centroid_boundary_seed: CC has no boundary')
+    dists = np.sqrt((edge[:, 0] - cy) ** 2 + (edge[:, 1] - cx) ** 2)
+    idx = int(np.argmin(dists))
+    return int(edge[idx, 0]), int(edge[idx, 1])
 
 
 def gt_boundary_edt(gt_mask: np.ndarray) -> np.ndarray:
