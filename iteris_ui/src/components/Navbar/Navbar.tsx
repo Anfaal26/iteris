@@ -51,9 +51,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const isDark = variant === 'dark';
 
+  // Frosted glass uses the landing-bg token at 85% opacity (spec §10 Navbar scroll behaviour).
+  // CSS variable interpolation is used here so no raw hex appears in component code.
   const frostedStyle: React.CSSProperties = scrolled
     ? {
-        backgroundColor: 'rgba(5,7,12,0.85)',
+        backgroundColor: 'color-mix(in srgb, var(--color-landing-bg) 85%, transparent)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border)',

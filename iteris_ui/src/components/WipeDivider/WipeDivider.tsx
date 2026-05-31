@@ -122,7 +122,7 @@ export const WipeDivider: React.FC<WipeDividerProps> = ({
           'hover:scale-110 focus-visible:scale-110',
         ].join(' ')}
         style={{
-          boxShadow: '0 0 0 2px var(--color-accent), 0 4px 12px rgba(0,0,0,0.3)',
+          boxShadow: '0 0 0 2px var(--color-accent), 0 4px 12px var(--color-border)',
         }}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">

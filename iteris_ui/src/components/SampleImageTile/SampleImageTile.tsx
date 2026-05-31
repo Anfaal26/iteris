@@ -88,7 +88,7 @@ export const SampleImageTile: React.FC<SampleImageTileProps> = ({
       </div>
 
       {/* Badge overlay */}
-      <div className="absolute bottom-0 inset-x-0 p-1.5 flex flex-wrap gap-1 bg-gradient-to-t from-black/60 to-transparent">
+      <div className="absolute bottom-0 inset-x-0 p-1.5 flex flex-wrap gap-1 bg-gradient-to-t from-landing-bg/60 to-transparent">
         <span className="px-1 py-0.5 rounded text-xs font-body bg-surface/80 text-muted capitalize">
           {image.modality}
         </span>

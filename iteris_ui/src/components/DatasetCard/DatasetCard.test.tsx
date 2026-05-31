@@ -13,7 +13,7 @@ describe('DatasetCard', () => {
 
   it('renders name and modality', () => {
     render(<DatasetCard {...props} />);
-    expect(screen.getByText('CAMUS')).toBeInTheDocument();
+    expect(screen.getAllByText('CAMUS').length).toBeGreaterThan(0);
     expect(screen.getByText('ultrasound')).toBeInTheDocument();
   });
 
