@@ -82,7 +82,7 @@ agents:
     patch_size:             64
     max_trace_length:       400
     closure_tolerance:      3
-    min_perimeter_steps:    50
+    min_perimeter_steps:    100  # LVendo perimeter ~250px; 100 = 40% min before closure
 
     # ── Precision-tuned reward ──────────────────────────────────────────────────
     # Per-step:
@@ -125,7 +125,7 @@ agents:
     patch_size:             64
     max_trace_length:       400
     closure_tolerance:      3
-    min_perimeter_steps:    50
+    min_perimeter_steps:    100  # LVendo perimeter ~250px; 100 = 40% min before closure
 
     # ── Precision-tuned reward ──────────────────────────────────────────────────
     # Per-step:

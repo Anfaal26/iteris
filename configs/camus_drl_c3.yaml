@@ -72,7 +72,7 @@ agents:
     patch_size:             64
     max_trace_length:       420
     closure_tolerance:      3
-    min_perimeter_steps:    55
+    min_perimeter_steps:    110  # LA perimeter ~280px; 110 = 40% min before closure
 
     # ── Precision-tuned reward ──────────────────────────────────────────────────
     reward_smoothness_penalty: -0.01
@@ -110,7 +110,7 @@ agents:
     patch_size:             64
     max_trace_length:       420
     closure_tolerance:      3
-    min_perimeter_steps:    55
+    min_perimeter_steps:    110  # LA perimeter ~280px; 110 = 40% min before closure
 
     # ── Precision-tuned reward ──────────────────────────────────────────────────
     reward_smoothness_penalty: -0.01
