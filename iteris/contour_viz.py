@@ -26,8 +26,9 @@ _ENV_KEYS = (
     'patch_size', 'max_trace_length', 'closure_tolerance', 'min_perimeter_steps',
     'coverage_tolerance', 'reward_step_cost', 'reward_coverage_bonus',
     'reward_off_boundary', 'reward_off_boundary_cap', 'reward_offimage',
-    'reward_terminal_dice', 'reward_closure_min_dice', 'reward_closure_bonus',
-    'seed_method',
+    'reward_terminal_dice', 'reward_boundary_precision',
+    'reward_closure_min_dice', 'reward_closure_bonus',
+    'seed_method', 'reward_smoothness_penalty',
 )
 
 

@@ -63,24 +63,41 @@ class ContourTracingEnv:
         min_perimeter_steps: int = 50,
         # ── region-aware reward structure (replaces the −dist + flat-closure
         #    reward that produced reward-hacking on the first BRISC run). ──
-        coverage_tolerance: float = 1.5,    # px — a step "covers" a GT boundary pixel
-                                            # within this distance (≤1.5 ≈ 1-px ring).
+        coverage_tolerance: float = 1.0,    # px — a step "covers" a GT boundary pixel
+                                            # within this distance.  1.0px is tighter
+                                            # than the original 1.5px: forces the agent
+                                            # to stay closer to the actual boundary
+                                            # rather than earning coverage by passing
+                                            # nearby.  BRISC and CAMUS both benefit.
         reward_step_cost: float        = -0.01,   # time pressure
-        reward_coverage_bonus: float   =  0.20,   # per NEW GT boundary pixel reached
+        reward_coverage_bonus: float   =  0.25,   # per NEW GT boundary pixel reached
+                                                  # (raised from 0.20 to compensate for
+                                                  # the tighter coverage_tolerance)
         reward_off_boundary: float     = -0.05,   # small distance gradient (per px,
                                                   # capped) — guides the patch CNN
                                                   # back toward the boundary
         reward_off_boundary_cap: float =  5.0,    # max px contribution per step
         reward_offimage: float = -10.0,
-        reward_terminal_dice: float    = 10.0,    # ★ DOMINANT term: terminal mask
+        reward_terminal_dice: float    = 10.0,    # ★ DOMINANT area term: terminal
                                                   # Dice vs GT — direct objective.
+        reward_boundary_precision: float = 3.0,  # ★ BOUNDARY term: terminal coverage
+                                                  # fraction — fraction of GT boundary
+                                                  # pixels visited during the trace.
+                                                  # Complements Dice: rewards adhering
+                                                  # to the boundary shape, not just
+                                                  # enclosing the right area.
         reward_closure_min_dice: float = 0.20,    # closures with Dice < this earn
                                                   # ZERO closure bonus (prevents
                                                   # the "tiny empty loop" exploit).
         reward_closure_bonus: float    = 2.0,     # scales linearly with Dice once
                                                   # the min-Dice gate is passed.
         seed_method: str = 'topmost',
-        reward_smoothness_penalty: float   = -0.02,   # applied when |Δθ| > 45°
+        reward_smoothness_penalty: float   = 0.0,   # angular-deviation penalty.
+                                                    # Default OFF: irregular tumor
+                                                    # shapes need sharp turns to follow
+                                                    # protrusions/concavities.  Enable
+                                                    # (e.g. -0.01) for smooth CAMUS
+                                                    # structures only.
         action_type: str = 'discrete',   # accepted for interface parity; only 'discrete'
     ):
         assert action_type == 'discrete', 'ContourTracingEnv is discrete-only'
@@ -100,10 +117,11 @@ class ContourTracingEnv:
         self.reward_off_boundary     = float(reward_off_boundary)
         self.reward_off_boundary_cap = float(reward_off_boundary_cap)
         self.reward_offimage         = float(reward_offimage)
-        self.reward_terminal_dice    = float(reward_terminal_dice)
-        self.reward_closure_min_dice = float(reward_closure_min_dice)
-        self.reward_closure_bonus    = float(reward_closure_bonus)
-        self.seed_method             = seed_method
+        self.reward_terminal_dice      = float(reward_terminal_dice)
+        self.reward_boundary_precision = float(reward_boundary_precision)
+        self.reward_closure_min_dice   = float(reward_closure_min_dice)
+        self.reward_closure_bonus      = float(reward_closure_bonus)
+        self.seed_method               = seed_method
         self.reward_smoothness_penalty = float(reward_smoothness_penalty)
 
         # Static within an episode: init-mask boundary as a full (H, W) edge mask.
@@ -242,13 +260,26 @@ class ContourTracingEnv:
             done = True
 
         if done:
-            # Compute terminal Dice of the rasterised trajectory polygon vs GT.
-            # This is the SAME signal the eval uses — train-eval alignment.
+            # ── Terminal Dice: area overlap (same signal used at eval) ──────────
             from .env import dice_score as _dice
             mask = cu.rasterise_trajectory(self.trajectory, self.H, self.W)
             terminal_d = float(_dice(mask, self.gt))
             reward += self.reward_terminal_dice * terminal_d
-            # Closure bonus: gated by min Dice so a tiny empty loop earns nothing.
+
+            # ── Boundary precision: fraction of GT boundary pixels visited ──────
+            # Complements Dice.  Dice rewards enclosing the right *area*; this
+            # term rewards actually *walking* the GT boundary.  An agent that
+            # draws a smooth blob can achieve high Dice while skipping protrusions
+            # and concavities — coverage_fraction penalises that directly.
+            # O(1) — just sums the _covered mask built during the episode.
+            if self._gt_boundary_total > 0:
+                coverage_fraction = float(self._covered.sum()) / self._gt_boundary_total
+                reward += self.reward_boundary_precision * coverage_fraction
+                info['coverage_fraction'] = coverage_fraction
+            else:
+                info['coverage_fraction'] = 1.0
+
+            # ── Closure bonus: gated by min Dice (anti-empty-loop) ──────────────
             if info['closed'] and terminal_d >= self.reward_closure_min_dice:
                 reward += self.reward_closure_bonus * terminal_d
             info['terminal_dice'] = terminal_d

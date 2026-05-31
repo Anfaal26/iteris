@@ -98,19 +98,26 @@ agents:
     closure_tolerance:      4        # looser: irregular tumour boundaries
     min_perimeter_steps:    20
 
-    reward_smoothness_penalty: -0.02       # penalty per step when |delta_theta| > 45 deg
-    # ── Region-aware reward (Paradigm-1 redesign) ──
-    # Per-step (small, dense):
-    coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
-    reward_step_cost:        -0.01      # mild time pressure
-    reward_coverage_bonus:    0.20      # +0.20 per NEW GT-boundary pixel reached
-    reward_off_boundary:     -0.05      # soft gradient toward the boundary (per px, capped)
-    reward_off_boundary_cap:  5.0
-    # Terminal (DOMINANT — direct objective alignment):
-    reward_terminal_dice:    10.0       # +10·Dice(rasterised_mask, gt) at episode end
-    reward_closure_min_dice:  0.20      # closures with Dice < this earn ZERO closure bonus
-    reward_closure_bonus:     2.0       # +2·Dice on closure (only if min-Dice gate passed)
-    reward_offimage:        -10.0       # single hard negative on walk-off
+    # ── Precision-tuned reward (fix for smoothed-peak / engulfed-segment issue) ──
+    # Per-step:
+    reward_smoothness_penalty:  0.0     # OFF for BRISC — irregular tumor shapes need
+                                        # sharp turns to trace protrusions/concavities.
+                                        # Keeping this non-zero forces smooth arcs that
+                                        # miss fine boundary features.
+    coverage_tolerance:       1.0       # tighter (was 1.5px): agent must be ON the
+                                        # boundary to earn the coverage bonus, not nearby.
+    reward_step_cost:         -0.01     # mild time pressure
+    reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
+    reward_off_boundary:      -0.05     # soft gradient toward boundary
+    reward_off_boundary_cap:   5.0
+    # Terminal:
+    reward_terminal_dice:     10.0      # area overlap — main objective
+    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
+                                        # during the trace. Rewards shape adherence, not
+                                        # just area. Penalises skipping protrusions.
+    reward_closure_min_dice:   0.20     # anti-empty-loop gate
+    reward_closure_bonus:      2.0      # +2·Dice on proper closure
+    reward_offimage:          -10.0     # hard off-image penalty
     lr:                     1.0e-4
     gamma:                  0.97
     tau:                    0.005
@@ -139,19 +146,26 @@ agents:
     closure_tolerance:      4
     min_perimeter_steps:    20
 
-    reward_smoothness_penalty: -0.02       # penalty per step when |delta_theta| > 45 deg
-    # ── Region-aware reward (Paradigm-1 redesign) ──
-    # Per-step (small, dense):
-    coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
-    reward_step_cost:        -0.01      # mild time pressure
-    reward_coverage_bonus:    0.20      # +0.20 per NEW GT-boundary pixel reached
-    reward_off_boundary:     -0.05      # soft gradient toward the boundary (per px, capped)
-    reward_off_boundary_cap:  5.0
-    # Terminal (DOMINANT — direct objective alignment):
-    reward_terminal_dice:    10.0       # +10·Dice(rasterised_mask, gt) at episode end
-    reward_closure_min_dice:  0.20      # closures with Dice < this earn ZERO closure bonus
-    reward_closure_bonus:     2.0       # +2·Dice on closure (only if min-Dice gate passed)
-    reward_offimage:        -10.0       # single hard negative on walk-off
+    # ── Precision-tuned reward (fix for smoothed-peak / engulfed-segment issue) ──
+    # Per-step:
+    reward_smoothness_penalty:  0.0     # OFF for BRISC — irregular tumor shapes need
+                                        # sharp turns to trace protrusions/concavities.
+                                        # Keeping this non-zero forces smooth arcs that
+                                        # miss fine boundary features.
+    coverage_tolerance:       1.0       # tighter (was 1.5px): agent must be ON the
+                                        # boundary to earn the coverage bonus, not nearby.
+    reward_step_cost:         -0.01     # mild time pressure
+    reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
+    reward_off_boundary:      -0.05     # soft gradient toward boundary
+    reward_off_boundary_cap:   5.0
+    # Terminal:
+    reward_terminal_dice:     10.0      # area overlap — main objective
+    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
+                                        # during the trace. Rewards shape adherence, not
+                                        # just area. Penalises skipping protrusions.
+    reward_closure_min_dice:   0.20     # anti-empty-loop gate
+    reward_closure_bonus:      2.0      # +2·Dice on proper closure
+    reward_offimage:          -10.0     # hard off-image penalty
     lr:                     1.0e-4
     gamma:                  0.97
     tau:                    0.005
