@@ -61,12 +61,24 @@ class ContourTracingEnv:
         max_trace_length: int = 400,
         closure_tolerance: float = 3.0,
         min_perimeter_steps: int = 50,
-        boundary_bonus_distance: float = 1.5,
-        reward_boundary_bonus: float = 0.5,
+        # ── region-aware reward structure (replaces the −dist + flat-closure
+        #    reward that produced reward-hacking on the first BRISC run). ──
+        coverage_tolerance: float = 1.5,    # px — a step "covers" a GT boundary pixel
+                                            # within this distance (≤1.5 ≈ 1-px ring).
+        reward_step_cost: float        = -0.01,   # time pressure
+        reward_coverage_bonus: float   =  0.20,   # per NEW GT boundary pixel reached
+        reward_off_boundary: float     = -0.05,   # small distance gradient (per px,
+                                                  # capped) — guides the patch CNN
+                                                  # back toward the boundary
+        reward_off_boundary_cap: float =  5.0,    # max px contribution per step
         reward_offimage: float = -10.0,
-        reward_closure: float = 5.0,
-        reward_length_penalty: float = -5.0,
-        max_distance_penalty: float = 10.0,
+        reward_terminal_dice: float    = 10.0,    # ★ DOMINANT term: terminal mask
+                                                  # Dice vs GT — direct objective.
+        reward_closure_min_dice: float = 0.20,    # closures with Dice < this earn
+                                                  # ZERO closure bonus (prevents
+                                                  # the "tiny empty loop" exploit).
+        reward_closure_bonus: float    = 2.0,     # scales linearly with Dice once
+                                                  # the min-Dice gate is passed.
         seed_method: str = 'topmost',
         action_type: str = 'discrete',   # accepted for interface parity; only 'discrete'
     ):
@@ -81,12 +93,15 @@ class ContourTracingEnv:
         self.max_trace_length        = int(max_trace_length)
         self.closure_tolerance       = float(closure_tolerance)
         self.min_perimeter_steps     = int(min_perimeter_steps)
-        self.boundary_bonus_distance = float(boundary_bonus_distance)
-        self.reward_boundary_bonus   = float(reward_boundary_bonus)
+        self.coverage_tolerance      = float(coverage_tolerance)
+        self.reward_step_cost        = float(reward_step_cost)
+        self.reward_coverage_bonus   = float(reward_coverage_bonus)
+        self.reward_off_boundary     = float(reward_off_boundary)
+        self.reward_off_boundary_cap = float(reward_off_boundary_cap)
         self.reward_offimage         = float(reward_offimage)
-        self.reward_closure          = float(reward_closure)
-        self.reward_length_penalty   = float(reward_length_penalty)
-        self.max_distance_penalty    = float(max_distance_penalty)
+        self.reward_terminal_dice    = float(reward_terminal_dice)
+        self.reward_closure_min_dice = float(reward_closure_min_dice)
+        self.reward_closure_bonus    = float(reward_closure_bonus)
         self.seed_method             = seed_method
 
         # Static within an episode: init-mask boundary as a full (H, W) edge mask.
@@ -94,6 +109,14 @@ class ContourTracingEnv:
         self._init_edge_full = np.zeros((self.H, self.W), dtype=np.uint8)
         if edge_px.shape[0] > 0:
             self._init_edge_full[edge_px[:, 0], edge_px[:, 1]] = 1
+
+        # Static within an episode: GT-boundary pixel set, used for "coverage"
+        # (rewarding the agent for visiting NEW pixels of the true boundary).
+        gt_edge_px = cu.boundary_edge_pixels(cu.largest_cc(self.gt))
+        self._gt_boundary_mask = np.zeros((self.H, self.W), dtype=np.uint8)
+        if gt_edge_px.shape[0] > 0:
+            self._gt_boundary_mask[gt_edge_px[:, 0], gt_edge_px[:, 1]] = 1
+        self._gt_boundary_total = int(self._gt_boundary_mask.sum())
 
         self.action_type = 'discrete'
         self.state_shape = (4, self.patch_size, self.patch_size)
@@ -128,48 +151,115 @@ class ContourTracingEnv:
         self._visited[self.seed_point[0], self.seed_point[1]] = 1
         # Precompute GT-boundary EDT once — O(1) per-step reward lookups after this.
         self._gt_edt = cu.gt_boundary_edt(self.gt)
+        # Coverage tracking: which GT-boundary pixels have been "reached" by the
+        # trace (any step within coverage_tolerance counts).  Each pixel only
+        # rewards once — prevents reward-farming by oscillating on one spot.
+        self._covered = np.zeros((self.H, self.W), dtype=np.uint8)
         self.done = False
         return self._extract_patch()
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
+        """Region-aware reward (replaces the old −dist + flat-closure reward).
+
+        Per-step (small, dense, shape only):
+            +reward_step_cost                 (time pressure)
+            +reward_coverage_bonus  for each NEW GT-boundary pixel reached
+                                    (within coverage_tolerance px of the step)
+            +reward_off_boundary · min(dist, cap)
+                                    (gentle gradient back toward the boundary;
+                                     reward_off_boundary is negative)
+
+        Terminal (DOMINANT — direct objective alignment):
+            +reward_terminal_dice · Dice(rasterised_mask, gt)
+            +reward_closure_bonus · Dice         if closed AND Dice >= min
+                                                 (else 0 — kills "tiny empty loop")
+            reward_offimage                     on walk-off (single negative event)
+
+        The terminal Dice term means the agent is *trained* on the metric it is
+        *scored* on. A tiny empty closure earns ~0 Dice → ~0 reward; tracing
+        the true perimeter earns ~10. The optimal policy IS the segmentation.
+        """
         a = int(action)
         dy, dx = cu.DIRECTIONS[a]
         new_point = (self.current_point[0] + int(dy), self.current_point[1] + int(dx))
 
         info: Dict = {'closed': False, 'offimage': False, 'timeout': False}
 
-        # Terminal: walked off the image. Do not advance the point.
+        # ── Terminal A: walked off the image ──────────────────────────────────
+        # Single hard negative; no terminal-Dice because the trace is invalid.
         if cu.is_off_image(new_point, self.H, self.W):
-            info['offimage'] = True
-            self.done = True
+            info['offimage']     = True
+            info['terminal_dice']= 0.0
+            self.done            = True
             info['trace_length'] = len(self.trajectory)
-            return self._extract_patch(), self.reward_offimage, True, info
+            return self._extract_patch(), float(self.reward_offimage), True, info
 
-        # Advance.
+        # ── Advance ────────────────────────────────────────────────────────────
         self.current_point = new_point
         self.trajectory.append(new_point)
         self._visited[new_point[0], new_point[1]] = 1
 
-        dist = float(self._gt_edt[new_point[0], new_point[1]])
-        reward = -min(dist, self.max_distance_penalty)
-        if dist < self.boundary_bonus_distance:
-            reward += self.reward_boundary_bonus
-        info['dist'] = dist
+        # ── Per-step reward ────────────────────────────────────────────────────
+        reward = self.reward_step_cost
 
-        done = False
+        # (1) Coverage — reward newly-reached GT-boundary pixels in a small
+        #     window around the step. Each GT pixel rewards at most once.
+        n_new = self._mark_new_coverage(new_point[0], new_point[1])
+        if n_new > 0:
+            reward += self.reward_coverage_bonus * n_new
+
+        # (2) Soft distance gradient — keeps the CNN's gradient informative
+        #     between coverage events. Capped so it cannot dominate.
+        dist = float(self._gt_edt[new_point[0], new_point[1]])
+        reward += self.reward_off_boundary * min(dist, self.reward_off_boundary_cap)
+        info['dist']       = dist
+        info['n_new_cov']  = int(n_new)
+
+        # ── Terminal B/C: closure or timeout — score the enclosed REGION ──────
+        done       = False
+        terminal_d = None
         if cu.is_closed(self.trajectory, self.seed_point,
                         self.closure_tolerance, self.min_perimeter_steps):
-            reward += self.reward_closure
             info['closed'] = True
             done = True
         elif len(self.trajectory) >= self.max_trace_length:
-            reward += self.reward_length_penalty
             info['timeout'] = True
             done = True
+
+        if done:
+            # Compute terminal Dice of the rasterised trajectory polygon vs GT.
+            # This is the SAME signal the eval uses — train-eval alignment.
+            from .env import dice_score as _dice
+            mask = cu.rasterise_trajectory(self.trajectory, self.H, self.W)
+            terminal_d = float(_dice(mask, self.gt))
+            reward += self.reward_terminal_dice * terminal_d
+            # Closure bonus: gated by min Dice so a tiny empty loop earns nothing.
+            if info['closed'] and terminal_d >= self.reward_closure_min_dice:
+                reward += self.reward_closure_bonus * terminal_d
+            info['terminal_dice'] = terminal_d
 
         self.done = done
         info['trace_length'] = len(self.trajectory)
         return self._extract_patch(), float(reward), done, info
+
+    def _mark_new_coverage(self, y: int, x: int) -> int:
+        """Mark GT-boundary pixels within ``coverage_tolerance`` of (y, x) as
+        covered. Returns the count of pixels newly covered by THIS step."""
+        if self._gt_boundary_total == 0:
+            return 0
+        r = int(np.ceil(self.coverage_tolerance))
+        y0, y1 = max(0, y - r), min(self.H, y + r + 1)
+        x0, x1 = max(0, x - r), min(self.W, x + r + 1)
+        # Cheap L_inf cover (1-px ring) — sufficient at r=1.5 and avoids per-step
+        # distance computation. For larger r we could mask by L2, but this
+        # tolerance is intentionally small so the cheap window suffices.
+        sub_gt  = self._gt_boundary_mask[y0:y1, x0:x1]
+        sub_cov = self._covered[y0:y1, x0:x1]
+        new_cov = sub_gt & (1 - sub_cov)
+        n_new   = int(new_cov.sum())
+        if n_new > 0:
+            sub_cov |= new_cov   # write-through (same memory as self._covered)
+        return n_new
 
     # ── state construction ──────────────────────────────────────────────────────
 

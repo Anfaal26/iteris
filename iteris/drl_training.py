@@ -155,8 +155,9 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
 
 _CONTOUR_ENV_KEYS = (
     'patch_size', 'max_trace_length', 'closure_tolerance', 'min_perimeter_steps',
-    'boundary_bonus_distance', 'reward_boundary_bonus', 'reward_offimage',
-    'reward_closure', 'reward_length_penalty', 'max_distance_penalty',
+    'coverage_tolerance', 'reward_step_cost', 'reward_coverage_bonus',
+    'reward_off_boundary', 'reward_off_boundary_cap', 'reward_offimage',
+    'reward_terminal_dice', 'reward_closure_min_dice', 'reward_closure_bonus',
     'seed_method',
 )
 

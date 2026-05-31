@@ -83,13 +83,19 @@ agents:
     max_trace_length:       400
     closure_tolerance:      3
     min_perimeter_steps:    50
-    boundary_bonus_distance: 1.5
-    reward_boundary_bonus:  0.5
-    reward_closure:         5.0
-    reward_offimage:       -10.0
-    reward_length_penalty: -5.0
-    max_distance_penalty:   10.0
     seed_method:            topmost
+    # ── Region-aware reward (Paradigm-1 redesign) ──
+    # Per-step (small, dense):
+    coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
+    reward_step_cost:        -0.01      # mild time pressure
+    reward_coverage_bonus:    0.20      # +0.20 per NEW GT-boundary pixel reached
+    reward_off_boundary:     -0.05      # soft gradient toward the boundary (per px, capped)
+    reward_off_boundary_cap:  5.0
+    # Terminal (DOMINANT — direct objective alignment):
+    reward_terminal_dice:    10.0       # +10·Dice(rasterised_mask, gt) at episode end
+    reward_closure_min_dice:  0.20      # closures with Dice < this earn ZERO closure bonus
+    reward_closure_bonus:     2.0       # +2·Dice on closure (only if min-Dice gate passed)
+    reward_offimage:        -10.0       # single hard negative on walk-off
     lr:                     1.0e-4
     gamma:                  0.99
     tau:                    0.005
@@ -116,13 +122,19 @@ agents:
     max_trace_length:       400
     closure_tolerance:      3
     min_perimeter_steps:    50
-    boundary_bonus_distance: 1.5
-    reward_boundary_bonus:  0.5
-    reward_closure:         5.0
-    reward_offimage:       -10.0
-    reward_length_penalty: -5.0
-    max_distance_penalty:   10.0
     seed_method:            topmost
+    # ── Region-aware reward (Paradigm-1 redesign) ──
+    # Per-step (small, dense):
+    coverage_tolerance:      1.5        # px window in which a step "covers" a GT boundary pixel
+    reward_step_cost:        -0.01      # mild time pressure
+    reward_coverage_bonus:    0.20      # +0.20 per NEW GT-boundary pixel reached
+    reward_off_boundary:     -0.05      # soft gradient toward the boundary (per px, capped)
+    reward_off_boundary_cap:  5.0
+    # Terminal (DOMINANT — direct objective alignment):
+    reward_terminal_dice:    10.0       # +10·Dice(rasterised_mask, gt) at episode end
+    reward_closure_min_dice:  0.20      # closures with Dice < this earn ZERO closure bonus
+    reward_closure_bonus:     2.0       # +2·Dice on closure (only if min-Dice gate passed)
+    reward_offimage:        -10.0       # single hard negative on walk-off
     lr:                     1.0e-4
     gamma:                  0.99
     tau:                    0.005

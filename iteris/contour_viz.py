@@ -19,10 +19,15 @@ from .env_contour  import ContourTracingEnv
 from .contour_utils import DIRECTION_NAMES
 
 # Keys ContourTracingEnv accepts — used to filter a flat cfg into env kwargs.
+# Region-aware reward (replaces the −dist + flat-closure reward that produced
+# reward-hacking on the first BRISC run). Old keys silently dropped if a stale
+# YAML still has them (whitelist filter).
 _ENV_KEYS = (
     'patch_size', 'max_trace_length', 'closure_tolerance', 'min_perimeter_steps',
-    'boundary_bonus_distance', 'reward_boundary_bonus', 'reward_offimage',
-    'reward_closure', 'reward_length_penalty', 'max_distance_penalty', 'seed_method',
+    'coverage_tolerance', 'reward_step_cost', 'reward_coverage_bonus',
+    'reward_off_boundary', 'reward_off_boundary_cap', 'reward_offimage',
+    'reward_terminal_dice', 'reward_closure_min_dice', 'reward_closure_bonus',
+    'seed_method',
 )
 
 
