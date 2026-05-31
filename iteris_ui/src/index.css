@@ -1,0 +1,113 @@
+/*
+ * ITERIS DESIGN SYSTEM — CANONICAL TOKENS (spec §10)
+ * --------------------------------------------------------------------------
+ * Every colour, font, motion duration, and z-index in the app derives from a
+ * variable defined here. Components must NEVER inline a hex value, px font size,
+ * or ms duration — they reference these tokens (directly, via Tailwind's theme,
+ * or via the typed mirror in src/tokens). This file is the single source of truth.
+ */
+
+:root {
+  /* ---- Clinical / light theme (Research + Workspace default) ---- */
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-text: #0f1923;
+  --color-muted: #64748b;
+  --color-border: #e2e8f0;
+  --color-accent: #0a7ea4;
+  --color-success: #16a34a; /* above baseline  */
+  --color-warning: #d97706; /* near baseline   */
+  --color-error: #dc2626; /* below baseline  */
+  --color-uncertainty: #7c3aed; /* confidence overlays */
+
+  /* ---- Landing page only (dark) ---- */
+  --color-landing-bg: #05070c;
+  --color-landing-text: #ffffff;
+  --color-landing-footer: #04050a;
+  --color-gradient-a: #0adcff;
+  --color-gradient-b: #4d8fff;
+  --color-gradient-c: #8c50f0;
+
+  /* ---- Mask colours — RESERVED. Never reused in UI chrome. ---- */
+  --mask-lv-endo: #00c9a7;
+  --mask-lv-epi: #f59e0b;
+  --mask-la: #f87171;
+  --mask-glioma: #818cf8;
+  --mask-meningioma: #34d399;
+  --mask-pituitary: #fb923c;
+
+  /* ---- Typography ---- */
+  --font-heading: 'Sora', system-ui, sans-serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* ---- Motion (spec §10 motion rules) ---- */
+  --motion-tooltip: 100ms;
+  --motion-panel: 150ms;
+  --motion-slide: 200ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---- Layout ---- */
+  --navbar-height: 56px;
+  --control-panel-width: 300px;
+  --control-panel-collapsed: 48px;
+  --results-panel-width: 280px;
+  --research-sidebar-width: 240px;
+
+  /* ---- Active theme aliases (overridden by [data-theme]) ---- */
+  --bg: var(--color-bg);
+  --surface: var(--color-surface);
+  --text: var(--color-text);
+  --muted: var(--color-muted);
+  --border: var(--color-border);
+  --chrome-opacity: 1;
+}
+
+/* Reading Room — near-black dark mode for image viewing.
+   Dims UI chrome to 40%, keeps viewer/masks at full brightness (handled per-component). */
+[data-theme='reading-room'] {
+  --bg: var(--color-landing-bg);
+  --surface: #0b0f17;
+  --text: #e6edf3;
+  --muted: #7d8896;
+  --border: #1c2430;
+  --chrome-opacity: 0.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Visible focus ring on every interactive element (WCAG 2.1 AA, spec §10). */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduce Motion — disables all transitions/animations (spec §10). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

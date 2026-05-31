@@ -1,0 +1,69 @@
+# Model registry — single source of truth for model metadata shown across the UI
+# (landing model preview, model library, workspace selection cards) and used by
+# the mock API. Metrics mirror the research Results table (spec §5/§8).
+# diceCamus / diceBrisc = best Dice per dataset; null = not evaluated there.
+
+- id: unet-baseline
+  name: U-Net Baseline
+  family: baseline
+  description: >-
+    Standard U-Net segmentation with no post-processing or boundary refinement.
+    Serves only as the comparison baseline for all DRL agents.
+  diceCamus: 0.89
+  diceBrisc: 0.81
+  iou: 0.80
+  hd: 5.6
+  deployed: true
+  selectable: false
+
+- id: dqn
+  name: DQN
+  family: discrete-drl
+  description: >-
+    Double Deep Q-Network with a patch-CNN backbone and an 8-direction discrete
+    action space refining the contour one pixel at a time. Huber loss.
+  diceCamus: 0.901
+  diceBrisc: 0.825
+  iou: 0.82
+  hd: 4.8
+  deployed: true
+  selectable: true
+
+- id: ddqn
+  name: DDQN
+  family: discrete-drl
+  description: >-
+    Double DQN with separate online and target networks for more stable
+    Q-value estimates during contour refinement.
+  diceCamus: 0.905
+  diceBrisc: 0.830
+  iou: 0.83
+  hd: 4.5
+  deployed: true
+  selectable: true
+
+- id: dueling-dqn
+  name: Dueling DQN
+  family: discrete-drl
+  description: >-
+    Dueling architecture combining a value stream and an advantage stream with
+    Double DQN. Best-performing discrete agent.
+  diceCamus: 0.908
+  diceBrisc: 0.835
+  iou: 0.84
+  hd: 4.2
+  deployed: true
+  selectable: true
+
+- id: ddpg
+  name: DDPG
+  family: continuous-drl
+  description: >-
+    Deterministic Policy Gradient with a continuous action space (vertex
+    displacement) and an actor-critic architecture. Best overall Dice.
+  diceCamus: 0.912
+  diceBrisc: 0.840
+  iou: 0.85
+  hd: 3.9
+  deployed: true
+  selectable: true

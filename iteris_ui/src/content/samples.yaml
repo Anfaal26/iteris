@@ -1,0 +1,46 @@
+# Curated sample images (spec §6 sample tiles, §9 dataset explorer).
+# thumbnailB64 is left empty here; the mock API / tiles render a procedural
+# placeholder when empty so the UI works before real thumbnails are wired in.
+
+- id: camus-a2c
+  thumbnailB64: ''
+  modality: ultrasound
+  anatomy: A2C (apical 2-chamber)
+  difficulty: easy
+  bestDice: 0.93
+  dataset: camus
+- id: camus-a4c
+  thumbnailB64: ''
+  modality: ultrasound
+  anatomy: A4C (apical 4-chamber)
+  difficulty: medium
+  bestDice: 0.91
+  dataset: camus
+- id: camus-edes
+  thumbnailB64: ''
+  modality: ultrasound
+  anatomy: ED/ES frame
+  difficulty: hard
+  bestDice: 0.86
+  dataset: camus
+- id: brisc-glioma
+  thumbnailB64: ''
+  modality: mri
+  anatomy: Glioma
+  difficulty: hard
+  bestDice: 0.84
+  dataset: brisc
+- id: brisc-meningioma
+  thumbnailB64: ''
+  modality: mri
+  anatomy: Meningioma
+  difficulty: medium
+  bestDice: 0.88
+  dataset: brisc
+- id: brisc-pituitary
+  thumbnailB64: ''
+  modality: mri
+  anatomy: Pituitary Tumor
+  difficulty: easy
+  bestDice: 0.90
+  dataset: brisc

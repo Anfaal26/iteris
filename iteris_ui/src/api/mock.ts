@@ -1,0 +1,174 @@
+/**
+ * Mock implementation of the Iteris API (spec §11). Produces deterministic,
+ * spec-accurate data so the entire UI runs without a backend. Mask layers are
+ * lightweight SVG data-URIs (valid <img> sources) drawn as anatomical ellipses.
+ *
+ * These mocks are seeded from src/content/*.yaml where possible so model names
+ * and metrics stay in one place; structural defaults live here.
+ */
+import modelsData from '@/content/models.yaml';
+import samplesData from '@/content/samples.yaml';
+import type {
+  CompareRequest,
+  CompareResponse,
+  HealthResponse,
+  InterpretRequest,
+  IterationStep,
+  MaskLayer,
+  Metrics,
+  ModelRecord,
+  PredictRequest,
+  PredictResponse,
+  SampleImage,
+  StructureId,
+  StructureMetrics,
+} from './contract';
+import { maskColorsHex } from '@/tokens';
+
+const STRUCTURES: Record<
+  PredictRequest['dataset'],
+  { id: StructureId; label: string; color: string }[]
+> = {
+  camus: [
+    { id: 'lv_endo', label: 'LV Endocardium', color: maskColorsHex.lvEndo },
+    { id: 'lv_epi', label: 'LV Epicardium', color: maskColorsHex.lvEpi },
+    { id: 'la', label: 'Left Atrium', color: maskColorsHex.la },
+  ],
+  brisc: [
+    { id: 'glioma', label: 'Glioma', color: maskColorsHex.glioma },
+    { id: 'meningioma', label: 'Meningioma', color: maskColorsHex.meningioma },
+    { id: 'pituitary', label: 'Pituitary Tumor', color: maskColorsHex.pituitary },
+  ],
+};
+
+const SIZE = 256;
+
+function svgMask(color: string, cx: number, cy: number, rx: number, ry: number): string {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${SIZE}' height='${SIZE}'><ellipse cx='${cx}' cy='${cy}' rx='${rx}' ry='${ry}' fill='${color}' fill-opacity='0.55' stroke='${color}' stroke-width='2'/></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+function buildMasks(dataset: PredictRequest['dataset'], spread = 1): MaskLayer[] {
+  return STRUCTURES[dataset].map((s, i) => ({
+    structure: s.id,
+    label: s.label,
+    color: s.color,
+    imageB64: svgMask(
+      s.color,
+      SIZE / 2 + (i - 1) * 18 * spread,
+      SIZE / 2 + (i - 1) * 14 * spread,
+      48 - i * 6,
+      40 - i * 5,
+    ),
+  }));
+}
+
+function round(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+function buildMetrics(dataset: PredictRequest['dataset'], dice: number): Metrics {
+  const baselineDice = dataset === 'camus' ? 0.89 : 0.79;
+  const structures: StructureMetrics[] = STRUCTURES[dataset].map((s, i) => ({
+    structure: s.id,
+    label: s.label,
+    dice: round(dice - i * 0.02),
+    iou: round(dice - 0.08 - i * 0.02),
+    hd: round(3.2 + i * 0.9),
+    hd95: round(2.1 + i * 0.7),
+  }));
+  return {
+    dice: round(dice),
+    iou: round(dice - 0.08),
+    hd: round(3.2),
+    hd95: round(2.1),
+    structures,
+    baselineDice,
+  };
+}
+
+export async function health(): Promise<HealthResponse> {
+  return {
+    status: 'ok',
+    modelsLoaded: 6,
+    gpuAvailable: false,
+    datasetsAvailable: ['camus', 'brisc'],
+  };
+}
+
+export async function models(): Promise<ModelRecord[]> {
+  return modelsData as ModelRecord[];
+}
+
+export async function samples(): Promise<SampleImage[]> {
+  return samplesData as SampleImage[];
+}
+
+export async function predict(body: PredictRequest): Promise<PredictResponse> {
+  const dice = body.dataset === 'camus' ? 0.912 : 0.84;
+  const masks = buildMasks(body.dataset);
+  const response: PredictResponse = {
+    sessionId: `mock-${body.modelId}-${body.dataset}`,
+    modelId: body.modelId,
+    dataset: body.dataset,
+    masks,
+    metrics: buildMetrics(body.dataset, dice),
+    preprocessingMs: 180,
+    inferenceMs: 640,
+    imageWidth: SIZE,
+    imageHeight: SIZE,
+  };
+  if (body.playback) {
+    const total = 20;
+    const init = (body.dataset === 'camus' ? 0.89 : 0.79) - 0.03;
+    response.stepSequence = Array.from({ length: total }, (_, i): IterationStep => {
+      const progress = (i + 1) / total;
+      return {
+        step: i + 1,
+        masks: buildMasks(body.dataset, 1 - progress * 0.9),
+        deltaDice: round((dice - init) * (1 / total) + (Math.sin(i) * 0.002)),
+        annotation: `Step ${i + 1}: agent nudges the contour toward the high-gradient boundary; Dice trending toward ${round(init + (dice - init) * progress)}.`,
+      };
+    });
+  }
+  return response;
+}
+
+export async function compare(body: CompareRequest): Promise<CompareResponse> {
+  return {
+    results: body.modelIds.map((id) => {
+      const dice = id === 'unet-baseline'
+        ? (body.dataset === 'camus' ? 0.89 : 0.79)
+        : (body.dataset === 'camus' ? 0.912 : 0.84);
+      return {
+        modelId: id,
+        masks: buildMasks(body.dataset),
+        metrics: buildMetrics(body.dataset, dice),
+      };
+    }),
+  };
+}
+
+const SECTION_TEXT: Record<string, (b: InterpretRequest) => string> = {
+  'Segmentation Summary': (b) =>
+    `The ${b.modelId.toUpperCase()} agent delineated ${b.structures.length} structure(s) on a ${b.dataset === 'camus' ? 'CAMUS echocardiography' : 'BRISC T1-weighted MRI'} image, reaching an overall Dice of ${b.metrics.dice}.`,
+  'Clinical Significance': () =>
+    'Boundary precision at this level supports reproducible volumetric measurement; sub-voxel error margins matter for downstream quantitative analysis.',
+  'Metric Interpretation': (b) =>
+    `A Dice of ${b.metrics.dice} against a baseline of ${b.metrics.baselineDice} corresponds to a small-millimetre boundary error for typical structure sizes.`,
+  'Performance Analysis': () =>
+    'The agent appears to have learned to follow high-gradient image edges while penalising anatomically implausible excursions, yielding the above-baseline result.',
+  'Literature References': () =>
+    'See e.g. Leclerc et al., IEEE TMI (CAMUS); Bakas et al., Scientific Data (brain tumour segmentation). Metrics reported per 5-fold CV.',
+};
+
+export async function* interpret(body: InterpretRequest): AsyncGenerator<string> {
+  for (const [header, fn] of Object.entries(SECTION_TEXT)) {
+    yield `\n## ${header}\n`;
+    const words = fn(body).split(' ');
+    for (const w of words) {
+      yield `${w} `;
+      await new Promise((r) => setTimeout(r, 12));
+    }
+  }
+}
