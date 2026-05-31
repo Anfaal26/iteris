@@ -31,6 +31,7 @@ def precompute_init_masks(
     baseline_checkpoint: str,
     target_class: int,
     min_area_fraction: float = 0.01,
+    tumor_type_filter: str = None,
 ) -> Tuple[List[dict], List[dict], List[dict]]:
     """
     Run the U-Net baseline and return (train, val, test) sample lists.
@@ -43,6 +44,8 @@ def precompute_init_masks(
     min_area_fraction   : drop samples whose GT structure covers less than this
                           fraction of the image — these are degenerate for
                           boundary refinement.
+    tumor_type_filter   : if set, keep only BRISC records whose tumor_type matches
+                          (e.g. 'glioma', 'meningioma', 'pituitary'). None = keep all.
 
     Each returned sample dict has:
         image     : (H, W) float32 in [0, 1]
@@ -60,6 +63,20 @@ def precompute_init_masks(
 
     # Records → patient-level split
     records = build_dataset_dicts(baseline_cfg)
+
+    # ── Per-tumor-type filtering (BRISC only) ────────────────────────────────
+    # If the DRL config specifies `tumor_type_filter`, keep only samples whose
+    # `tumor_type` field matches. Parsed from the BRISC filename convention
+    # (gl/mn/pi/nt) by ingestion.py. A missing/unknown tumor_type is kept
+    # when no filter is active; silently dropped when a filter IS active so
+    # the agent trains only on its target morphology class.
+    if tumor_type_filter is not None:
+        before = len(records)
+        records = [r for r in records
+                   if r.get('tumor_type', 'unknown') == tumor_type_filter]
+        print(f'[warm_start] tumor_type_filter={tumor_type_filter!r}: '
+              f'{len(records)} / {before} samples kept')
+
     train_r, val_r, test_r = patient_level_split(
         records,
         val_split  = baseline_cfg['val_split'],

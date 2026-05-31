@@ -1,0 +1,140 @@
+# BRISC DRL — Glioma (class filter: tumor_type == 'glioma')
+#
+# Glioma characteristics:
+#   - Diffuse, infiltrative margins, no sharp boundary
+#   - Can be very large (perimeter up to ~500-600px at 256×256)
+#   - Most variable shape across all tumor types — hardest for tracing
+#   - U-Net init Dice likely lower than meningioma/pituitary
+#   - Can occur anywhere in the cerebral hemispheres
+#
+# Load with:
+#   cfg_full = load_drl_class_config('configs/brisc_drl_glioma.yaml')
+#   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
+
+target_class:        1
+class_name:          glioma
+tumor_type_filter:   glioma          # filters warm_start samples by tumor_type field
+dataset:             BRISC
+baseline_cfg_name:   brisc.yaml
+baseline_checkpoint: /kaggle/input/brisc-baseline-outputs/brisc_best.pt
+
+# ── Reward shaping — glioma rationale ────────────────────────────────────────
+# Gliomas have diffuse boundaries — Dice fluctuates more than meningioma.
+# IoU-delta is smoother for irregular, large structures.
+reward_mode:   iou_delta
+reward_alpha:  1.0
+reward_beta:   0.0
+hd_norm:       30.0               # larger normalization — glioma HD95 can be high
+
+# ── Environment (DDPG continuous baseline) ───────────────────────────────────
+image_size:        256
+max_steps:         20
+shift_px:          2               # keep shifts — glioma can have spatial offsets
+sdt_clip:          20.0
+reward_clip:       1.0
+min_area_fraction: 0.01
+stop_eps_dice:     0.001
+stop_eps_hd:       0.5
+stop_n:            3
+
+hard_mining_scale: 5.0             # re-enable — glioma hard cases are tractable
+
+# ── Per-agent hyperparams ─────────────────────────────────────────────────────
+agents:
+
+  DDPG:
+    agent_type:          DDPG
+    cont_morph_scale:    0.25
+    cont_trans_scale:    0.02
+    ou_sigma:            [0.025, 0.002, 0.002]
+    ou_theta:            0.15
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    actor_freeze_steps:  2000
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    train_steps:         100000
+    eval_every:          2500
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  # ── Paradigm 1 — boundary tracing ────────────────────────────────────────────
+  # Glioma: long perimeter, irregular shape, diffuse boundary.
+  # Largest T_max in the BRISC family — matches upper-tail glioma perimeters.
+  DQN:
+    agent_type:             DQN
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       500      # large glioma perimeter can reach ~500px
+    closure_tolerance:      5        # loose — diffuse boundary, irregular return path
+    min_perimeter_steps:    40       # larger minimum for large structures
+    seed_method:            centroid
+    # ── Region-aware reward ──
+    coverage_tolerance:      1.5
+    reward_step_cost:        -0.01
+    reward_coverage_bonus:    0.20
+    reward_off_boundary:     -0.05
+    reward_off_boundary_cap:  5.0
+    reward_terminal_dice:    10.0
+    reward_closure_min_dice:  0.15   # looser gate — diffuse boundary may not hit 0.20
+    reward_closure_bonus:     2.0
+    reward_offimage:        -10.0
+    reward_smoothness_penalty: -0.01  # lighter smoothness — glioma has irregular curves
+    lr:                     1.0e-4
+    gamma:                  0.97
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            50000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    30000
+    train_steps:            60000    # longer — glioma is the hardest class
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working
+
+  DuelingDDQN:
+    agent_type:             DUELING
+    env_class:              contour_tracing
+    patch_size:             64
+    max_trace_length:       500
+    closure_tolerance:      5
+    min_perimeter_steps:    40
+    seed_method:            centroid
+    coverage_tolerance:      1.5
+    reward_step_cost:        -0.01
+    reward_coverage_bonus:    0.20
+    reward_off_boundary:     -0.05
+    reward_off_boundary_cap:  5.0
+    reward_terminal_dice:    10.0
+    reward_closure_min_dice:  0.15
+    reward_closure_bonus:     2.0
+    reward_offimage:        -10.0
+    reward_smoothness_penalty: -0.01
+    lr:                     1.0e-4
+    gamma:                  0.97
+    tau:                    0.005
+    embed_dim:              128
+    batch_size:             64
+    buffer_size:            50000
+    prefill_steps:          2000
+    epsilon_start:          1.0
+    epsilon_end:            0.05
+    epsilon_decay_steps:    30000
+    train_steps:            60000
+    num_envs:               16
+    grad_updates:           1
+    eval_every:             5000
+    val_subset:             50
+    seed:                   42
+    checkpoint_dir:         /kaggle/working

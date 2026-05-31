@@ -151,9 +151,20 @@ def build_brisc_dicts(data_root) -> List[dict]:
                     continue
                 m = PATIENT_RE.match(img.stem.lower())
                 patient_id = f'{m.group(1)}_{m.group(2)}' if m else img.stem
+                # Extract tumor type from filename convention:
+                # brisc2025_train_00001_gl_ax_t1.jpg  → 'glioma'
+                # brisc2025_train_00001_mn_ax_t1.jpg  → 'meningioma'
+                # brisc2025_train_00001_pi_ax_t1.jpg  → 'pituitary'
+                # brisc2025_train_00001_nt_ax_t1.jpg  → 'non_tumor'
+                # Falls back to 'unknown' if convention not present.
+                TYPE_MAP = {'gl': 'glioma', 'mn': 'meningioma',
+                            'pi': 'pituitary', 'nt': 'non_tumor'}
+                parts = img.stem.lower().split('_')
+                tumor_type = next(
+                    (TYPE_MAP[p] for p in parts if p in TYPE_MAP), 'unknown')
                 records.append(dict(
                     image=str(img), label=str(mask),
-                    patient=patient_id,
+                    patient=patient_id, tumor_type=tumor_type,
                 ))
 
     if records:

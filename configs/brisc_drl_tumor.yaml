@@ -92,7 +92,9 @@ agents:
     agent_type:             DQN
     env_class:              contour_tracing
     patch_size:             64
-    max_trace_length:       200
+    max_trace_length:       300      # 200→300: covers glioma upper-tail perimeters
+                                     # (mean tumour area 1.95% → perimeter ~127px;
+                                     #  large gliomas can exceed 250px; 300 = safe margin)
     closure_tolerance:      4        # looser: irregular tumour boundaries
     min_perimeter_steps:    20
 
@@ -131,7 +133,9 @@ agents:
     agent_type:             DUELING
     env_class:              contour_tracing
     patch_size:             64
-    max_trace_length:       200
+    max_trace_length:       300      # 200→300: covers glioma upper-tail perimeters
+                                     # (mean tumour area 1.95% → perimeter ~127px;
+                                     #  large gliomas can exceed 250px; 300 = safe margin)
     closure_tolerance:      4
     min_perimeter_steps:    20
 
