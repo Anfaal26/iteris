@@ -40,10 +40,9 @@ Raw scan ──► U-Net baseline mask ──► DRL agent refines for ≤20 ste
 | Agent | Action space | Key detail |
 |---|---|---|
 | DQN | Discrete (13 CAMUS / 9 BRISC) | Baseline Q-learner, CNN Q-head, ε-greedy, uniform replay buffer |
-| DDQN | Discrete (13 CAMUS / 9 BRISC) | DQN + Double-DQN target (online net selects, target net evaluates) |
 | Dueling DQN | Discrete (13 CAMUS / 9 BRISC) | V(s) + A(s,a) split head + Double target — best-practice combination |
-| MSA-Dueling | Discrete (13 CAMUS / 9 BRISC) | Dueling head on a 4-head MSA backbone (4 heads × 64-d keys) |
 | DDPG | Continuous (3D) | OU noise, morph + dy + dx, τ=0.005 soft target update |
+| MSA-Best |(13 CAMUS / 9 BRISC) |Best performing headhead on a 4-head MSA backbone (4 heads × 64-d keys) |
 
 > **Discrete action layouts** — `SegmentationEnv`: 4 directional dilate + 4 directional erode + 4 whole-mask shift + no-op = **13 actions** (CAMUS scale). `SegmentationEnvBRISC`: drops the 4 shifts → **9 actions** (small-target scale; BRISC tumours are correctly located by the U-Net, shifts hurt more than they help). Selected per-agent via `cfg['env_class']`.
 
