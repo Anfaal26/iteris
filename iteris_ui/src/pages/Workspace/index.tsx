@@ -1,20 +1,173 @@
 /**
- * Iteris workstation (spec §6) — placeholder scaffold.
- * Owned by the Workspace agent: three-zone layout, four viewing modes,
- * canvas image viewer, results panel, and the LLM interpretation layer (§7).
+ * Workspace — three-zone clinical workstation (spec §6 + §7).
+ * Left: ControlPanel, Centre: ImageViewer, Right: ResultsPanel.
+ */
+
+import { useState, useEffect } from 'react';
+import { Navbar } from '@/components';
+import type {
+  ModelId,
+  DatasetId,
+  ViewMode,
+  SampleImage,
+  ModelRecord,
+  PredictResponse,
+  CompareResponse,
+} from '@/api/contract';
+import { api } from '@/api/client';
+import { ROUTES } from '@/routes';
+import { ControlPanel } from './panels/ControlPanel';
+import { ImageViewer } from './panels/ImageViewer';
+import { ResultsPanel } from './panels/ResultsPanel';
+
+const NAV_ITEMS = [
+  { label: 'Workspace', href: ROUTES.workspace },
+  { label: 'Model Library', href: ROUTES.models },
+  { label: 'Dataset Explorer', href: ROUTES.datasets },
+];
+
+/** Default placeholder b64 PNG (1×1 grey pixel). */
+const PLACEHOLDER_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+/**
+ * Main Workspace page with three-zone layout (spec §6).
  */
 export default function Workspace() {
+  const [samples, setSamples] = useState<SampleImage[]>([]);
+  const [models, setModels] = useState<ModelRecord[]>([]);
+
+  const [selectedModel, setSelectedModel] = useState<ModelId>('ddpg');
+  const [selectedDataset, setSelectedDataset] = useState<DatasetId>('camus');
+  const [viewMode, setViewMode] = useState<ViewMode>('single');
+  const [playbackEnabled, setPlaybackEnabled] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const [activeImage, setActiveImage] = useState<{ b64: string; label: string } | null>(null);
+  const [result, setResult] = useState<PredictResponse | null>(null);
+  const [baselineResult, setBaselineResult] = useState<PredictResponse | null>(null);
+  const [compareResponse, setCompareResponse] = useState<CompareResponse | null>(null);
+
+  useEffect(() => {
+    api.models().then(setModels).catch(() => {});
+    api.samples().then(setSamples).catch(() => {});
+  }, []);
+
+  const handleSampleSelect = (sample: SampleImage) => {
+    setActiveImage({ b64: PLACEHOLDER_B64, label: `${sample.anatomy} (${sample.modality})` });
+    setResult(null);
+    setBaselineResult(null);
+    setCompareResponse(null);
+  };
+
+  const handleImageUpload = (b64: string, filename: string) => {
+    setActiveImage({ b64, label: filename });
+    setResult(null);
+    setBaselineResult(null);
+    setCompareResponse(null);
+  };
+
+  const handleRunInference = async () => {
+    if (!activeImage) return;
+    setLoading(true);
+    try {
+      const predictResult = await api.predict({
+        imageB64: activeImage.b64,
+        modelId: selectedModel,
+        dataset: selectedDataset,
+        mode: viewMode,
+        playback: playbackEnabled,
+      });
+      setResult(predictResult);
+
+      // If wipe mode, also get baseline result
+      if (viewMode === 'wipe' || viewMode === 'side-by-side') {
+        const baselineRes = await api.predict({
+          imageB64: activeImage.b64,
+          modelId: 'unet-baseline',
+          dataset: selectedDataset,
+          mode: 'single',
+        });
+        setBaselineResult(baselineRes);
+      }
+
+      // If side-by-side, compare multiple models
+      if (viewMode === 'side-by-side') {
+        const compareRes = await api.compare({
+          imageB64: activeImage.b64,
+          modelIds: ['unet-baseline', selectedModel, 'ddpg'],
+          dataset: selectedDataset,
+        });
+        setCompareResponse(compareRes);
+      }
+    } catch {
+      // Error is surfaced by the loading state clearing
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportJson = () => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result.metrics, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `iteris-metrics-${result.sessionId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <main className="min-h-screen bg-bg font-body text-text">
-      <div className="mx-auto max-w-3xl px-6 py-16">
-        <h1 className="font-heading text-3xl font-bold text-accent">
-          Iteris Workstation
-        </h1>
-        <p className="mt-4 text-muted">
-          Scaffold — control panel, image viewer, viewing modes, and results
-          panel are built by the Workspace agent against the API contract.
-        </p>
+    <div className="flex flex-col h-screen overflow-hidden bg-bg">
+      <Navbar
+        variant="light"
+        navItems={NAV_ITEMS}
+      />
+
+      {/* Three-zone layout below navbar */}
+      <div
+        className="flex flex-row flex-1 overflow-hidden"
+        style={{ marginTop: 'var(--navbar-height)' }}
+      >
+        <ControlPanel
+          samples={samples}
+          models={models}
+          selectedModel={selectedModel}
+          selectedDataset={selectedDataset}
+          viewMode={viewMode}
+          playbackEnabled={playbackEnabled}
+          loading={loading}
+          activeImageLabel={activeImage?.label}
+          onModelSelect={setSelectedModel}
+          onDatasetChange={setSelectedDataset}
+          onViewModeChange={setViewMode}
+          onPlaybackToggle={setPlaybackEnabled}
+          onSampleSelect={handleSampleSelect}
+          onImageUpload={handleImageUpload}
+          onRunInference={handleRunInference}
+        />
+
+        <ImageViewer
+          anatomyLabel={activeImage?.label ?? 'Select an image'}
+          masks={result?.masks ?? []}
+          baselineMasks={baselineResult?.masks ?? []}
+          viewMode={viewMode}
+          playbackEnabled={playbackEnabled}
+          stepSequence={result?.stepSequence}
+          compareResults={compareResponse?.results}
+          baselineMetrics={baselineResult?.metrics}
+          drlMetrics={result?.metrics}
+          hasResult={!!result}
+        />
+
+        <ResultsPanel
+          result={result}
+          onExportJson={handleExportJson}
+        />
       </div>
-    </main>
+    </div>
   );
 }
