@@ -88,18 +88,21 @@ agents:
     # Per-step:
     reward_smoothness_penalty: -0.01    # mild smoothness (kept for CAMUS — LV boundaries
                                         # are smooth; reduced from -0.02 to allow curvature)
-    coverage_tolerance:       1.0       # tighter (was 1.5px): stay on boundary
-    reward_step_cost:         -0.01     # mild time pressure
-    reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
-    reward_off_boundary:      -0.05     # soft gradient toward boundary
+    coverage_tolerance:       1.2       # slightly looser than 1.0: LV perimeter ~250px
+                                        # on 256×256 — 1.0px was too sparse, slowing
+                                        # closure discovery (0% closure at step 15k).
+    reward_step_cost:         -0.01
+    reward_coverage_bonus:     0.25
+    reward_off_boundary:      -0.05
     reward_off_boundary_cap:   5.0
     # Terminal:
-    reward_terminal_dice:     10.0      # area overlap (Dice vs GT)
-    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
-                                        # rewards shape adherence, not just area overlap
-    reward_closure_min_dice:   0.20     # anti-empty-loop gate
-    reward_closure_bonus:      2.0      # +2·Dice on proper closure
-    reward_offimage:          -10.0     # hard off-image penalty
+    reward_terminal_dice:     10.0
+    reward_boundary_precision:  1.0     # boundary adherence. Reduced 3.0→1.0: at 3.0
+                                        # competed too strongly with terminal_dice and
+                                        # caused near-zero closure rates early in training.
+    reward_closure_min_dice:   0.20
+    reward_closure_bonus:      2.0
+    reward_offimage:          -10.0
     lr:                     1.0e-4
     gamma:                  0.99
     tau:                    0.005
@@ -109,8 +112,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    30000
-    train_steps:            50000
+    epsilon_decay_steps:    50000       # 30k→50k: proportional to 100k budget
+    train_steps:            100000      # 50k→100k: curve was still rising at 50k
     num_envs:               16
     grad_updates:           1
     eval_every:             5000
@@ -131,18 +134,21 @@ agents:
     # Per-step:
     reward_smoothness_penalty: -0.01    # mild smoothness (kept for CAMUS — LV boundaries
                                         # are smooth; reduced from -0.02 to allow curvature)
-    coverage_tolerance:       1.0       # tighter (was 1.5px): stay on boundary
-    reward_step_cost:         -0.01     # mild time pressure
-    reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
-    reward_off_boundary:      -0.05     # soft gradient toward boundary
+    coverage_tolerance:       1.2       # slightly looser than 1.0: LV perimeter ~250px
+                                        # on 256×256 — 1.0px was too sparse, slowing
+                                        # closure discovery (0% closure at step 15k).
+    reward_step_cost:         -0.01
+    reward_coverage_bonus:     0.25
+    reward_off_boundary:      -0.05
     reward_off_boundary_cap:   5.0
     # Terminal:
-    reward_terminal_dice:     10.0      # area overlap (Dice vs GT)
-    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
-                                        # rewards shape adherence, not just area overlap
-    reward_closure_min_dice:   0.20     # anti-empty-loop gate
-    reward_closure_bonus:      2.0      # +2·Dice on proper closure
-    reward_offimage:          -10.0     # hard off-image penalty
+    reward_terminal_dice:     10.0
+    reward_boundary_precision:  1.0     # boundary adherence. Reduced 3.0→1.0: at 3.0
+                                        # competed too strongly with terminal_dice and
+                                        # caused near-zero closure rates early in training.
+    reward_closure_min_dice:   0.20
+    reward_closure_bonus:      2.0
+    reward_offimage:          -10.0
     lr:                     1.0e-4
     gamma:                  0.99
     tau:                    0.005
@@ -152,8 +158,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    30000
-    train_steps:            50000
+    epsilon_decay_steps:    50000       # 30k→50k: proportional to 100k budget
+    train_steps:            100000      # 50k→100k: curve was still rising at 50k
     num_envs:               16
     grad_updates:           1
     eval_every:             5000

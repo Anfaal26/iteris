@@ -76,13 +76,13 @@ agents:
 
     # ── Precision-tuned reward ──────────────────────────────────────────────────
     reward_smoothness_penalty: -0.01
-    coverage_tolerance:       1.0
+    coverage_tolerance:       1.2       # 1.0→1.2: denser signal for LV structures
     reward_step_cost:         -0.01
     reward_coverage_bonus:     0.25
     reward_off_boundary:      -0.05
     reward_off_boundary_cap:   5.0
     reward_terminal_dice:     10.0
-    reward_boundary_precision:  3.0
+    reward_boundary_precision:  1.0     # 3.0→1.0: reduce competing weight
     reward_closure_min_dice:   0.20
     reward_closure_bonus:      2.0
     reward_offimage:          -10.0
@@ -95,8 +95,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    30000
-    train_steps:            50000
+    epsilon_decay_steps:    50000       # proportional to 100k budget
+    train_steps:            100000      # 50k→100k: curve still rising at 50k
     num_envs:               16
     grad_updates:           1
     eval_every:             5000
@@ -114,13 +114,13 @@ agents:
 
     # ── Precision-tuned reward ──────────────────────────────────────────────────
     reward_smoothness_penalty: -0.01
-    coverage_tolerance:       1.0
+    coverage_tolerance:       1.2       # 1.0→1.2: denser signal for LV structures
     reward_step_cost:         -0.01
     reward_coverage_bonus:     0.25
     reward_off_boundary:      -0.05
     reward_off_boundary_cap:   5.0
     reward_terminal_dice:     10.0
-    reward_boundary_precision:  3.0
+    reward_boundary_precision:  1.0     # 3.0→1.0: reduce competing weight
     reward_closure_min_dice:   0.20
     reward_closure_bonus:      2.0
     reward_offimage:          -10.0
@@ -133,8 +133,8 @@ agents:
     prefill_steps:          2000
     epsilon_start:          1.0
     epsilon_end:            0.05
-    epsilon_decay_steps:    30000
-    train_steps:            50000
+    epsilon_decay_steps:    50000       # proportional to 100k budget
+    train_steps:            100000      # 50k→100k: curve still rising at 50k
     num_envs:               16
     grad_updates:           1
     eval_every:             5000

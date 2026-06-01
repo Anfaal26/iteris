@@ -112,9 +112,9 @@ agents:
     reward_off_boundary_cap:   5.0
     # Terminal:
     reward_terminal_dice:     10.0      # area overlap — main objective
-    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
-                                        # during the trace. Rewards shape adherence, not
-                                        # just area. Penalises skipping protrusions.
+    reward_boundary_precision:  1.0     # boundary adherence (fraction of GT boundary visited).
+                                        # Reduced 3.0→1.0: at 3.0 competed too strongly with
+                                        # reward_terminal_dice, slowing convergence.
     reward_closure_min_dice:   0.20     # anti-empty-loop gate
     reward_closure_bonus:      2.0      # +2·Dice on proper closure
     reward_offimage:          -10.0     # hard off-image penalty
@@ -160,9 +160,9 @@ agents:
     reward_off_boundary_cap:   5.0
     # Terminal:
     reward_terminal_dice:     10.0      # area overlap — main objective
-    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
-                                        # during the trace. Rewards shape adherence, not
-                                        # just area. Penalises skipping protrusions.
+    reward_boundary_precision:  1.0     # boundary adherence (fraction of GT boundary visited).
+                                        # Reduced 3.0→1.0: at 3.0 competed too strongly with
+                                        # reward_terminal_dice, slowing convergence.
     reward_closure_min_dice:   0.20     # anti-empty-loop gate
     reward_closure_bonus:      2.0      # +2·Dice on proper closure
     reward_offimage:          -10.0     # hard off-image penalty
