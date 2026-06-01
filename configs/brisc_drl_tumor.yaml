@@ -108,13 +108,17 @@ agents:
                                         # boundary to earn the coverage bonus, not nearby.
     reward_step_cost:         -0.01     # mild time pressure
     reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
-    reward_off_boundary:      -0.05     # soft gradient toward boundary
-    reward_off_boundary_cap:   5.0
+    reward_off_boundary:      -0.15     # stronger gradient (was -0.05): at -0.05 the agent
+                                        # could drift 5px inside while still net-positive.
+                                        # At -0.15: 3px inside costs -0.45/step, which clearly
+                                        # exceeds coverage bonus (+0.25) → agent stays on boundary.
+    reward_off_boundary_cap:   3.0     # tighter cap (was 5.0): strong gradient applies within
+                                        # 3px of boundary (the precision zone). Max cost: -0.45/step.
     # Terminal:
     reward_terminal_dice:     10.0      # area overlap — main objective
-    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
-                                        # during the trace. Rewards shape adherence, not
-                                        # just area. Penalises skipping protrusions.
+    reward_boundary_precision:  1.0     # boundary adherence (fraction of GT boundary visited).
+                                        # Reduced 3.0→1.0: at 3.0 competed too strongly with
+                                        # reward_terminal_dice, slowing convergence.
     reward_closure_min_dice:   0.20     # anti-empty-loop gate
     reward_closure_bonus:      2.0      # +2·Dice on proper closure
     reward_offimage:          -10.0     # hard off-image penalty
@@ -156,13 +160,17 @@ agents:
                                         # boundary to earn the coverage bonus, not nearby.
     reward_step_cost:         -0.01     # mild time pressure
     reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
-    reward_off_boundary:      -0.05     # soft gradient toward boundary
-    reward_off_boundary_cap:   5.0
+    reward_off_boundary:      -0.15     # stronger gradient (was -0.05): at -0.05 the agent
+                                        # could drift 5px inside while still net-positive.
+                                        # At -0.15: 3px inside costs -0.45/step, which clearly
+                                        # exceeds coverage bonus (+0.25) → agent stays on boundary.
+    reward_off_boundary_cap:   3.0     # tighter cap (was 5.0): strong gradient applies within
+                                        # 3px of boundary (the precision zone). Max cost: -0.45/step.
     # Terminal:
     reward_terminal_dice:     10.0      # area overlap — main objective
-    reward_boundary_precision:  3.0     # ★ NEW: fraction of GT boundary pixels visited
-                                        # during the trace. Rewards shape adherence, not
-                                        # just area. Penalises skipping protrusions.
+    reward_boundary_precision:  1.0     # boundary adherence (fraction of GT boundary visited).
+                                        # Reduced 3.0→1.0: at 3.0 competed too strongly with
+                                        # reward_terminal_dice, slowing convergence.
     reward_closure_min_dice:   0.20     # anti-empty-loop gate
     reward_closure_bonus:      2.0      # +2·Dice on proper closure
     reward_offimage:          -10.0     # hard off-image penalty

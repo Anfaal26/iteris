@@ -233,6 +233,15 @@ class ContourTracingEnv:
         #     between coverage events. Capped so it cannot dominate.
         dist = float(self._gt_edt[new_point[0], new_point[1]])
         reward += self.reward_off_boundary * min(dist, self.reward_off_boundary_cap)
+
+        # (2b) On-boundary snap bonus — small extra reward for landing exactly
+        #      ON a GT boundary pixel (dist < 0.5).  Makes the boundary pixel
+        #      strictly more attractive than its 8-neighbour 1px away, pushing
+        #      the agent to commit to the exact boundary rather than cutting
+        #      corners.  Reduces the staircase on smooth curved sections.
+        if dist < 0.5:
+            reward += 0.10
+
         info['dist']       = dist
         info['n_new_cov']  = int(n_new)
 
