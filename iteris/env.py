@@ -133,20 +133,43 @@ def shifted(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
 
 
 class SegmentationEnv:
-    """Per-class binary boundary-refinement environment (v3 action space)."""
+    """Per-class binary boundary-refinement environment (v4 action space).
 
-    # ── Discrete action layout (see module docstring) ────────────────────────
-    NUM_DISCRETE_ACTIONS  = 13
+    Action space (14 discrete actions) — supervisor-approved design:
+    ────────────────────────────────────────────────────────────────
+    0–3   Directional local dilation (N, E, S, W)
+          3-element directional SE → only expands boundary facing that direction.
+          Corrects local under-segmentation without globally inflating the mask.
+    4–7   Directional local erosion (N, E, S, W)
+          Symmetric to dilations.  Corrects local over-segmentation.
+    8–11  Whole-mask shift (↑, ↓, ←, →)
+          Corrects systematic positional offsets.  Primarily useful for BRISC
+          where the U-Net may localise the tumour correctly but be slightly off-centre.
+    12    Smooth contour
+          Morphological closing (binary_closing with a 3×3 disk).
+          Fills small holes, removes jagged staircase artefacts, rounds sharp
+          corners.  The agent learns to call this when the boundary is rough.
+    13    Stop (explicit terminal action)
+          Agent signals "satisfied" — episode ends immediately.  Reward = final
+          composite metric vs episode-start baseline (same as the terminal reward
+          on max_steps).  Encourages the agent to stop as soon as the mask is
+          good rather than padding out the full max_steps budget.
+    ────────────────────────────────────────────────────────────────
+    """
+
+    # ── Discrete action layout ────────────────────────────────────────────────
+    NUM_DISCRETE_ACTIONS  = 14
     DILATE_N, DILATE_E, DILATE_S, DILATE_W = 0, 1, 2, 3
     ERODE_N,  ERODE_E,  ERODE_S,  ERODE_W  = 4, 5, 6, 7
     SHIFT_U,  SHIFT_D,  SHIFT_L,  SHIFT_R  = 8, 9, 10, 11
-    NOOP                                    = 12
+    SMOOTH                                  = 12
+    STOP                                    = 13
 
     DISCRETE_NAMES = [
         'dil-N', 'dil-E', 'dil-S', 'dil-W',
         'ero-N', 'ero-E', 'ero-S', 'ero-W',
         'sh-↑', 'sh-↓', 'sh-←', 'sh-→',
-        'no-op',
+        'smooth', 'stop',
     ]
 
     # ── Continuous action layout (see module docstring) ──────────────────────
@@ -173,6 +196,12 @@ class SegmentationEnv:
         reward_alpha: float = 0.5,        # weight on Dice component (composite)
         reward_beta: float  = 0.5,        # weight on HD95 component (composite)
         hd_norm: float = 50.0,            # HD95 normalisation in px — tune to 2× expected HD95
+        # ── fail-fast (small-target datasets) ───────────────────────────────
+        fail_thresh: float = 0.0,         # >0 enables fail-fast: terminate if Dice
+                                          # drops ≥ fail_thresh below episode-start
+                                          # Dice for fail_n consecutive steps.
+                                          # 0.0 = disabled (default).
+        fail_n: int = 2,                  # consecutive bad steps before termination
     ):
         assert action_type in ('discrete', 'continuous')
         assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
@@ -196,6 +225,8 @@ class SegmentationEnv:
         self.reward_alpha     = reward_alpha
         self.reward_beta      = reward_beta
         self.hd_norm          = hd_norm
+        self.fail_thresh      = float(fail_thresh)
+        self.fail_n           = int(fail_n)
 
         self.reset()
 
@@ -271,14 +302,31 @@ class SegmentationEnv:
         return self._state()
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
-        if self.action_type == 'discrete':
-            self.mask = self._apply_discrete(int(action))
-        else:
-            self.mask = self._apply_continuous(action)
+        a = int(action) if self.action_type == 'discrete' else action
 
-        # Mask-empty guard: catastrophic erosion (especially on small BRISC
-        # tumours) can wipe the mask entirely.  Revert to init_mask so the
-        # episode can recover instead of being stuck at Dice 0.
+        # ── Explicit stop action (action 13 for discrete) ────────────────────
+        # The agent signals "satisfied". Episode terminates with the same reward
+        # as hitting max_steps — encourages stopping as soon as the mask is good.
+        if self.action_type == 'discrete' and a == self.STOP:
+            self.t += 1
+            new_dice = dice_score(self.mask, self.gt)
+            new_hd95 = self._hd95_vs_gt(self.mask) \
+                       if self.reward_mode == 'dice_hd_composite' else float('nan')
+            raw_reward = self._compute_reward(new_dice, new_hd95)
+            reward = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
+            info = {'dice': new_dice, 'hd95': new_hd95, 'delta_dice': raw_reward,
+                    'reward_clipped': reward != raw_reward, 'step': self.t,
+                    'stop_action': True}
+            return self._state(), reward, True, info
+
+        # ── Apply action ─────────────────────────────────────────────────────
+        if self.action_type == 'discrete':
+            self.mask = self._apply_discrete(a)
+        else:
+            self.mask = self._apply_continuous(a)
+
+        # Mask-empty guard: catastrophic erosion (especially on small targets)
+        # can wipe the mask. Revert to init_mask so the episode can recover.
         if not self.mask.any():
             self.mask = self.init_mask.copy()
 
@@ -296,7 +344,9 @@ class SegmentationEnv:
         self.dice_history.append(new_dice)
         self.hd95_history.append(new_hd95)
 
+        # ── Termination conditions ────────────────────────────────────────────
         done = self.t >= self.max_steps
+
         if not done and len(self.dice_history) > self.stop_n:
             dice_0 = self.dice_history[0]
 
@@ -321,6 +371,18 @@ class SegmentationEnv:
             else:
                 done = dice_converged or dice_improved
 
+        # Fail-fast (optional, primarily for small-target datasets like BRISC):
+        # terminate if Dice has been ≥ fail_thresh below init for fail_n steps.
+        if (not done and self.fail_thresh > 0.0
+                and len(self.dice_history) > self.fail_n):
+            dice_0 = self.dice_history[0]
+            recent_bad = all(
+                self.dice_history[-k-1] < dice_0 - self.fail_thresh
+                for k in range(self.fail_n)
+            )
+            if recent_bad:
+                done = True
+
         info = {
             'dice': new_dice,
             'hd95': new_hd95,
@@ -333,31 +395,38 @@ class SegmentationEnv:
     # ── private ──────────────────────────────────────────────────────────────
 
     def _apply_discrete(self, a: int) -> np.ndarray:
-        """13-action discrete dispatcher — see module docstring for layout.
+        """14-action discrete dispatcher — see class docstring for layout.
 
         Directional ops use 3-element SEs so each op only affects the boundary
-        segment facing that cardinal direction.  Band restriction (#2) is
-        automatic for 1-px ops: dilations only add pixels at raw_sdt = -1,
-        erosions only remove pixels at raw_sdt = +1 — both inside any
-        reasonable band_px (>= 1).
+        facing that cardinal direction — inherently "local" without needing an
+        explicit band mask.
         """
         sp = self.shift_px
-        # Directional dilate — push boundary out 1 px in one direction
+        # 0–3: directional dilate (expand boundary outward in one direction)
         if a == 0:  return ndi.binary_dilation(self.mask, SE_N).astype(np.uint8)
         if a == 1:  return ndi.binary_dilation(self.mask, SE_E).astype(np.uint8)
         if a == 2:  return ndi.binary_dilation(self.mask, SE_S).astype(np.uint8)
         if a == 3:  return ndi.binary_dilation(self.mask, SE_W).astype(np.uint8)
-        # Directional erode — pull boundary in 1 px from one direction
+        # 4–7: directional erode (shrink boundary inward from one direction)
         if a == 4:  return ndi.binary_erosion(self.mask, SE_N).astype(np.uint8)
         if a == 5:  return ndi.binary_erosion(self.mask, SE_E).astype(np.uint8)
         if a == 6:  return ndi.binary_erosion(self.mask, SE_S).astype(np.uint8)
         if a == 7:  return ndi.binary_erosion(self.mask, SE_W).astype(np.uint8)
-        # Whole-mask shifts
+        # 8–11: whole-mask shift (positional correction)
         if a == 8:  return shifted(self.mask, -sp,   0)   # ↑
         if a == 9:  return shifted(self.mask, +sp,   0)   # ↓
         if a == 10: return shifted(self.mask,   0, -sp)   # ←
         if a == 11: return shifted(self.mask,   0, +sp)   # →
-        if a == 12: return self.mask                       # no-op
+        # 12: smooth — morphological closing fills holes + softens staircase
+        if a == 12:
+            disk = ndi.generate_binary_structure(2, 1)   # 3×3 cross
+            smoothed = ndi.binary_closing(
+                self.mask.astype(bool), structure=disk, iterations=1
+            ).astype(np.uint8)
+            # Guard: don't let smooth accidentally wipe a tiny mask
+            return smoothed if smoothed.any() else self.mask
+        # 13: stop — handled in step(), mask unchanged until termination
+        if a == 13: return self.mask
         raise ValueError(f'Bad discrete action: {a}')
 
     def _apply_continuous(self, a) -> np.ndarray:

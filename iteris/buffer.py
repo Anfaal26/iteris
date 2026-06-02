@@ -20,67 +20,8 @@ from typing import Dict, Optional
 import numpy as np
 
 
-class ContourReplayBuffer:
-    """Uniform circular replay buffer for the tracing paradigm.
-
-    Unlike ``ReplayBuffer`` (which stores a compact sample_idx + mask and
-    reconstructs the full refinement state at sample time), tracing states are
-    small local patches that depend on the trajectory and cannot be rebuilt
-    from a sample index. So the (4, patch, patch) patch tensors are stored
-    directly. There is no SDT to cache here — the distance reward lives in the
-    env, not the state.
-
-    States are kept as float16 to halve host-RAM cost (patch values are image
-    intensities in [0, 1] plus binary layers — fp16 is ample); they are
-    upcast to float32 by the state-builder at update time.
-
-    The ``sample()`` output reuses the key names ``current_mask`` / ``next_mask``
-    so the existing ``DQNAgent.update(batch, state_builder)`` works unchanged:
-    pair this buffer with a state-builder that simply upcasts the stored patch
-    to a float32 tensor (see ``drl_training._make_patch_state_builder``).
-    """
-
-    def __init__(self, capacity: int, state_shape: tuple,
-                 action_dim: Optional[int] = None, discrete: bool = True):
-        if not discrete:
-            raise ValueError('ContourReplayBuffer is discrete-only (8 directions)')
-        self.capacity    = capacity
-        self.state_shape = state_shape          # (4, patch, patch)
-        self.cache_sdt   = False                # interface parity with ReplayBuffer
-
-        self.current_state = np.zeros((capacity, *state_shape), dtype=np.float16)
-        self.next_state    = np.zeros((capacity, *state_shape), dtype=np.float16)
-        self.action        = np.zeros(capacity, dtype=np.int64)
-        self.reward        = np.zeros(capacity, dtype=np.float32)
-        self.done          = np.zeros(capacity, dtype=np.uint8)
-
-        self.size = 0
-        self.head = 0
-
-    def push(self, current_state, action, reward, next_state, done):
-        i = self.head
-        self.current_state[i] = current_state.astype(np.float16)
-        self.next_state[i]    = next_state.astype(np.float16)
-        self.action[i]        = action
-        self.reward[i]        = reward
-        self.done[i]          = bool(done)
-        self.head = (self.head + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
-
-    def sample(self, batch_size: int) -> Dict[str, np.ndarray]:
-        idx = np.random.randint(0, self.size, size=batch_size)
-        return dict(
-            sample_idx   = idx,                 # unused by the patch builder; kept for parity
-            current_mask = self.current_state[idx],
-            next_mask    = self.next_state[idx],
-            action       = self.action[idx],
-            reward       = self.reward[idx],
-            done         = self.done[idx],
-        )
-
-    def __len__(self):
-        return self.size
-
+# NStepContourBuffer and ContourReplayBuffer were archived with Paradigm 1.
+# See iteris/archive/paradigm1_boundary_tracing/ for the full implementation.
 
 class ReplayBuffer:
     """Uniform circular replay buffer with cached SDT."""

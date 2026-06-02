@@ -1,4 +1,15 @@
 """
+ARCHIVED — Paradigm 1: Sequential Boundary Tracing.
+
+Retired on supervisor recommendation: 8-direction 1-pixel tracing produces
+staircase artifacts on smooth anatomical boundaries and has fundamental
+credit-assignment problems over 200-400 step episodes. Replaced by the
+improved local mask refinement paradigm (14-action SegmentationEnv).
+
+To resurrect: move this file back to iteris/env_contour.py, restore the
+_run_contour_training dispatch in drl_training.py, and add ContourTracingEnv
+back to ENV_REGISTRY. See git log for the full contour-training implementation.
+────────────────────────────────────────────────────────────────────────────────
 Sequential boundary-tracing environment (Paradigm 1).
 
 The agent walks the object boundary one pixel at a time. At each step it picks
@@ -234,13 +245,13 @@ class ContourTracingEnv:
         dist = float(self._gt_edt[new_point[0], new_point[1]])
         reward += self.reward_off_boundary * min(dist, self.reward_off_boundary_cap)
 
-        # (2b) On-boundary snap bonus — small extra reward for landing exactly
-        #      ON a GT boundary pixel (dist < 0.5).  Makes the boundary pixel
-        #      strictly more attractive than its 8-neighbour 1px away, pushing
-        #      the agent to commit to the exact boundary rather than cutting
-        #      corners.  Reduces the staircase on smooth curved sections.
-        if dist < 0.5:
-            reward += 0.10
+        # NOTE: snap bonus (+0.10 at dist<0.5) was tried and REMOVED.
+        # It created a premature-closure exploit: the agent closed 20-step
+        # loops near the seed (where dist≈0) to harvest snap rewards, achieving
+        # Dice 0.015 with 46% closure at step 5k. The terminal Dice gate
+        # (reward_closure_min_dice) couldn't prevent it because the coverage
+        # rewards + snaps + tiny Dice still beat exploring with the strong
+        # off-boundary penalty.
 
         info['dist']       = dist
         info['n_new_cov']  = int(n_new)

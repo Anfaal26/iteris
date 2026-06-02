@@ -48,12 +48,11 @@ hard_mining_scale: 5.0
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.
 agents:
+
   DDPG:
     agent_type:          DDPG
-    # 3-component action: (morph, dy_norm, dx_norm)
     cont_morph_scale:    0.25        # ±5 px dilation/erosion  (at sdt_clip=20)
     cont_trans_scale:    0.02        # ±5 px translation        (at H=256)
-    # Per-component OU noise — proportional to each scale
     ou_sigma:            [0.025, 0.002, 0.002]   # [morph, dy, dx]
     ou_theta:            0.15
     actor_lr:            1.0e-4
@@ -71,98 +70,38 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── Paradigm 1 — sequential boundary tracing (the agent draws the mask) ──────
-  # Selector name ends in _TRACE; agent_type stays DDQN so the refinement DDQN
-  # above and this tracing agent coexist.  env_class routes run_drl_training to
-  # the vectorised tracing loop.  See docs/CONTEXT_PARADIGM1.md.
-  # ── DQN_TRACE: basic Q-network boundary tracer (no target-network double trick) ──
   DQN:
-    agent_type:             DQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       400
-    closure_tolerance:      3
-    min_perimeter_steps:    100  # LVendo perimeter ~250px; 100 = 40% min before closure
+    agent_type:          DQN
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 25000
+    train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
-    # ── Precision-tuned reward ──────────────────────────────────────────────────
-    # Per-step:
-    reward_smoothness_penalty: -0.01    # mild smoothness (kept for CAMUS — LV boundaries
-                                        # are smooth; reduced from -0.02 to allow curvature)
-    coverage_tolerance:       1.2       # slightly looser than 1.0: LV perimeter ~250px
-                                        # on 256×256 — 1.0px was too sparse, slowing
-                                        # closure discovery (0% closure at step 15k).
-    reward_step_cost:         -0.01
-    reward_coverage_bonus:     0.25
-    reward_off_boundary:      -0.05
-    reward_off_boundary_cap:   5.0
-    # Terminal:
-    reward_terminal_dice:     10.0
-    reward_boundary_precision:  1.0     # boundary adherence. Reduced 3.0→1.0: at 3.0
-                                        # competed too strongly with terminal_dice and
-                                        # caused near-zero closure rates early in training.
-    reward_closure_min_dice:   0.20
-    reward_closure_bonus:      2.0
-    reward_offimage:          -10.0
-    lr:                     1.0e-4
-    gamma:                  0.99
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    50000       # 30k→50k: proportional to 100k budget
-    train_steps:            100000      # 50k→100k: curve was still rising at 50k
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
-
-  # ── DUELING_TRACE: dueling Q-network tracer (V + A heads, best for exploration) ──
   DuelingDDQN:
-    agent_type:             DUELING
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       400
-    closure_tolerance:      3
-    min_perimeter_steps:    100  # LVendo perimeter ~250px; 100 = 40% min before closure
-
-    # ── Precision-tuned reward ──────────────────────────────────────────────────
-    # Per-step:
-    reward_smoothness_penalty: -0.01    # mild smoothness (kept for CAMUS — LV boundaries
-                                        # are smooth; reduced from -0.02 to allow curvature)
-    coverage_tolerance:       1.2       # slightly looser than 1.0: LV perimeter ~250px
-                                        # on 256×256 — 1.0px was too sparse, slowing
-                                        # closure discovery (0% closure at step 15k).
-    reward_step_cost:         -0.01
-    reward_coverage_bonus:     0.25
-    reward_off_boundary:      -0.05
-    reward_off_boundary_cap:   5.0
-    # Terminal:
-    reward_terminal_dice:     10.0
-    reward_boundary_precision:  1.0     # boundary adherence. Reduced 3.0→1.0: at 3.0
-                                        # competed too strongly with terminal_dice and
-                                        # caused near-zero closure rates early in training.
-    reward_closure_min_dice:   0.20
-    reward_closure_bonus:      2.0
-    reward_offimage:          -10.0
-    lr:                     1.0e-4
-    gamma:                  0.99
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    50000       # 30k→50k: proportional to 100k budget
-    train_steps:            100000      # 50k→100k: curve was still rising at 50k
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DUELING
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000     # 10000→50000: retains 5× more experience
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 25000
+    train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
