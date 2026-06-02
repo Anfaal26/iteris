@@ -31,11 +31,9 @@ class DQNAgent:
     """
     DQN (vanilla / Double / Dueling) for discrete-action agents.
 
-    Active use: the boundary-tracing paradigm constructs this with ``patch=True``
-    and 8 directional actions (``ContourTracingEnv.NUM_DISCRETE_ACTIONS``).  The
-    full-image ``patch=False`` path (QNetwork / DuelingQNetwork, 13-action
-    refinement) is retained as a general fallback but is no longer exercised by
-    any shipped config.
+    Operates on the full-image (4, H, W) state via QNetwork / DuelingQNetwork.
+    num_actions = 14 to match SegmentationEnv v4 (4 dilate + 4 erode + 4 shift
+    + smooth + stop).
 
     Toggle behaviour via:
         double=True   → Double DQN target computation

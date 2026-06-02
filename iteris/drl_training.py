@@ -146,8 +146,6 @@ def run_drl_training(
     """Train one DRL agent for one (dataset, structure) combination."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    if cfg.get('env_class') == 'contour_tracing':
-
     seed = cfg.get('seed', 42)
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -238,7 +236,6 @@ def run_drl_training(
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
     # ── Agent ─────────────────────────────────────────────────────────────────
-    # branch below is retained for completeness but no shipped config routes a
     common = dict(in_channels=4, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
                   embed_dim=cfg.get('embed_dim', 256), device=device)

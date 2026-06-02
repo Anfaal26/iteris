@@ -21,7 +21,7 @@ DISCRETE (DQN family) — 13 actions, directional structuring elements:
 
     Note: this discrete refinement path is retained only because DDPG shares
     SegmentationEnv as its host env.  Discrete RL on segmentation now uses the
-    boundary-tracing paradigm (see iteris/env_contour.py).
+    boundary-tracing paradigm (archived: iteris/archive/paradigm1_boundary_tracing/).
 
 CONTINUOUS (DDPG family) — 3-component action:
     a[0]  morph    ∈ [-cont_morph_scale, +cont_morph_scale]   SDT threshold shift
