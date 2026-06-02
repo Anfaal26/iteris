@@ -103,15 +103,20 @@ describe('Landing page', () => {
     expect(links[0]).toHaveAttribute('href', '/workspace');
   });
 
-  it('renders View Our Research link to /research', () => {
+  it('renders View Research link to /research', () => {
     render(<Landing />);
-    const link = screen.getByRole('link', { name: /View Our Research/i });
-    expect(link).toHaveAttribute('href', '/research');
+    // CTA label changed to "View Research" in the redesign
+    const links = screen.getAllByRole('link', { name: /View Research/i });
+    expect(links.length).toBeGreaterThan(0);
+    expect(links[0]).toHaveAttribute('href', '/research');
   });
 
   it('renders the stat pill with best Dice score', () => {
     render(<Landing />);
-    expect(screen.getByText(/Best Dice 0\.912/i)).toBeInTheDocument();
+    // "0.912" and "Best Dice" are in separate spans — check both are present
+    const diceValues = screen.getAllByText('0.912');
+    expect(diceValues.length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Best Dice/i).length).toBeGreaterThan(0);
   });
 
   it('renders Feature Strip section', () => {
@@ -131,7 +136,8 @@ describe('Landing page', () => {
   it('renders Research Metrics section', () => {
     render(<Landing />);
     expect(screen.getByRole('region', { name: /research metrics/i })).toBeInTheDocument();
-    expect(screen.getByText('0.912')).toBeInTheDocument();
+    // 0.912 appears in both the stat pill and the metrics strip — just check it's present
+    expect(screen.getAllByText('0.912').length).toBeGreaterThan(0);
   });
 
   it('renders Model Preview with DDPG BEST badge', () => {

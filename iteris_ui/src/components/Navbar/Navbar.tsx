@@ -1,39 +1,32 @@
 /**
- * Navbar — top navigation bar with dark and light variants.
- * Transitions from transparent to frosted glass after 80 px of scroll.
- * Logo + wordmark on the left, centre links, right icon pills.
+ * Navbar — frosted-glass top navigation bar (redesigned for medical-imaging aesthetic).
+ *
+ * Dark variant (landing): always frosted ice-blue glass. A "mixed boundary" gradient
+ * div bleeds 56px below the bar, dissolving the edge softly into the page.
+ * Scroll past 80px ramps opacity from 52% → 82%.
+ *
+ * Light variant (workspace / research): clean clinical surface bar.
  */
 
 import React, { useState, useEffect } from 'react';
 import { LogoMark } from '@/components/LogoMark/LogoMark';
 import { ReadingRoomToggle } from '@/components/ReadingRoomToggle/ReadingRoomToggle';
 
-/** A single nav link item. */
 export interface NavItem {
   label: string;
   href: string;
 }
 
-/** Props for the Navbar component. */
 export interface NavbarProps {
-  /** Visual variant. @default 'dark' */
   variant?: 'dark' | 'light';
-  /** Centre navigation links. */
   navItems?: NavItem[];
-  /** Called when the search icon is activated. */
   onSearch?: () => void;
-  /** Called when the settings icon is activated. */
   onSettings?: () => void;
-  /** Additional class names. */
   className?: string;
 }
 
 const SCROLL_THRESHOLD = 80;
 
-/**
- * Primary navigation bar for the ITERIS workstation.
- * Becomes frosted glass (backdrop-blur + border-bottom) after 80 px scroll.
- */
 export const Navbar: React.FC<NavbarProps> = ({
   variant = 'dark',
   navItems = [],
@@ -42,120 +35,131 @@ export const Navbar: React.FC<NavbarProps> = ({
   className,
 }) => {
   const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > SCROLL_THRESHOLD);
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
   const isDark = variant === 'dark';
 
-  // Frosted glass uses the landing-bg token at 85% opacity (spec §10 Navbar scroll behaviour).
-  // CSS variable interpolation is used here so no raw hex appears in component code.
-  const frostedStyle: React.CSSProperties = scrolled
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > SCROLL_THRESHOLD);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const headerStyle: React.CSSProperties = isDark
     ? {
-        backgroundColor: 'color-mix(in srgb, var(--color-landing-bg) 85%, transparent)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderBottom: '1px solid var(--border)',
+        height: '64px',
+        background: scrolled ? 'rgba(3, 5, 8, 0.82)' : 'rgba(3, 5, 8, 0.52)',
+        backdropFilter: 'blur(24px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+        borderBottom: scrolled
+          ? '1px solid rgba(186, 230, 253, 0.08)'
+          : '1px solid transparent',
       }
-    : {};
+    : {
+        height: '56px',
+        background: 'var(--color-surface)',
+        borderBottom: '1px solid var(--color-border)',
+      };
+
+  const linkCls = isDark
+    ? 'text-[13px] font-body text-landing-text/60 hover:text-landing-text transition-colors duration-panel ease-out no-underline'
+    : 'text-[13px] font-body text-muted hover:text-text transition-colors duration-panel ease-out no-underline';
+
+  const iconCls = [
+    'flex items-center justify-center w-8 h-8 rounded-full transition-colors duration-panel ease-out',
+    isDark
+      ? 'text-landing-text/50 hover:text-landing-text hover:bg-white/[0.06]'
+      : 'text-muted hover:text-text hover:bg-black/[0.04]',
+  ].join(' ');
 
   return (
-    <header
-      role="banner"
-      className={[
-        'fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6',
-        'h-navbar transition-all duration-panel ease-out',
-        isDark ? 'text-landing-text' : 'text-text',
-        !scrolled && isDark ? 'bg-transparent' : '',
-        !scrolled && !isDark ? 'bg-surface border-b border-border' : '',
-        className ?? '',
-      ].join(' ')}
-      style={scrolled ? frostedStyle : undefined}
-    >
-      {/* Left: logo + wordmark */}
-      <a
-        href="/"
-        className="flex items-center gap-2 font-heading font-semibold text-base no-underline"
-        aria-label="Iteris home"
+    <>
+      <header
+        role="banner"
+        className={[
+          'fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6 lg:px-10',
+          'transition-all duration-slide ease-out',
+          isDark ? 'text-landing-text' : 'text-text',
+          className ?? '',
+        ].join(' ')}
+        style={headerStyle}
       >
-        <LogoMark
-          size={28}
-          className={isDark ? 'text-grad-a' : 'text-accent'}
-          ariaLabel=""
+        {/* Left — logo + wordmark */}
+        <a href="/" className="flex items-center gap-2.5 no-underline flex-shrink-0" aria-label="Iteris home">
+          <LogoMark size={26} className={isDark ? 'text-grad-b' : 'text-accent'} ariaLabel="" />
+          <span className={[
+            'font-heading font-semibold tracking-[0.06em] text-sm',
+            isDark ? 'text-landing-text' : 'text-text',
+          ].join(' ')}>
+            ITERIS
+          </span>
+        </a>
+
+        {/* Centre — nav links */}
+        {navItems.length > 0 && (
+          <nav aria-label="Main navigation" className="hidden md:block">
+            <ul className="flex items-center gap-8 list-none m-0 p-0">
+              {navItems.map((item) => (
+                <li key={item.href}>
+                  <a href={item.href} className={linkCls}>{item.label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+
+        {/* Right — icons + CTA */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <ReadingRoomToggle className={isDark ? 'text-landing-text/50 hover:text-landing-text' : ''} />
+
+          {onSearch && (
+            <button type="button" onClick={onSearch} aria-label="Open search" className={iconCls}>
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                <circle cx="6.5" cy="6.5" r="4.5" /><line x1="10" y1="10" x2="14" y2="14" />
+              </svg>
+            </button>
+          )}
+
+          {onSettings && (
+            <button type="button" onClick={onSettings} aria-label="Open settings" className={iconCls}>
+              <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+              </svg>
+            </button>
+          )}
+
+          {/* Primary CTA pill — dark variant only */}
+          {isDark && (
+            <a
+              href="/workspace"
+              className="ml-3 hidden sm:flex items-center gap-1.5 rounded-full px-4 py-1.5
+                         text-[12px] font-heading font-semibold tracking-wide
+                         border text-grad-b
+                         hover:bg-grad-b/10
+                         transition-all duration-panel ease-out no-underline"
+              style={{ borderColor: 'rgba(56,189,248,0.3)', background: 'rgba(56,189,248,0.07)' }}
+            >
+              Try Iteris
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                <path d="M2 5h6M5 2l3 3-3 3" />
+              </svg>
+            </a>
+          )}
+        </div>
+      </header>
+
+      {/* Mixed boundary — hazy gradient that bleeds from nav edge into page (dark only).
+          This dissolves the nav bottom edge rather than leaving a hard line. */}
+      {isDark && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-x-0 z-40 pointer-events-none"
+          style={{
+            top: '64px',
+            height: '60px',
+            background: 'linear-gradient(to bottom, rgba(3,5,8,0.4) 0%, transparent 100%)',
+          }}
         />
-        <span className={isDark ? 'text-landing-text' : 'text-text'}>ITERIS</span>
-      </a>
-
-      {/* Centre: nav links */}
-      {navItems.length > 0 && (
-        <nav aria-label="Main navigation">
-          <ul className="flex items-center gap-6 list-none m-0 p-0">
-            {navItems.map((item) => (
-              <li key={item.href}>
-                <a
-                  href={item.href}
-                  className={[
-                    'text-sm font-body no-underline transition-colors duration-panel ease-out',
-                    isDark
-                      ? 'text-landing-text/70 hover:text-landing-text'
-                      : 'text-muted hover:text-text',
-                  ].join(' ')}
-                >
-                  {item.label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
       )}
-
-      {/* Right: icon pills */}
-      <div className="flex items-center gap-1">
-        <ReadingRoomToggle className={isDark ? 'text-landing-text/70 hover:text-landing-text' : ''} />
-
-        {onSearch && (
-          <button
-            type="button"
-            onClick={onSearch}
-            aria-label="Open search"
-            className={[
-              'flex items-center justify-center w-8 h-8 rounded-md',
-              'transition-colors duration-panel ease-out',
-              isDark
-                ? 'text-landing-text/70 hover:text-landing-text'
-                : 'text-muted hover:text-text',
-            ].join(' ')}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              <circle cx="6.5" cy="6.5" r="4.5" />
-              <line x1="10" y1="10" x2="14" y2="14" />
-            </svg>
-          </button>
-        )}
-
-        {onSettings && (
-          <button
-            type="button"
-            onClick={onSettings}
-            aria-label="Open settings"
-            className={[
-              'flex items-center justify-center w-8 h-8 rounded-md',
-              'transition-colors duration-panel ease-out',
-              isDark
-                ? 'text-landing-text/70 hover:text-landing-text'
-                : 'text-muted hover:text-text',
-            ].join(' ')}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm6.53-2.65a6.1 6.1 0 0 0 .05-.35l1-.78a.25.25 0 0 0 .06-.32l-.94-1.63a.25.25 0 0 0-.3-.11l-1.17.47a5.5 5.5 0 0 0-.6-.35l-.18-1.24A.25.25 0 0 0 12.2 3H10.8a.25.25 0 0 0-.25.21l-.18 1.24c-.2.1-.4.22-.6.35L8.6 4.33a.25.25 0 0 0-.3.11L7.36 6.07a.25.25 0 0 0 .06.32l1 .78c-.02.12-.04.23-.04.35s.02.23.04.35l-1 .78a.25.25 0 0 0-.06.32l.94 1.63c.06.11.19.15.3.11l1.17-.47c.19.13.39.25.6.35l.18 1.24c.04.13.15.21.25.21h1.4c.11 0 .21-.08.25-.21l.18-1.24c.2-.1.4-.22.6-.35l1.17.47c.11.04.24 0 .3-.11l.94-1.63a.25.25 0 0 0-.06-.32l-1-.78z" />
-            </svg>
-          </button>
-        )}
-      </div>
-    </header>
+    </>
   );
 };
 

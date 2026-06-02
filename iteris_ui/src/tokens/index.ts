@@ -30,10 +30,10 @@ export const colors = {
 
 /** Raw hex values for contexts that cannot resolve CSS vars (e.g. WebGL on canvas). */
 export const colorsHex = {
-  landingBg: '#05070c',
-  gradientA: '#0adcff',
-  gradientB: '#4d8fff',
-  gradientC: '#8c50f0',
+  landingBg: '#030508',
+  gradientA: '#bae6fd',   /* ice-white / MRI highlight  */
+  gradientB: '#38bdf8',   /* scanner blue               */
+  gradientC: '#0ea5e9',   /* deep imaging blue          */
   accent: '#0a7ea4',
 } as const;
 

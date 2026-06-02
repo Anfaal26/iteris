@@ -1,3 +1,8 @@
+/* Tailwind directives — MUST be first so utilities are generated */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /*
  * ITERIS DESIGN SYSTEM — CANONICAL TOKENS (spec §10)
  * --------------------------------------------------------------------------
@@ -21,12 +26,23 @@
   --color-uncertainty: #7c3aed; /* confidence overlays */
 
   /* ---- Landing page only (dark) ---- */
-  --color-landing-bg: #05070c;
-  --color-landing-text: #ffffff;
-  --color-landing-footer: #04050a;
-  --color-gradient-a: #0adcff;
-  --color-gradient-b: #4d8fff;
-  --color-gradient-c: #8c50f0;
+  /* Medical imaging cold-blue palette */
+  --color-landing-bg: #030508;
+  --color-landing-text: #f0f9ff;
+  --color-landing-footer: #020407;
+  --color-gradient-a: #bae6fd;   /* ice-white / MRI highlight           */
+  --color-gradient-b: #38bdf8;   /* scanner blue / contrast-agent cyan  */
+  --color-gradient-c: #0ea5e9;   /* deep imaging blue                   */
+
+  /* Glass / frost utilities */
+  --glass-bg:          rgba(56, 189, 248, 0.04);
+  --glass-bg-hover:    rgba(56, 189, 248, 0.09);
+  --glass-border:      rgba(186, 230, 253, 0.10);
+  --glass-border-glow: rgba(56, 189, 248, 0.35);
+  --glass-blur:        24px;
+
+  /* DICOM crosshair scan-grid texture */
+  --scan-grid:         rgba(56, 189, 248, 0.028);
 
   /* ---- Mask colours — RESERVED. Never reused in UI chrome. ---- */
   --mask-lv-endo: #00c9a7;
