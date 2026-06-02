@@ -23,39 +23,29 @@ import pandas as pd
 import torch
 from tqdm.auto import trange
 
-from .env         import (SegmentationEnv,
-                          signed_dt, dice_score, hd95_px)
-from .env_contour import ContourTracingEnv, VectorisedContourEnv
-from .buffer      import ReplayBuffer, ContourReplayBuffer
-from .agents      import DQNAgent, DuelingDQNAgent, DDPGAgent
+from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
+from .buffer  import ReplayBuffer
+from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent
 
 
 # ─── Environment registry ────────────────────────────────────────────────────
-# Selected via cfg['env_class']:
-#   'default'         → SegmentationEnv    (DDPG continuous baseline — mask
-#                                           morphology, kept for the paper's
-#                                           continuous comparison)
-#   'contour_tracing' → ContourTracingEnv  (8 directional actions, Paradigm 1 —
-#                                           the active paradigm for discrete RL)
-#
-# The BRISC small-target refinement env (SegmentationEnvBRISC) was archived
-# when the discrete paradigm shifted to boundary tracing; see
-# iteris/archive/env_brisc.py if you ever need to resurrect it.
+# All discrete agents use SegmentationEnv (14-action local mask refinement).
+# 'default' is the only active env_class; it applies to both CAMUS and BRISC
+# (BRISC uses fail_thresh / fail_n config keys for fail-fast termination).
+# Archived: ContourTracingEnv (Paradigm 1, boundary tracing) — see
+#   iteris/archive/paradigm1_boundary_tracing/env_contour.py
 ENV_REGISTRY = {
-    'default':         SegmentationEnv,
-    'contour_tracing': ContourTracingEnv,
+    'default': SegmentationEnv,
 }
 
 CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
 
 
 AGENT_REGISTRY = {
-    'DQN':     (DQNAgent,        'discrete'),    # boundary tracing (patch net)
-    'DUELING': (DuelingDQNAgent, 'discrete'),    # boundary tracing (patch dueling)
-    'DDPG':    (DDPGAgent,       'continuous'),  # continuous mask-morph baseline
+    'DQN':     (DQNAgent,        'discrete'),   # 14-action local mask refinement
+    'DUELING': (DuelingDQNAgent, 'discrete'),   # same, with V+A dueling heads
+    'DDPG':    (DDPGAgent,       'continuous'), # 3-D continuous morph+shift baseline
 }
-# DDQN and MSA-DUELING agents were archived in the boundary-tracing paradigm
-# shift — see iteris/archive/agents_legacy.py and iteris/archive/msa.py.
 
 
 def _build_state_caches(samples: List[dict], image_size: int) -> dict:
@@ -148,236 +138,6 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
     )
 
 
-# ─── Tracing paradigm (Paradigm 1) ────────────────────────────────────────────
-# Separate training path: vectorised envs + patch states + rasterise-then-score
-# eval. The refinement path above is untouched (rollback = don't select a
-# *_TRACE agent / contour_tracing env_class).
-
-_CONTOUR_ENV_KEYS = (
-    'patch_size', 'max_trace_length', 'closure_tolerance', 'min_perimeter_steps',
-    'coverage_tolerance', 'reward_step_cost', 'reward_coverage_bonus',
-    'reward_off_boundary', 'reward_off_boundary_cap', 'reward_offimage',
-    'reward_terminal_dice', 'reward_boundary_precision',
-    'reward_closure_min_dice', 'reward_closure_bonus',
-    'seed_method', 'reward_smoothness_penalty',
-)
-
-
-def _make_patch_state_builder():
-    """Builder (idx, stored_patch, cached_sdt=None) → torch (4, patch, patch).
-
-    The ContourReplayBuffer stores patch tensors directly (as float16), so the
-    builder just upcasts to float32. The (idx, cached_sdt) args exist only so
-    DQNAgent.update can call this with the same signature as the refinement
-    state-builder.
-    """
-    def build(idx, stored_patch, cached_sdt=None):
-        return torch.from_numpy(np.asarray(stored_patch, dtype=np.float32))
-    return build
-
-
-def _contour_env_kwargs(cfg: dict) -> dict:
-    kw = {}
-    for k in _CONTOUR_ENV_KEYS:
-        if k in cfg:
-            kw[k] = cfg[k]
-    return kw
-
-
-def _make_contour_env(caches: dict, idx: int, env_kwargs: dict) -> ContourTracingEnv:
-    return ContourTracingEnv(
-        image     = caches['image'][idx],
-        gt_mask   = caches['gt_mask'][idx],
-        init_mask = caches['init_mask'][idx],
-        **env_kwargs,
-    )
-
-
-@torch.no_grad()
-def _evaluate_contour(agent, caches: dict, env_kwargs: dict,
-                      subset: int = None) -> dict:
-    """Greedy trace → rasterise → Dice/HD95. Also reports closure rate.
-
-    ``subset`` limits how many samples are scored (option 3 — fast in-training
-    eval); pass None for the full set (final pass).
-    """
-    n_total = len(caches['image'])
-    n = n_total if subset is None else min(subset, n_total)
-
-    init_d, final_d, final_h, closed = [], [], [], []
-    for i in range(n):
-        env = _make_contour_env(caches, i, env_kwargs)
-        state = env.reset()
-        init_d.append(dice_score(env.init_mask, env.gt))
-        info = {'closed': False}
-        while True:
-            a = agent.select_action(state, epsilon=0.0)
-            state, _, done, info = env.step(a)
-            if done:
-                break
-        final_mask = env.get_final_mask()
-        final_d.append(dice_score(final_mask, env.gt))
-        final_h.append(hd95_px(final_mask, env.gt))
-        closed.append(bool(info.get('closed', False)))
-
-    return dict(
-        init_dice_mean  = float(np.mean(init_d)),
-        final_dice_mean = float(np.mean(final_d)),
-        final_hd95_mean = float(np.nanmean(final_h)),
-        delta_dice_mean = float(np.mean([f - i for f, i in zip(final_d, init_d)])),
-        closure_rate    = float(np.mean(closed)),
-    )
-
-
-def _run_contour_training(cfg: dict, train_samples: List[dict],
-                          val_samples: List[dict], device) -> dict:
-    """Vectorised tracing-paradigm training loop. Returns the same dict shape
-    as run_drl_training."""
-    seed = cfg.get('seed', 42)
-    random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-    agent_cls, action_type = AGENT_REGISTRY[cfg['agent_type'].upper()]
-    if action_type != 'discrete':
-        raise ValueError('contour_tracing supports discrete agents only')
-
-    train_caches = _build_state_caches(train_samples, cfg['image_size'])
-    val_caches   = _build_state_caches(val_samples,   cfg['image_size'])
-
-    env_kwargs = _contour_env_kwargs(cfg)
-    patch_size = cfg.get('patch_size', 64)
-    state_shape = (4, patch_size, patch_size)
-
-    # ── Agent (patch=True → PatchQNetwork / PatchDuelingQNetwork) ─────────────
-    agent = agent_cls(
-        in_channels = 4,
-        num_actions = ContourTracingEnv.NUM_DISCRETE_ACTIONS,
-        lr          = cfg.get('lr', 1e-4),
-        gamma       = cfg.get('gamma', 0.99),
-        tau         = cfg.get('tau', 0.005),
-        embed_dim   = cfg.get('embed_dim', 128),
-        patch       = True,
-        device      = device,
-    )
-    state_builder = _make_patch_state_builder()
-
-    buffer = ContourReplayBuffer(
-        capacity    = cfg.get('buffer_size', 50000),
-        state_shape = state_shape,
-        discrete    = True,
-    )
-
-    n_envs   = cfg.get('num_envs', 16)
-    num_act  = ContourTracingEnv.NUM_DISCRETE_ACTIONS
-    sampler  = lambda: np.random.randint(len(train_samples))
-
-    print(f"[drl] env_class=contour_tracing (ContourTracingEnv) | "
-          f"discrete actions={num_act} | action_type=discrete | "
-          f"num_envs={n_envs} (vectorised)")
-
-    venv  = VectorisedContourEnv(
-        [_make_contour_env(train_caches, sampler(), env_kwargs) for _ in range(n_envs)]
-    )
-    states = venv.reset_all()
-
-    def _step_and_store(actions):
-        nonlocal states
-        next_states, rewards, dones, infos = venv.step_all(actions)
-        for k in range(n_envs):
-            buffer.push(states[k], actions[k], rewards[k], next_states[k], dones[k])
-        states = next_states.copy()
-        # Auto-reset finished slots with a fresh sample (keeps the batch full).
-        for k in range(n_envs):
-            if dones[k]:
-                states[k] = venv.replace(
-                    k, _make_contour_env(train_caches, sampler(), env_kwargs))
-        return infos
-
-    # ── Pre-fill with random rollouts ─────────────────────────────────────────
-    prefill_steps = cfg.get('prefill_steps', 2000)
-    print(f'[drl] Pre-filling buffer with {prefill_steps} random transitions...')
-    while len(buffer) < prefill_steps:
-        _step_and_store(np.random.randint(num_act, size=n_envs))
-    print(f'[drl] Buffer size: {len(buffer)}')
-
-    # ── Main loop: each iteration = one batched step over n_envs + grad updates
-    train_steps     = cfg.get('train_steps', 30000)
-    eval_every      = cfg.get('eval_every', 5000)
-    batch_size      = cfg.get('batch_size', 64)
-    val_subset      = cfg.get('val_subset', 50)
-    grad_updates    = cfg.get('grad_updates', 1)
-    eps_start       = cfg.get('epsilon_start', 1.0)
-    eps_end         = cfg.get('epsilon_end', 0.05)
-    eps_decay_steps = cfg.get('epsilon_decay_steps', train_steps * 0.6)
-    target_class    = cfg.get('target_class', 1)
-
-    history   = []
-    best_dice = 0.0
-    ckpt_dir  = Path(cfg.get('checkpoint_dir', '/kaggle/working'))
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path = ckpt_dir / (f"{cfg.get('dataset','camus').lower()}_"
-                            f"{cfg['agent_type'].lower()}_trace_c{target_class}_best.pt")
-
-    print(f'[drl] Training: {train_steps} steps  →  {ckpt_path}')
-    pbar = trange(train_steps, desc=f"{cfg['agent_type']}_TRACE c{target_class}")
-
-    for step in range(1, train_steps + 1):
-        epsilon = max(eps_end, eps_start - (eps_start - eps_end) * step / eps_decay_steps)
-
-        # ONE batched forward for greedy actions across all envs (option 1).
-        s_t = torch.from_numpy(states.astype(np.float32)).to(device)
-        with torch.no_grad():
-            greedy = agent.q(s_t).argmax(dim=1).cpu().numpy()
-        rand_mask = np.random.random(n_envs) < epsilon
-        actions = np.where(rand_mask, np.random.randint(num_act, size=n_envs), greedy)
-
-        _step_and_store(actions)
-
-        for _ in range(grad_updates):
-            if len(buffer) >= batch_size:
-                agent.update(buffer.sample(batch_size), state_builder)
-
-        pbar.update(1)
-
-        if step % eval_every == 0:
-            metrics = _evaluate_contour(agent, val_caches, env_kwargs, subset=val_subset)
-            metrics['step'] = step
-            metrics['epsilon'] = epsilon
-            history.append(metrics)
-            improved = metrics['final_dice_mean'] > best_dice
-            if improved:
-                best_dice = metrics['final_dice_mean']
-                _save_agent(agent, history, best_dice, ckpt_path)
-            pbar.write(
-                f"step {step:6d} | init {metrics['init_dice_mean']:.4f} "
-                f"→ final {metrics['final_dice_mean']:.4f} "
-                f"(Δ {metrics['delta_dice_mean']:+.4f}, HD95 {metrics['final_hd95_mean']:.2f}px, "
-                f"closure {metrics['closure_rate']*100:.0f}%)"
-                f"{' ✓' if improved else ''}"
-            )
-
-    pbar.close()
-
-    # Final full-val pass (option 3: subset during training, full at the end).
-    final_metrics = _evaluate_contour(agent, val_caches, env_kwargs, subset=None)
-    final_metrics['step'] = train_steps
-    final_metrics['epsilon'] = eps_end
-    history.append(final_metrics)
-    if final_metrics['final_dice_mean'] > best_dice:
-        best_dice = final_metrics['final_dice_mean']
-        _save_agent(agent, history, best_dice, ckpt_path)
-    print(f"[drl] Done. Best val final-Dice: {best_dice:.4f} | "
-          f"final-pass closure {final_metrics['closure_rate']*100:.0f}%")
-
-    return dict(
-        agent      = agent,
-        history    = pd.DataFrame(history),
-        best_dice  = best_dice,
-        checkpoint = str(ckpt_path),
-    )
-
-
 def run_drl_training(
     cfg: dict,
     train_samples: List[dict],
@@ -386,9 +146,7 @@ def run_drl_training(
     """Train one DRL agent for one (dataset, structure) combination."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Tracing paradigm uses a dedicated vectorised loop.
     if cfg.get('env_class') == 'contour_tracing':
-        return _run_contour_training(cfg, train_samples, val_samples, device)
 
     seed = cfg.get('seed', 42)
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
@@ -400,11 +158,8 @@ def run_drl_training(
     H = image_size
 
     # ── Environment class selection ──────────────────────────────────────────
-    # Continuous (DDPG) → base SegmentationEnv (mask morphology, the only
-    # remaining mask-morph path; kept as the paper's continuous baseline).
-    # Discrete agents pick from ENV_REGISTRY via cfg['env_class'].  Boundary
-    # tracing is handled by an earlier dispatch to _run_contour_training, so
-    # this branch effectively only sees 'default' (DDPG).
+    # All agents use SegmentationEnv (14-action local mask refinement).
+    # env_class is always 'default' — kept as a config key for forward compat.
     env_class_name = cfg.get('env_class', 'default')
     if action_type == 'continuous':
         env_cls = SegmentationEnv
@@ -483,9 +238,7 @@ def run_drl_training(
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
     # ── Agent ─────────────────────────────────────────────────────────────────
-    # This non-tracing path is reached only by DDPG (continuous). The discrete
     # branch below is retained for completeness but no shipped config routes a
-    # discrete agent here — discrete RL dispatches to _run_contour_training.
     common = dict(in_channels=4, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
                   embed_dim=cfg.get('embed_dim', 256), device=device)

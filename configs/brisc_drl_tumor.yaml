@@ -8,17 +8,12 @@
 #
 # ── Algorithms ───────────────────────────────────────────────────────────────
 #
-# Discrete (boundary tracing — the active paradigm):
-#   DQN          — 8 directional actions, 64×64 patch state, ContourTracingEnv.
-#                  Agent walks the GT boundary step-by-step; the trajectory IS
-#                  the segmentation.
-#   DuelingDDQN  — same env, V(s) + A(s,a) heads.
+# DQN / DuelingDDQN — 14-action local mask refinement (SegmentationEnv v4):
+#   4 directional dilations + 4 directional erosions + 4 shifts + smooth + stop.
+#   Reward: iou_delta (smoother for small tumours).
 #
-# Continuous (kept as the paper's continuous baseline only):
-#   DDPG         — 3-D continuous action (morph, dy, dx) on base SegmentationEnv
-#                  (mask morphology). This is the only remaining mask-morph path
-#                  in the codebase; discrete refinement was retired in favour of
-#                  boundary tracing.
+# DDPG — 3-D continuous action (morph, dy, dx) on the same SegmentationEnv.
+#   Kept as the paper's continuous comparison baseline.
 
 target_class:        1
 class_name:          tumor
@@ -37,9 +32,7 @@ reward_alpha:  1.0                # not used for iou_delta; kept for composite a
 reward_beta:   0.0                # not used for iou_delta
 hd_norm:       17.0               # 2× mean HD95 (~8.36 px) — for ablation only
 
-# ── Environment (DDPG continuous baseline) ──────────────────────────────────
-# These are only consumed by the DDPG SegmentationEnv path. The discrete
-# boundary-tracing agents have their own env params in their own blocks.
+# ── Environment (shared by all agents — SegmentationEnv v4) ─────────────────
 image_size:        256
 max_steps:         20
 shift_px:          1
@@ -56,9 +49,6 @@ hard_mining_scale: 3.0
 # ── Per-agent hyperparams ────────────────────────────────────────────────────
 agents:
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # DDPG — continuous baseline (mask morphology, SegmentationEnv)
-  # ──────────────────────────────────────────────────────────────────────────
   DDPG:
     agent_type:          DDPG
     # env_class implicitly 'default' (continuous always uses base env)
@@ -81,113 +71,38 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Paradigm 1 — sequential boundary tracing (the agent draws the mask)
-  # ──────────────────────────────────────────────────────────────────────────
-  # Tumours are blobs, not contours, but every blob has a boundary the agent can
-  # trace.  Largest-CC only (multi-focal tumours are a documented v1 limitation).
-  # Shorter perimeter (~100 px for a 30-px tumour) → smaller max_trace_length,
-  # looser closure_tolerance (irregular shapes), smaller min_perimeter_steps.
   DQN:
-    agent_type:             DQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       300      # 200→300: covers glioma upper-tail perimeters
-                                     # (mean tumour area 1.95% → perimeter ~127px;
-                                     #  large gliomas can exceed 250px; 300 = safe margin)
-    closure_tolerance:      4        # looser: irregular tumour boundaries
-    min_perimeter_steps:    20
-
-    # ── Precision-tuned reward (fix for smoothed-peak / engulfed-segment issue) ──
-    # Per-step:
-    reward_smoothness_penalty:  0.0     # OFF for BRISC — irregular tumor shapes need
-                                        # sharp turns to trace protrusions/concavities.
-                                        # Keeping this non-zero forces smooth arcs that
-                                        # miss fine boundary features.
-    coverage_tolerance:       1.0       # tighter (was 1.5px): agent must be ON the
-                                        # boundary to earn the coverage bonus, not nearby.
-    reward_step_cost:         -0.01     # mild time pressure
-    reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
-    reward_off_boundary:      -0.15     # stronger gradient (was -0.05): at -0.05 the agent
-                                        # could drift 5px inside while still net-positive.
-                                        # At -0.15: 3px inside costs -0.45/step, which clearly
-                                        # exceeds coverage bonus (+0.25) → agent stays on boundary.
-    reward_off_boundary_cap:   3.0     # tighter cap (was 5.0): strong gradient applies within
-                                        # 3px of boundary (the precision zone). Max cost: -0.45/step.
-    # Terminal:
-    reward_terminal_dice:     10.0      # area overlap — main objective
-    reward_boundary_precision:  1.0     # boundary adherence (fraction of GT boundary visited).
-                                        # Reduced 3.0→1.0: at 3.0 competed too strongly with
-                                        # reward_terminal_dice, slowing convergence.
-    reward_closure_min_dice:   0.20     # anti-empty-loop gate
-    reward_closure_bonus:      2.0      # +2·Dice on proper closure
-    reward_offimage:          -10.0     # hard off-image penalty
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            40000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    25000   # 15k→25k: exploration covers full budget
-    train_steps:            50000   # 25k→50k: curve hadn't plateaued at 25k
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DQN
+    lr:                  1.0e-4
+    gamma:               0.95
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         30000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 15000
+    train_steps:         30000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
   DuelingDDQN:
-    agent_type:             DUELING
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       300      # 200→300: covers glioma upper-tail perimeters
-                                     # (mean tumour area 1.95% → perimeter ~127px;
-                                     #  large gliomas can exceed 250px; 300 = safe margin)
-    closure_tolerance:      4
-    min_perimeter_steps:    20
-
-    # ── Precision-tuned reward (fix for smoothed-peak / engulfed-segment issue) ──
-    # Per-step:
-    reward_smoothness_penalty:  0.0     # OFF for BRISC — irregular tumor shapes need
-                                        # sharp turns to trace protrusions/concavities.
-                                        # Keeping this non-zero forces smooth arcs that
-                                        # miss fine boundary features.
-    coverage_tolerance:       1.0       # tighter (was 1.5px): agent must be ON the
-                                        # boundary to earn the coverage bonus, not nearby.
-    reward_step_cost:         -0.01     # mild time pressure
-    reward_coverage_bonus:     0.25     # raised (was 0.20): compensate for tighter tolerance
-    reward_off_boundary:      -0.15     # stronger gradient (was -0.05): at -0.05 the agent
-                                        # could drift 5px inside while still net-positive.
-                                        # At -0.15: 3px inside costs -0.45/step, which clearly
-                                        # exceeds coverage bonus (+0.25) → agent stays on boundary.
-    reward_off_boundary_cap:   3.0     # tighter cap (was 5.0): strong gradient applies within
-                                        # 3px of boundary (the precision zone). Max cost: -0.45/step.
-    # Terminal:
-    reward_terminal_dice:     10.0      # area overlap — main objective
-    reward_boundary_precision:  1.0     # boundary adherence (fraction of GT boundary visited).
-                                        # Reduced 3.0→1.0: at 3.0 competed too strongly with
-                                        # reward_terminal_dice, slowing convergence.
-    reward_closure_min_dice:   0.20     # anti-empty-loop gate
-    reward_closure_bonus:      2.0      # +2·Dice on proper closure
-    reward_offimage:          -10.0     # hard off-image penalty
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            40000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    25000   # 15k→25k: exploration covers full budget
-    train_steps:            50000   # 25k→50k: curve hadn't plateaued at 25k
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DUELING
+    lr:                  1.0e-4
+    gamma:               0.95
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         30000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 15000
+    train_steps:         30000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working

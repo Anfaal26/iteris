@@ -1,116 +1,98 @@
 # Iteris — Implementation Plan
 
-> Strategic document. Read before adding features, configs, or notebooks.
-> **Last updated:** 2026-06-01. Supersedes all prior plan documents.
+> **Last updated:** 2026-06-02. Paradigm restored to local mask refinement.
 
 ---
 
 ## 1. Engineering Principles
 
-1. **Notebooks are thin.** All logic lives in `iteris/`. Notebooks are ~50 lines: import, configure, call, display. Fix bugs in one file, not seven notebooks.
-2. **Configs are YAML.** No hardcoded hyperparameters in Python. Every dataset/agent has a YAML in `configs/`.
-3. **Dataset-agnostic core.** `models.py`, `metrics.py`, `training.py` consume `(image, label)` tensors and a `cfg` dict — they know nothing about CAMUS vs BRISC.
-4. **Modality-aware edges.** `ingestion.py` has per-dataset builders. `transforms.py` switches preprocessing on `cfg['normalize']` (minmax / zscore / hu). This is the entire surface area for a new dataset.
-5. **Separate paradigm paths.** Tracing (`_run_contour_training`) and refinement (DDPG) dispatch at the top of `run_drl_training` based on `cfg['env_class']`. Neither path touches the other.
+1. **Notebooks are thin.** All logic in `iteris/`. Notebooks: import → configure → call → display.
+2. **Configs are YAML.** No hardcoded hyperparameters. Every dataset/agent has a YAML in `configs/`.
+3. **Episode-start baseline reward.** `r_t = metric(t) - metric(0)` — eliminates the oscillation trap.
+4. **Hard-sample mining.** Weighting ∝ `exp((1-init_dice) * scale)` — amplifies signal from hard samples.
 
 ---
 
 ## 2. Current Status
 
-### Complete ✓
+### ✅ Complete
 
 | Item | Notes |
 |---|---|
-| CAMUS U-Net baseline | Dice 0.938/0.872/0.896 (c1/c2/c3) · checkpoint `camus_best.pt` |
-| BRISC U-Net baseline | Dice 0.835 test · checkpoint `brisc_best.pt` |
-| Boundary-tracing env | `ContourTracingEnv`, `VectorisedContourEnv`, GT-EDT precompute, 8-direction action |
-| Region-aware reward | Terminal Dice (+10·D) dominant; coverage bonus; conditional closure gate |
-| Seed Option A | Best-overlap CC + GT fallback at init_Dice < 0.30; centroid variant for BRISC |
-| Agent + network | `DQNAgent`, `DuelingDQNAgent` with `patch=True`; `PatchQNetwork`, `PatchDuelingQNetwork` |
-| Training loop | `_run_contour_training` — vectorised 16-env, prefill, ε-greedy, eval subset, checkpoint |
-| Viz + diagnostics | `contour_viz.py`, `dryrun_viz.py` |
-| BRISC 25k validation | DuelingDDQN: test Dice 0.806, HD95 8.76px, closure 87.6% — reward confirmed working |
-| Phase B fixes | CAMUS steps bumped (50k/60k), centroid seed, smoothness penalty, T_max 300 for BRISC |
-| BRISC per-type configs | Optional glioma/meningioma/pituitary configs with tuned T_max |
+| CAMUS + BRISC baselines | `camus_best.pt`, `brisc_best.pt` |
+| `SegmentationEnv` v4 | 14 actions: dil/ero ×4 + shift ×4 + **smooth** + **stop**; fail-fast; explicit stop reward |
+| All configs rebuilt | CAMUS c1/c2/c3 + BRISC — clean refinement blocks, no tracing params |
+| Notebooks cleaned | IS_TRACING branches removed; AGENT_NAME = DQN\|DuelingDDQN\|DDPG |
+| Paradigm 1 archived | `iteris/archive/paradigm1_boundary_tracing/` with resurrection notes |
 
-### In Progress
+### ⏳ Next up
 
-| Item | Blocker |
-|---|---|
-| BRISC DuelingDDQN at 50k | Upload latest Kaggle iteris-pkg dataset to `dfd9d54` → run §4 |
-| BRISC DQN at 50k | Same — within-paradigm comparison |
-
-### Pending (in order)
-
-| Item | Notes |
-|---|---|
-| CAMUS c1 DuelingDDQN 50k | First cardiac test with region-aware reward |
-| CAMUS c1 DQN 50k | Comparison |
-| CAMUS c2 (LVepi) and c3 (LA) | Same protocol |
-| DDPG baseline runs | Continuous baseline; mask morphology unchanged |
+1. **Bump `iteris-pkg`** on Kaggle to current commit
+2. **BRISC DQN dry-run** (`RUN_DRY_RUN = True`) — validate v4 env runs cleanly
+3. **BRISC DQN 30k steps** — first real run with 14-action space
+4. **CAMUS c1 DQN 50k** — cardiac validation
 
 ---
 
 ## 3. Kaggle Workflow
 
-### Updating iteris-pkg
+```
+git push origin main          (local)
+Kaggle iteris-pkg → New Version  (bump dataset)
+§0 → §1 → §2 (warm-start) → §4 (train)
+```
 
-1. Locally: `git pull` (or `git push` after changes)
-2. Download repo zip or zip `iteris/` + `configs/` + `requirements.txt`
-3. Kaggle: `iteris-pkg` dataset → **New Version** → upload zip → Create
-4. In notebook: sidebar → `iteris-pkg` → **Update to latest version** → restart kernel
+Expected wall-clock: BRISC 30k ~10 min · CAMUS 50k ~60 min.
 
-### Running a training notebook
+---
 
-1. Attach: dataset + `iteris-pkg` + baseline outputs (`camus-baseline-outputs` or `brisc-baseline-outputs-v2`)
-2. Settings: GPU T4, Persistence Files only, Internet On
-3. §0 install → §1 config (`AGENT_NAME='DQN'` or `'DuelingDDQN'` or `'DDPG'`) → §2 warm-start → §4 train
-4. Save Version → Save & Run All
+## 4. Config Reference
 
-### Expected wall-clock (T4)
+| Config | DQN steps | DuelingDDQN steps | DDPG steps |
+|---|---|---|---|
+| BRISC | 30k | 30k | 100k |
+| CAMUS c1 (LVendo) | 50k | 50k | 100k |
+| CAMUS c2 (LVepi) | 60k | 60k | 120k |
+| CAMUS c3 (LA) | 50k | 50k | 100k |
 
-| Run | Time |
+---
+
+## 5. Roadmap
+
+### Phase A — Re-establish baseline with v4 env
+
+| Step | Target |
 |---|---|
-| BRISC DQN/DuelingDDQN 50k steps | ~48 min |
-| CAMUS DQN/DuelingDDQN 50k/60k steps | ~60–75 min |
-| DDPG 100k–120k steps | ~3–4 hr |
+| BRISC DQN/DuelingDDQN | val Dice ≥ 0.86 (above baseline 0.835) |
+| CAMUS c1 DQN/DuelingDDQN | val Dice ≥ 0.93 (above baseline 0.938) |
+| All DDPG runs | Continuous comparison baseline |
+
+### Phase B — Evaluation + stats
+
+- Unified eval harness over all checkpoints
+- Wilcoxon signed-rank vs U-Net baseline (per-class)
+- 5-fold CV
+- Main results table: DQN · DuelingDDQN · DDPG × CAMUS c1/c2/c3 + BRISC
+
+### Phase C — Paper
+
+- Methods: SegmentationEnv v4 description, reward rationale
+- Results: main table + qualitative grid (Easy/Medium/Hard per dataset)
+- Discussion: smooth action impact · stop action analysis · comparison with boundary tracing (archived)
 
 ---
 
-## 4. Roadmap
+## 6. Adding a New Dataset
 
-### Phase C — Paper quality (implement after BRISC 50k confirms reward works)
-
-| Item | What | Effort |
-|---|---|---|
-| **C1** | CAMUS `max_trace_length` reduction: c1 400→320, c2 480→360, c3 420→320 | YAML only |
-| **C2** | n-step returns (n=5) in `DQNAgent.update()` + `ContourReplayBuffer.sample()` | ~60 LOC; bigger win on CAMUS than BRISC |
-| **C3** | Full training matrix: DQN + DuelingDDQN × 3 CAMUS classes + BRISC | Kaggle runs |
-| **C4** | Unified eval harness: load all checkpoints, same test split, results table | ~1 notebook |
-| **C5** | Wilcoxon signed-rank tests vs U-Net baseline | `iteris/evaluation.py` extension |
-
-### Phase D — Paper writing only
-
-| Item | What |
-|---|---|
-| **D1** | LA results reported separately with mitral-valve-closure caveat |
-| **D2** | Optional: morphological post-processing on jagged BRISC masks (close-then-open); report both |
-| **D3** | Future work: learned First-P-Net seed; PPO comparison; skip-neighbourhood 16-action variant |
+1. Add `configs/<dataset>.yaml` (normalize, num_classes, class_names)
+2. Add `build_<dataset>_dicts()` in `iteris/ingestion.py`
+3. Add `configs/<dataset>_drl.yaml` agent blocks
+4. Copy a training notebook, swap config path
 
 ---
 
-## 5. Adding a New Dataset
+## 7. Critical Don'ts
 
-1. Add `configs/<dataset>.yaml` (set `normalize`, `num_classes`, `class_names`)
-2. Add `build_<dataset>_dicts()` in `iteris/ingestion.py` → wire into `build_dataset_dicts(cfg)`
-3. Add a U-Net baseline notebook (copy `01_camus_baseline.ipynb`, swap config)
-4. For DRL: add `configs/<dataset>_drl_c<n>.yaml` with agent blocks
-
----
-
-## 6. Critical Don'ts
-
-- Do not add `scipy.ndimage` to the reward path — use the precomputed GT-EDT (`self._gt_edt[y,x]`)
-- Do not restart the seeding discussion — best-overlap CC + GT fallback is settled (see CONTEXT.md §8)
-- Do not create files in root — use `iteris/`, `configs/`, `notebooks/`, `docs/`
-- Do not modify archived files in `iteris/archive/` unless resurrecting them intentionally
+- Do not add scipy-based SDT to the reward hot loop — use the precomputed cache in `ReplayBuffer`
+- Do not hardcode hyperparameters — everything goes in YAML
+- Do not re-introduce boundary tracing without a clear literature justification

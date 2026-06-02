@@ -13,8 +13,7 @@ from .models import AttentionResUNet
 from .losses import build_loss
 from .metrics import dice_score, hd95_batch
 
-# DRL (Week 2+) exports
-from .env          import SegmentationEnv
-from .env_contour  import ContourTracingEnv, VectorisedContourEnv
-from .buffer       import ReplayBuffer, ContourReplayBuffer
-from .agents       import DQNAgent, DuelingDQNAgent, DDPGAgent
+# DRL (Week 2+) exports — local mask refinement paradigm (SegmentationEnv v4)
+from .env    import SegmentationEnv
+from .buffer import ReplayBuffer
+from .agents import DQNAgent, DuelingDQNAgent, DDPGAgent

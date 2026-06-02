@@ -41,6 +41,7 @@ hard_mining_scale: 5.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
+
   DDPG:
     agent_type:          DDPG
     cont_morph_scale:    0.25
@@ -54,7 +55,7 @@ agents:
     actor_freeze_steps:  2000
     embed_dim:           256
     batch_size:          64
-    buffer_size:         50000    # 10000→50000: retains 5× more experience
+    buffer_size:         50000     # 10000→50000: retains 5× more experience
     prefill_steps:       2000
     train_steps:         120000   # DDPG needs more steps; LV_epi is the hardest class
     eval_every:          2500
@@ -62,82 +63,38 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── Paradigm 1 — sequential boundary tracing (the agent draws the mask) ──────
-  # See camus_drl_c1.yaml DDQN_TRACE for the rationale; LV_epi has the longest
-  # CAMUS perimeter (~320 px) and a thin apex, so max_trace_length is larger.
-
   DQN:
-    agent_type:             DQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       480
-    closure_tolerance:      3
-    min_perimeter_steps:    130  # LVepi perimeter ~320px; 130 = 40% min before closure
-
-    # ── Precision-tuned reward ──────────────────────────────────────────────────
-    reward_smoothness_penalty: -0.01    # mild (was -0.02); LVepi apex needs turns
-    coverage_tolerance:       1.2       # 1.0→1.2: denser signal for LV structures
-    reward_step_cost:         -0.01
-    reward_coverage_bonus:     0.25
-    reward_off_boundary:      -0.05
-    reward_off_boundary_cap:   5.0
-    reward_terminal_dice:     10.0
-    reward_boundary_precision:  1.0     # 3.0→1.0: reduce competing weight
-    reward_closure_min_dice:   0.20
-    reward_closure_bonus:      2.0
-    reward_offimage:          -10.0
-    lr:                     1.0e-4
-    gamma:                  0.99
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    60000       # proportional to 120k budget
-    train_steps:            120000      # 60k→120k: LVepi is hardest, needs most steps
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DQN
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
   DuelingDDQN:
-    agent_type:             DUELING
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       480
-    closure_tolerance:      3
-    min_perimeter_steps:    130  # LVepi perimeter ~320px; 130 = 40% min before closure
-
-    # ── Precision-tuned reward ──────────────────────────────────────────────────
-    reward_smoothness_penalty: -0.01    # mild (was -0.02); LVepi apex needs turns
-    coverage_tolerance:       1.2       # 1.0→1.2: denser signal for LV structures
-    reward_step_cost:         -0.01
-    reward_coverage_bonus:     0.25
-    reward_off_boundary:      -0.05
-    reward_off_boundary_cap:   5.0
-    reward_terminal_dice:     10.0
-    reward_boundary_precision:  1.0     # 3.0→1.0: reduce competing weight
-    reward_closure_min_dice:   0.20
-    reward_closure_bonus:      2.0
-    reward_offimage:          -10.0
-    lr:                     1.0e-4
-    gamma:                  0.99
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    60000       # proportional to 120k budget
-    train_steps:            120000      # 60k→120k: LVepi is hardest, needs most steps
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DUELING
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000     # 10000→50000: retains 5× more experience
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working

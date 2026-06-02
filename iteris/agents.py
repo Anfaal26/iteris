@@ -17,8 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic, \
-                           PatchQNetwork, PatchDuelingQNetwork
+from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic
 
 
 def _soft_update(target_net: nn.Module, source_net: nn.Module, tau: float):
@@ -48,14 +47,13 @@ class DQNAgent:
     def __init__(
         self,
         in_channels: int = 4,
-        num_actions: int = 13,
+        num_actions: int = 14,   # updated to match SegmentationEnv v4 (14 actions)
         lr: float = 1e-4,
         gamma: float = 0.99,
         tau: float = 0.005,
         double: bool = False,
         dueling: bool = False,
         embed_dim: int = 256,
-        patch: bool = False,
         device: torch.device = None,
     ):
         self.device      = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -64,15 +62,11 @@ class DQNAgent:
         self.tau         = tau
         self.double      = double
         self.dueling     = dueling
-        self.patch       = patch
 
-        # patch=True selects the small-input variants for the tracing paradigm
-        # (4, 64, 64) state; otherwise the full-image (4, H, W) refinement nets.
-        if patch:
-            NetCls = PatchDuelingQNetwork if dueling else PatchQNetwork
-        else:
-            NetCls = DuelingQNetwork if dueling else QNetwork
-        self.q        = NetCls(in_channels, num_actions, embed_dim).to(self.device)
+        # Full-image (4, H, W) input — local mask refinement paradigm.
+        # PatchQNetwork (64×64) was for the archived contour-tracing paradigm.
+        NetCls = DuelingQNetwork if dueling else QNetwork
+        self.q = NetCls(in_channels, num_actions, embed_dim).to(self.device)
         self.q_target = deepcopy(self.q).eval()
         for p in self.q_target.parameters():
             p.requires_grad_(False)
