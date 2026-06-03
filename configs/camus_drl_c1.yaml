@@ -33,17 +33,18 @@ shift_px:          2
 sdt_clip:          20.0
 reward_clip:       1.0
 min_area_fraction: 0.01
-# Tighter early-stop: at Dice 0.94 a 0.001 step gain is real signal, not noise.
-stop_eps_dice:     0.0005
+stop_eps_dice:     0.005      # 0.0005→0.005: a 1-px cardinal op on LV_endo changes
+                              # Dice by ~0.003–0.007. 0.0005 caused false-convergence
+                              # in 3 steps before the agent could explore.
 stop_eps_hd:       0.3
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
-# At Dice 0.93, most train samples are already near-perfect and no discrete
-# action can improve them.  Weighting ∝ exp((1-init_dice)*scale) boosts hard
+# At Dice 0.93+, most samples provide near-zero gradient. Scale=10 gives
+# Dice=0.85 samples ~100× weight vs Dice=0.95, focusing on the improvable tail.
 # samples (dice=0.85 → ~2×, dice=0.75 → ~5×) while keeping easy samples in
 # the mix so the agent still learns "no-op on already-good states".
-hard_mining_scale: 5.0
+hard_mining_scale: 10.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.

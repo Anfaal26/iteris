@@ -30,14 +30,13 @@ shift_px:          2
 sdt_clip:          20.0
 reward_clip:       1.0
 min_area_fraction: 0.01
-stop_eps_dice:     0.001
+stop_eps_dice:     0.005      # 1-px op on LVepi ≈ 0.003–0.007 Dice; 0.001 = false convergence
 stop_eps_hd:       0.5
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
-# LV_epi baseline Dice 0.872 — still benefits from preferring harder samples
-# where boundary correction is achievable (apex regions, thin walls).
-hard_mining_scale: 5.0
+# LVepi has more shape variability than LVendo; scale=10 still appropriate.
+hard_mining_scale: 10.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:

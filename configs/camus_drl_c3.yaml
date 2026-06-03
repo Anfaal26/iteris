@@ -18,10 +18,13 @@ baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_best.pt
 # boundary pixel can spike HD95 regardless of overall segmentation quality.
 # Pure Dice-delta is safer: it rewards overlap improvement consistently.
 # hd_norm kept in config for potential ablations using dice_hd_composite.
-reward_mode:   dice_delta        # shape variability makes HD95 an unreliable signal
-reward_alpha:  0.7               # ignored for dice_delta; kept for composite ablation
-reward_beta:   0.3               # ignored for dice_delta; kept for composite ablation
-hd_norm:       22.0              # 2× expected HD95 of ~10 px (for ablation if needed)
+reward_mode:   dice_hd_composite  # LA: add HD95 signal to prevent mask ballooning.
+                                  # Pure dice_delta was failing (curve degraded to 0.848).
+                                  # The alpha/beta balance keeps Dice dominant but the
+                                  # HD95 term prevents boundary blow-outs.
+reward_alpha:  0.7               # 70% Dice — primary overlap objective
+reward_beta:   0.3               # 30% HD95 — boundary precision guard
+hd_norm:       22.0              # 2× expected HD95 of ~10 px
 
 # ── Environment ───────────────────────────────────────────────────────────────
 image_size:        256
@@ -30,14 +33,17 @@ shift_px:          2
 sdt_clip:          20.0
 reward_clip:       1.0
 min_area_fraction: 0.01
-stop_eps_dice:     0.001
+stop_eps_dice:     0.005      # 0.001→0.005: episodes were terminating in ~3 steps
+                              # before the agent could explore meaningful changes.
 stop_eps_hd:       0.5
+max_steps:         30         # 20→30: LA corrections are more complex; give more headroom
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
-# LA baseline Dice 0.896 — meaningful spread of init dices; hard mining
-# focuses training on shape-variable cases (elongated atria, poor views).
-hard_mining_scale: 5.0
+# Run showed only 7.3% of samples have init Dice < 0.90.
+# scale=10 makes Dice=0.80 samples ~100× weight vs Dice=0.95 — necessary to
+# get meaningful gradient signal from the improvable minority.
+hard_mining_scale: 10.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
