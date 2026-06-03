@@ -8,8 +8,10 @@
 #
 # ── Algorithms ───────────────────────────────────────────────────────────────
 #
-# DQN / DuelingDDQN — 14-action local mask refinement (SegmentationEnv v4):
-#   4 directional dilations + 4 directional erosions + 4 shifts + smooth + stop.
+# DQN / DuelingDDQN — 24-action local mask refinement (SegmentationEnv v4):
+#   4 cardinal dilations + 4 cardinal erosions
+#   4 diagonal dilations + 4 diagonal erosions (NEW — precise corner correction)
+#   4 shifts + smooth + add_uncertain + remove_uncertain (NEW) + stop
 #   Reward: iou_delta (smoother for small tumours).
 #
 # DDPG — 3-D continuous action (morph, dy, dx) on the same SegmentationEnv.
@@ -43,8 +45,13 @@ stop_eps_dice:     0.001
 stop_eps_hd:       0.5
 stop_n:            3
 
-# ── Hard sample mining (DDPG only) ──────────────────────────────────────────
-hard_mining_scale: 3.0
+# ── Hard sample mining ───────────────────────────────────────────────────────
+# Applies to ALL agents (not DDPG-only). At init Dice ~0.876, 80%+ of samples
+# are already near-perfect — morphological ops can't improve them. Hard mining
+# focuses training on the improvable minority.
+# scale=8.0: Dice=0.80 gets ~7× weight vs Dice=0.93 (~1.7×). Aggressive but
+# necessary — without it the agent sees mostly zero-improvement gradient.
+hard_mining_scale: 8.0
 
 # ── Per-agent hyperparams ────────────────────────────────────────────────────
 agents:
@@ -78,13 +85,14 @@ agents:
     tau:                 0.005
     embed_dim:           256
     batch_size:          64
-    buffer_size:         30000
+    buffer_size:         50000           # larger: 24 actions need more diverse experience
     prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 15000
-    train_steps:         30000
+    epsilon_decay_steps: 25000           # slower decay: more exploration over 24-action space
+    train_steps:         50000           # 30k→50k: training curve was still rising
     eval_every:          2000
+    hard_mining_scale:   8.0             # override top-level: must be set per-agent to take effect
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
@@ -96,13 +104,14 @@ agents:
     tau:                 0.005
     embed_dim:           256
     batch_size:          64
-    buffer_size:         30000
+    buffer_size:         50000
     prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 15000
-    train_steps:         30000
+    epsilon_decay_steps: 25000
+    train_steps:         50000
     eval_every:          2000
+    hard_mining_scale:   8.0
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working

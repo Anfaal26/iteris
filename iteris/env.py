@@ -56,14 +56,19 @@ import scipy.ndimage as ndi
 # 4-connectivity cross — kept for HD95 boundary extraction
 STRUCT = ndi.generate_binary_structure(2, 1)
 
-# ── Directional structuring elements (3-element, 1-px move in one direction) ─
-# binary_dilation with SE_N: each mask pixel marks the pixel ABOVE it → boundary
-# extends NORTH.  binary_erosion with SE_N: pixel kept only if both itself AND
-# pixel above are in mask → strips the NORTH (top) boundary.
-SE_N = np.array([[1], [1], [0]], dtype=np.uint8)   # north  (offsets (-1, 0) and (0, 0))
-SE_S = np.array([[0], [1], [1]], dtype=np.uint8)   # south  (offsets (+1, 0) and (0, 0))
-SE_W = np.array([[1, 1, 0]],    dtype=np.uint8)    # west   (offsets (0, -1) and (0, 0))
-SE_E = np.array([[0, 1, 1]],    dtype=np.uint8)    # east   (offsets (0, +1) and (0, 0))
+# ── Directional structuring elements ─────────────────────────────────────────
+# Cardinal (3-element): 1-px move in one direction, affects only boundary facing that way.
+SE_N = np.array([[1], [1], [0]], dtype=np.uint8)
+SE_S = np.array([[0], [1], [1]], dtype=np.uint8)
+SE_W = np.array([[1, 1, 0]],    dtype=np.uint8)
+SE_E = np.array([[0, 1, 1]],    dtype=np.uint8)
+
+# Diagonal (2×2 corner): 1-px move along a diagonal, expands/contracts the corner.
+# Crucial for irregular BRISC tumors — cardinal ops alone can't correct diagonal errors.
+SE_NE = np.array([[0, 1], [1, 1]], dtype=np.uint8)  # northeast corner
+SE_NW = np.array([[1, 0], [1, 1]], dtype=np.uint8)  # northwest corner
+SE_SE = np.array([[1, 1], [0, 1]], dtype=np.uint8)  # southeast corner
+SE_SW = np.array([[1, 1], [1, 0]], dtype=np.uint8)  # southwest corner
 
 
 def dice_score(m1: np.ndarray, m2: np.ndarray, eps: float = 1e-6) -> float:
@@ -157,19 +162,34 @@ class SegmentationEnv:
     ────────────────────────────────────────────────────────────────
     """
 
-    # ── Discrete action layout ────────────────────────────────────────────────
-    NUM_DISCRETE_ACTIONS  = 14
-    DILATE_N, DILATE_E, DILATE_S, DILATE_W = 0, 1, 2, 3
-    ERODE_N,  ERODE_E,  ERODE_S,  ERODE_W  = 4, 5, 6, 7
-    SHIFT_U,  SHIFT_D,  SHIFT_L,  SHIFT_R  = 8, 9, 10, 11
-    SMOOTH                                  = 12
-    STOP                                    = 13
+    # ── Discrete action layout (22 actions) ──────────────────────────────────
+    # 0–3:   Cardinal dilate       (N, E, S, W)
+    # 4–7:   Cardinal erode        (N, E, S, W)
+    # 8–11:  Diagonal dilate       (NE, NW, SE, SW) — corner correction
+    # 12–15: Diagonal erode        (NE, NW, SE, SW) — corner correction
+    # 16–19: Whole-mask shift      (↑, ↓, ←, →)
+    # 20:    Smooth                (morphological closing)
+    # 21:    Add uncertain pixels  — include U-Net uncertain-borderline pixels
+    # 22:    Remove uncertain pixels — exclude U-Net uncertain-borderline pixels
+    # 23:    Stop
+    NUM_DISCRETE_ACTIONS  = 24
+    DILATE_N, DILATE_E, DILATE_S, DILATE_W            = 0, 1, 2, 3
+    ERODE_N,  ERODE_E,  ERODE_S,  ERODE_W             = 4, 5, 6, 7
+    DILATE_NE, DILATE_NW, DILATE_SE, DILATE_SW        = 8, 9, 10, 11
+    ERODE_NE,  ERODE_NW,  ERODE_SE,  ERODE_SW         = 12, 13, 14, 15
+    SHIFT_U,  SHIFT_D,  SHIFT_L,  SHIFT_R             = 16, 17, 18, 19
+    SMOOTH                                             = 20
+    ADD_UNCERTAIN                                      = 21
+    REMOVE_UNCERTAIN                                   = 22
+    STOP                                               = 23
 
     DISCRETE_NAMES = [
-        'dil-N', 'dil-E', 'dil-S', 'dil-W',
-        'ero-N', 'ero-E', 'ero-S', 'ero-W',
+        'dil-N',  'dil-E',  'dil-S',  'dil-W',
+        'ero-N',  'ero-E',  'ero-S',  'ero-W',
+        'dil-NE', 'dil-NW', 'dil-SE', 'dil-SW',
+        'ero-NE', 'ero-NW', 'ero-SE', 'ero-SW',
         'sh-↑', 'sh-↓', 'sh-←', 'sh-→',
-        'smooth', 'stop',
+        'smooth', 'add-unc', 'rem-unc', 'stop',
     ]
 
     # ── Continuous action layout (see module docstring) ──────────────────────
@@ -180,6 +200,9 @@ class SegmentationEnv:
         image: np.ndarray,         # (H, W) float32 in [0, 1]
         gt_mask: np.ndarray,       # (H, W) uint8 in {0, 1}
         init_mask: np.ndarray,     # (H, W) uint8 in {0, 1} — U-Net prediction
+        prob_map: np.ndarray = None, # (H, W) float — U-Net probability for target class;
+                                     # enables ADD_UNCERTAIN / REMOVE_UNCERTAIN actions.
+                                     # None → those actions fall back to no-op.
         action_type: str = 'discrete',
         max_steps: int = 20,
         shift_px: int = 2,
@@ -210,6 +233,18 @@ class SegmentationEnv:
         self.gt        = gt_mask.astype(np.uint8)
         self.init_mask = init_mask.astype(np.uint8)
         self.H, self.W = image.shape
+        # Precompute uncertainty zone masks from the U-Net probability map.
+        # uncertain_hi: pixels the U-Net considered "maybe foreground" (0.35–0.65)
+        # that aren't in the binary init_mask — candidates to ADD.
+        # uncertain_lo: pixels in init_mask where U-Net was uncertain (0.35–0.65)
+        # — candidates to REMOVE.
+        if prob_map is not None:
+            pm = prob_map.astype(np.float32)
+            self._uncertain_hi = ((pm >= 0.35) & (pm <= 0.65) & (init_mask == 0)).astype(np.uint8)
+            self._uncertain_lo = ((pm >= 0.35) & (pm <= 0.65) & (init_mask == 1)).astype(np.uint8)
+        else:
+            self._uncertain_hi = None
+            self._uncertain_lo = None
 
         self.action_type      = action_type
         self.max_steps        = max_steps
@@ -307,7 +342,7 @@ class SegmentationEnv:
         # ── Explicit stop action (action 13 for discrete) ────────────────────
         # The agent signals "satisfied". Episode terminates with the same reward
         # as hitting max_steps — encourages stopping as soon as the mask is good.
-        if self.action_type == 'discrete' and a == self.STOP:
+        if self.action_type == 'discrete' and a == self.STOP:   # a == 23
             self.t += 1
             new_dice = dice_score(self.mask, self.gt)
             new_hd95 = self._hd95_vs_gt(self.mask) \
@@ -402,31 +437,51 @@ class SegmentationEnv:
         explicit band mask.
         """
         sp = self.shift_px
-        # 0–3: directional dilate (expand boundary outward in one direction)
+        # 0–3: cardinal dilate
         if a == 0:  return ndi.binary_dilation(self.mask, SE_N).astype(np.uint8)
         if a == 1:  return ndi.binary_dilation(self.mask, SE_E).astype(np.uint8)
         if a == 2:  return ndi.binary_dilation(self.mask, SE_S).astype(np.uint8)
         if a == 3:  return ndi.binary_dilation(self.mask, SE_W).astype(np.uint8)
-        # 4–7: directional erode (shrink boundary inward from one direction)
+        # 4–7: cardinal erode
         if a == 4:  return ndi.binary_erosion(self.mask, SE_N).astype(np.uint8)
         if a == 5:  return ndi.binary_erosion(self.mask, SE_E).astype(np.uint8)
         if a == 6:  return ndi.binary_erosion(self.mask, SE_S).astype(np.uint8)
         if a == 7:  return ndi.binary_erosion(self.mask, SE_W).astype(np.uint8)
-        # 8–11: whole-mask shift (positional correction)
-        if a == 8:  return shifted(self.mask, -sp,   0)   # ↑
-        if a == 9:  return shifted(self.mask, +sp,   0)   # ↓
-        if a == 10: return shifted(self.mask,   0, -sp)   # ←
-        if a == 11: return shifted(self.mask,   0, +sp)   # →
-        # 12: smooth — morphological closing fills holes + softens staircase
-        if a == 12:
-            disk = ndi.generate_binary_structure(2, 1)   # 3×3 cross
+        # 8–11: diagonal dilate — corrects corner under-segmentation
+        if a == 8:  return ndi.binary_dilation(self.mask, SE_NE).astype(np.uint8)
+        if a == 9:  return ndi.binary_dilation(self.mask, SE_NW).astype(np.uint8)
+        if a == 10: return ndi.binary_dilation(self.mask, SE_SE).astype(np.uint8)
+        if a == 11: return ndi.binary_dilation(self.mask, SE_SW).astype(np.uint8)
+        # 12–15: diagonal erode — corrects corner over-segmentation
+        if a == 12: return ndi.binary_erosion(self.mask, SE_NE).astype(np.uint8)
+        if a == 13: return ndi.binary_erosion(self.mask, SE_NW).astype(np.uint8)
+        if a == 14: return ndi.binary_erosion(self.mask, SE_SE).astype(np.uint8)
+        if a == 15: return ndi.binary_erosion(self.mask, SE_SW).astype(np.uint8)
+        # 16–19: whole-mask shift
+        if a == 16: return shifted(self.mask, -sp,   0)
+        if a == 17: return shifted(self.mask, +sp,   0)
+        if a == 18: return shifted(self.mask,   0, -sp)
+        if a == 19: return shifted(self.mask,   0, +sp)
+        # 20: smooth
+        if a == 20:
+            disk = ndi.generate_binary_structure(2, 1)
             smoothed = ndi.binary_closing(
                 self.mask.astype(bool), structure=disk, iterations=1
             ).astype(np.uint8)
-            # Guard: don't let smooth accidentally wipe a tiny mask
             return smoothed if smoothed.any() else self.mask
-        # 13: stop — handled in step(), mask unchanged until termination
-        if a == 13: return self.mask
+        # 21: add uncertain — include pixels U-Net was borderline on (prob 0.35–0.65, not in mask)
+        if a == 21:
+            if self._uncertain_hi is not None and self._uncertain_hi.any():
+                return np.clip(self.mask.astype(np.int16) + self._uncertain_hi, 0, 1).astype(np.uint8)
+            return self.mask   # fallback if no prob_map
+        # 22: remove uncertain — exclude pixels U-Net was borderline on (prob 0.35–0.65, in mask)
+        if a == 22:
+            if self._uncertain_lo is not None and self._uncertain_lo.any():
+                result = np.clip(self.mask.astype(np.int16) - self._uncertain_lo, 0, 1).astype(np.uint8)
+                return result if result.any() else self.mask   # don't wipe entire mask
+            return self.mask   # fallback if no prob_map
+        # 23: stop — handled in step()
+        if a == 23: return self.mask
         raise ValueError(f'Bad discrete action: {a}')
 
     def _apply_continuous(self, a) -> np.ndarray:

@@ -101,7 +101,11 @@ def precompute_init_masks(
 
             with torch.no_grad():
                 logits = model(image_tensor.unsqueeze(0).to(device))
+                # Softmax probabilities — saved as float16 to halve RAM
+                probs  = torch.softmax(logits, dim=1)
                 pred   = logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int64)
+                # Probability for the target class at every pixel
+                prob_map = probs[0, target_class].cpu().numpy().astype(np.float16)
 
             init_bin = (pred == target_class).astype(np.uint8)
             image_np = image_tensor[0].numpy().astype(np.float32)   # first channel
@@ -110,6 +114,7 @@ def precompute_init_masks(
                 image     = image_np,
                 gt_mask   = gt_bin,
                 init_mask = init_bin,
+                prob_map  = prob_map,    # float16 (H,W) — U-Net probability for target class
                 patient   = r.get('patient', ''),
                 view      = r.get('view', ''),
                 phase     = r.get('phase', ''),

@@ -49,13 +49,17 @@ AGENT_REGISTRY = {
 
 
 def _build_state_caches(samples: List[dict], image_size: int) -> dict:
-    """Stack image + init_mask arrays for vectorised lookup at sample time."""
-    n = len(samples)
-    return dict(
+    """Stack image + init_mask (+ optional prob_map) arrays for vectorised lookup."""
+    caches = dict(
         image     = np.stack([s['image']     for s in samples]).astype(np.float32),
         gt_mask   = np.stack([s['gt_mask']   for s in samples]).astype(np.uint8),
         init_mask = np.stack([s['init_mask'] for s in samples]).astype(np.uint8),
     )
+    # prob_map is present when warm_start was run with the updated code.
+    # Stored as float16 to save RAM; env converts to float32 on use.
+    if all('prob_map' in s for s in samples):
+        caches['prob_map'] = np.stack([s['prob_map'] for s in samples]).astype(np.float16)
+    return caches
 
 
 def _make_state_builder(caches: dict, sdt_clip: float):
@@ -82,10 +86,14 @@ def _make_state_builder(caches: dict, sdt_clip: float):
 
 def _make_env(caches: dict, idx: int, env_kwargs: dict,
               env_cls=SegmentationEnv) -> SegmentationEnv:
+    # Pass prob_map if warm_start produced one (enables ADD_UNCERTAIN/REMOVE_UNCERTAIN)
+    prob = caches['prob_map'][idx].astype(np.float32) \
+           if 'prob_map' in caches else None
     return env_cls(
         image     = caches['image'][idx],
         gt_mask   = caches['gt_mask'][idx],
         init_mask = caches['init_mask'][idx],
+        prob_map  = prob,
         **env_kwargs,
     )
 
