@@ -41,7 +41,10 @@ shift_px:          1
 sdt_clip:          15.0           # tighter than CAMUS (20) — small structures
 reward_clip:       1.0
 min_area_fraction: 0.005          # keep small tumours; ~12×12 px in 256×256
-stop_eps_dice:     0.001
+stop_eps_dice:     0.005    # 0.001→0.005: at BRISC init Dice ~0.876, a 1-px op
+                            # changes Dice by 0.001–0.003, causing false-convergence
+                            # after 3 steps. 0.005 ensures the agent genuinely stops
+                            # only when nothing meaningful is changing.
 stop_eps_hd:       0.5
 stop_n:            3
 

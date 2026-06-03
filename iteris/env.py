@@ -9,19 +9,13 @@ GT over up to 20 steps.
 Action spaces
 ────────────────────────────────────────────────────────────────────────────────
 
-DISCRETE (DQN family) — 13 actions, directional structuring elements:
-    0–3   directional dilate  (push boundary out 1 px in one cardinal direction)
-    4–7   directional erode   (pull boundary in 1 px from one cardinal direction)
-    8–11  whole-mask shift    (translate ±shift_px in one cardinal direction)
-    12    no-op
-    3-element SEs (e.g. [[1],[1],[0]] for NORTH) make each op affect only the
-    boundary segment facing that direction.  1-px ops self-restrict to the
-    immediate boundary band so each action has a small, locally-targeted blast
-    radius.
-
-    Note: this discrete refinement path is retained only because DDPG shares
-    SegmentationEnv as its host env.  Discrete RL on segmentation now uses the
-    boundary-tracing paradigm (archived: iteris/archive/paradigm1_boundary_tracing/).
+DISCRETE (DQN family) — 24 actions:
+    0–3    Cardinal dilate / 4–7 Cardinal erode (directional SEs)
+    8–11   Diagonal dilate / 12–15 Diagonal erode (corner SEs)
+    16–19  Whole-mask shift
+    20     Smooth (morphological closing)
+    21     Add uncertain pixels / 22 Remove uncertain pixels (U-Net prob 0.35–0.65)
+    23     Stop (explicit terminal)
 
 CONTINUOUS (DDPG family) — 3-component action:
     a[0]  morph    ∈ [-cont_morph_scale, +cont_morph_scale]   SDT threshold shift
@@ -140,25 +134,19 @@ def shifted(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
 class SegmentationEnv:
     """Per-class binary boundary-refinement environment (v4 action space).
 
-    Action space (14 discrete actions) — supervisor-approved design:
+    Action space (24 discrete actions):
     ────────────────────────────────────────────────────────────────
-    0–3   Directional local dilation (N, E, S, W)
-          3-element directional SE → only expands boundary facing that direction.
-          Corrects local under-segmentation without globally inflating the mask.
-    4–7   Directional local erosion (N, E, S, W)
-          Symmetric to dilations.  Corrects local over-segmentation.
-    8–11  Whole-mask shift (↑, ↓, ←, →)
-          Corrects systematic positional offsets.  Primarily useful for BRISC
-          where the U-Net may localise the tumour correctly but be slightly off-centre.
-    12    Smooth contour
-          Morphological closing (binary_closing with a 3×3 disk).
-          Fills small holes, removes jagged staircase artefacts, rounds sharp
-          corners.  The agent learns to call this when the boundary is rough.
-    13    Stop (explicit terminal action)
-          Agent signals "satisfied" — episode ends immediately.  Reward = final
-          composite metric vs episode-start baseline (same as the terminal reward
-          on max_steps).  Encourages the agent to stop as soon as the mask is
-          good rather than padding out the full max_steps budget.
+    0–3    Cardinal dilate  (N, E, S, W)   — expand boundary in one direction
+    4–7    Cardinal erode   (N, E, S, W)   — shrink boundary from one direction
+    8–11   Diagonal dilate  (NE, NW, SE, SW) — expand corner region
+    12–15  Diagonal erode   (NE, NW, SE, SW) — shrink corner region
+    16–19  Whole-mask shift (↑, ↓, ←, →)  — correct positional offset
+    20     Smooth            — morphological closing, fills holes, rounds jagged edges
+    21     Add uncertain     — include pixels where U-Net was uncertain (prob 0.35–0.65)
+                               that are not yet in the current mask
+    22     Remove uncertain  — remove pixels where U-Net was uncertain (prob 0.35–0.65)
+                               that are still in the current mask
+    23     Stop              — agent signals "satisfied"; episode terminates immediately
     ────────────────────────────────────────────────────────────────
     """
 
@@ -430,12 +418,7 @@ class SegmentationEnv:
     # ── private ──────────────────────────────────────────────────────────────
 
     def _apply_discrete(self, a: int) -> np.ndarray:
-        """14-action discrete dispatcher — see class docstring for layout.
-
-        Directional ops use 3-element SEs so each op only affects the boundary
-        facing that cardinal direction — inherently "local" without needing an
-        explicit band mask.
-        """
+        """24-action discrete dispatcher — see class docstring for full layout."""
         sp = self.shift_px
         # 0–3: cardinal dilate
         if a == 0:  return ndi.binary_dilation(self.mask, SE_N).astype(np.uint8)
@@ -469,17 +452,23 @@ class SegmentationEnv:
                 self.mask.astype(bool), structure=disk, iterations=1
             ).astype(np.uint8)
             return smoothed if smoothed.any() else self.mask
-        # 21: add uncertain — include pixels U-Net was borderline on (prob 0.35–0.65, not in mask)
+        # 21: add uncertain — add uncertain pixels not yet in current mask
+        # Bug fix: use self.mask (not init_mask) to determine what's missing,
+        # so repeated calls don't try to re-add already-added pixels.
         if a == 21:
-            if self._uncertain_hi is not None and self._uncertain_hi.any():
-                return np.clip(self.mask.astype(np.int16) + self._uncertain_hi, 0, 1).astype(np.uint8)
-            return self.mask   # fallback if no prob_map
-        # 22: remove uncertain — exclude pixels U-Net was borderline on (prob 0.35–0.65, in mask)
+            if self._uncertain_hi is not None:
+                to_add = self._uncertain_hi & (1 - self.mask)   # only pixels not in current mask
+                if to_add.any():
+                    return np.clip(self.mask.astype(np.int16) + to_add, 0, 1).astype(np.uint8)
+            return self.mask   # fallback: no prob_map or nothing to add
+        # 22: remove uncertain — remove uncertain pixels still in current mask
         if a == 22:
-            if self._uncertain_lo is not None and self._uncertain_lo.any():
-                result = np.clip(self.mask.astype(np.int16) - self._uncertain_lo, 0, 1).astype(np.uint8)
-                return result if result.any() else self.mask   # don't wipe entire mask
-            return self.mask   # fallback if no prob_map
+            if self._uncertain_lo is not None:
+                to_remove = self._uncertain_lo & self.mask       # only pixels in current mask
+                if to_remove.any():
+                    result = np.clip(self.mask.astype(np.int16) - to_remove, 0, 1).astype(np.uint8)
+                    return result if result.any() else self.mask
+            return self.mask   # fallback: no prob_map or nothing to remove
         # 23: stop — handled in step()
         if a == 23: return self.mask
         raise ValueError(f'Bad discrete action: {a}')

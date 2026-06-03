@@ -277,7 +277,7 @@ def run_drl_training(
     # in agent.update() by reusing the SDT computed during env.step().
     buffer = ReplayBuffer(
         capacity   = cfg.get('buffer_size', 10000),
-        mask_shape = (H, H),
+        mask_shape = (H, H),   # BRISC/CAMUS are square (256×256); extend to (H,W) if needed
         # 3-component continuous action: (morph, dy_norm, dx_norm).
         action_dim = CONTINUOUS_ACTION_DIM if action_type == 'continuous' else None,
         discrete   = (action_type == 'discrete'),
