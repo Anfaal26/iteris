@@ -64,6 +64,9 @@ agents:
 
   DQN:
     agent_type:          DQN
+    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
+    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
+    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -82,6 +85,9 @@ agents:
 
   DuelingDDQN:
     agent_type:          DUELING
+    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
+    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
+    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005

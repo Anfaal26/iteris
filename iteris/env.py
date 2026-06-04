@@ -213,6 +213,19 @@ class SegmentationEnv:
                                           # Dice for fail_n consecutive steps.
                                           # 0.0 = disabled (default).
         fail_n: int = 2,                  # consecutive bad steps before termination
+        # ── STOP-incentive shaping (critical for near-optimal baselines) ─────
+        reward_step_penalty: float = 0.0, # subtracted from every NON-stop step's
+                                          # reward. Breaks the baseline-indifference
+                                          # trap: without it, wandering at baseline
+                                          # (r=0/step) ties STOP (r=0), so the agent
+                                          # never learns to stop and noisily degrades.
+                                          # With it, STOP-at-baseline strictly
+                                          # dominates idle wandering.
+        disable_auto_stop: bool = False,  # True → episode ends ONLY on STOP action,
+                                          # max_steps, or fail-fast. Removes the
+                                          # convergence/improvement heuristic that
+                                          # otherwise terminates at degraded states
+                                          # before the agent can choose STOP.
     ):
         assert action_type in ('discrete', 'continuous')
         assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
@@ -248,8 +261,10 @@ class SegmentationEnv:
         self.reward_alpha     = reward_alpha
         self.reward_beta      = reward_beta
         self.hd_norm          = hd_norm
-        self.fail_thresh      = float(fail_thresh)
-        self.fail_n           = int(fail_n)
+        self.fail_thresh         = float(fail_thresh)
+        self.fail_n              = int(fail_n)
+        self.reward_step_penalty = float(reward_step_penalty)
+        self.disable_auto_stop   = bool(disable_auto_stop)
 
         self.reset()
 
@@ -317,12 +332,21 @@ class SegmentationEnv:
         self.mask = self.init_mask.copy()
         self.t    = 0
         self._precompute_gt_quantities()
-        self.dice_history = [dice_score(self.mask, self.gt)]
+        d0 = dice_score(self.mask, self.gt)
+        self.dice_history = [d0]
+        # Best-mask tracking: highest-Dice mask seen this episode. Eval can report
+        # this as the achievable ceiling; the agent's job is to STOP at it.
+        self.best_dice = d0
+        self.best_mask = self.mask.copy()
         if self.reward_mode != 'dice_delta':
             self.hd95_history = [self._hd95_vs_gt(self.mask)]
         else:
             self.hd95_history = [float('nan')]
         return self._state()
+
+    def get_best_mask(self) -> np.ndarray:
+        """Highest-Dice mask seen during the episode (for diagnostics)."""
+        return self.best_mask
 
     def step(self, action) -> Tuple[np.ndarray, float, bool, Dict]:
         a = int(action) if self.action_type == 'discrete' else action
@@ -335,11 +359,12 @@ class SegmentationEnv:
             new_dice = dice_score(self.mask, self.gt)
             new_hd95 = self._hd95_vs_gt(self.mask) \
                        if self.reward_mode == 'dice_hd_composite' else float('nan')
+            # STOP reward = current improvement, NO step penalty (it's the exit).
             raw_reward = self._compute_reward(new_dice, new_hd95)
             reward = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
             info = {'dice': new_dice, 'hd95': new_hd95, 'delta_dice': raw_reward,
                     'reward_clipped': reward != raw_reward, 'step': self.t,
-                    'stop_action': True}
+                    'stop_action': True, 'best_dice': self.best_dice}
             return self._state(), reward, True, info
 
         # ── Apply action ─────────────────────────────────────────────────────
@@ -361,16 +386,27 @@ class SegmentationEnv:
         else:
             new_hd95 = float('nan')
 
-        raw_reward = self._compute_reward(new_dice, new_hd95)
+        # Per-step penalty: subtracted from every non-STOP step so that idle
+        # wandering at baseline costs reward and STOP becomes the optimal exit.
+        raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
         reward     = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
 
         self.dice_history.append(new_dice)
         self.hd95_history.append(new_hd95)
 
+        # Track best mask seen this episode.
+        if new_dice > self.best_dice:
+            self.best_dice = new_dice
+            self.best_mask = self.mask.copy()
+
         # ── Termination conditions ────────────────────────────────────────────
         done = self.t >= self.max_steps
 
-        if not done and len(self.dice_history) > self.stop_n:
+        # Auto-stop heuristic (convergence / improvement-maintained). Disabled
+        # when disable_auto_stop=True so the agent's explicit STOP action — not a
+        # heuristic — decides when to end. The heuristic could otherwise terminate
+        # the episode at a degraded state before the agent chooses to stop.
+        if not done and not self.disable_auto_stop and len(self.dice_history) > self.stop_n:
             dice_0 = self.dice_history[0]
 
             # Convergence: Dice/HD95 has plateaued
@@ -412,6 +448,7 @@ class SegmentationEnv:
             'delta_dice': raw_reward,
             'reward_clipped': reward != raw_reward,
             'step': self.t,
+            'best_dice': self.best_dice,
         }
         return self._state(), reward, done, info
 

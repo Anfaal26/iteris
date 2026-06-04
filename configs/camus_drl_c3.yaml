@@ -28,7 +28,7 @@ hd_norm:       22.0              # 2× expected HD95 of ~10 px
 
 # ── Environment ───────────────────────────────────────────────────────────────
 image_size:        256
-max_steps:         20
+max_steps:         30         # LA corrections are more complex than LV; more headroom
 shift_px:          2
 sdt_clip:          20.0
 reward_clip:       1.0
@@ -36,7 +36,6 @@ min_area_fraction: 0.01
 stop_eps_dice:     0.005      # 0.001→0.005: episodes were terminating in ~3 steps
                               # before the agent could explore meaningful changes.
 stop_eps_hd:       0.5
-max_steps:         30         # 20→30: LA corrections are more complex; give more headroom
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
@@ -71,6 +70,9 @@ agents:
 
   DQN:
     agent_type:          DQN
+    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
+    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
+    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -89,6 +91,9 @@ agents:
 
   DuelingDDQN:
     agent_type:          DUELING
+    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
+    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
+    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005

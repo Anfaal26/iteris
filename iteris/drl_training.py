@@ -122,7 +122,7 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         n = len(samples)
         caches = _build_state_caches(samples, samples[0]['image'].shape[0])
 
-    init_d, final_d, final_h = [], [], []
+    init_d, final_d, final_h, best_d = [], [], [], []
     for i in range(n):
         env = _make_env(caches, i, env_kwargs, env_cls=env_cls)
         state = env.reset()
@@ -137,11 +137,17 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
                 break
         final_d.append(info['dice'])
         final_h.append(info['hd95'])
+        # best_dice = highest Dice seen during the episode (the achievable ceiling
+        # if STOP timing were perfect). final_dice = the deployment number.
+        best_d.append(info.get('best_dice', info['dice']))
 
+    final_h_arr = np.asarray(final_h, dtype=float)
+    valid_h = final_h_arr[~np.isnan(final_h_arr)]
     return dict(
         init_dice_mean  = float(np.mean(init_d)),
         final_dice_mean = float(np.mean(final_d)),
-        final_hd95_mean = float(np.nanmean(final_h)),
+        best_dice_mean  = float(np.mean(best_d)),    # diagnostic ceiling
+        final_hd95_mean = float(valid_h.mean()) if valid_h.size else float('nan'),
         delta_dice_mean = float(np.mean([f - i for f, i in zip(final_d, init_d)])),
     )
 
@@ -232,7 +238,8 @@ def run_drl_training(
         'cont_morph_scale', 'cont_trans_scale',
         'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
         'stop_eps_dice', 'stop_eps_hd', 'stop_n',
-        'fail_thresh', 'fail_n',                # BRISC env extras
+        'fail_thresh', 'fail_n',                       # small-target extras
+        'reward_step_penalty', 'disable_auto_stop',    # STOP-incentive shaping
     )
     for _k in _env_optional_keys:
         if _k in cfg:
@@ -383,6 +390,7 @@ def run_drl_training(
                 pbar.write(
                     f"step {step:6d} | init {metrics['init_dice_mean']:.4f} "
                     f"→ final {metrics['final_dice_mean']:.4f} "
+                    f"| best-seen {metrics.get('best_dice_mean', float('nan')):.4f} "
                     f"(Δ {metrics['delta_dice_mean']:+.4f}, HD95 {metrics['final_hd95_mean']:.2f}px)"
                     f"{' ✓' if improved else ''}"
                 )
