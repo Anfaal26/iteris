@@ -73,6 +73,8 @@ agents:
     # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
     reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
     disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
+    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
+    terminal_bonus_scale: 5.0
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -94,6 +96,8 @@ agents:
     # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
     reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
     disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
+    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
+    terminal_bonus_scale: 5.0
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005

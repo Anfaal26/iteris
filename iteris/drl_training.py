@@ -26,16 +26,20 @@ from tqdm.auto import trange
 from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent
+from .env_contour_refine import ContourRefineEnv
 
 
 # ─── Environment registry ────────────────────────────────────────────────────
-# All discrete agents use SegmentationEnv (14-action local mask refinement).
-# 'default' is the only active env_class; it applies to both CAMUS and BRISC
-# (BRISC uses fail_thresh / fail_n config keys for fail-fast termination).
-# Archived: ContourTracingEnv (Paradigm 1, boundary tracing) — see
-#   iteris/archive/paradigm1_boundary_tracing/env_contour.py
+# 'default' : SegmentationEnv — 24-action GLOBAL morphological mask refinement.
+# 'contour' : ContourRefineEnv — control-point + spline LOCAL contour refinement
+#             (DeepSnake/MARL-style sector push-out/in/smooth/stop). Same 4-channel
+#             state and discrete-agent interface as 'default', so it is a drop-in
+#             env swap selected via `env_class: contour` in the per-agent config.
+# Archived : ContourTracingEnv (Paradigm 1, 8-dir boundary tracing) — retired for
+#            staircase artefacts; see iteris/archive/paradigm1_boundary_tracing/.
 ENV_REGISTRY = {
     'default': SegmentationEnv,
+    'contour': ContourRefineEnv,
 }
 
 CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
@@ -240,6 +244,8 @@ def run_drl_training(
         'stop_eps_dice', 'stop_eps_hd', 'stop_n',
         'fail_thresh', 'fail_n',                       # small-target extras
         'reward_step_penalty', 'disable_auto_stop',    # STOP-incentive shaping
+        'terminal_bonus_scale',                        # path-independent terminal reward
+        'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda',  # contour env (env_class: contour)
     )
     for _k in _env_optional_keys:
         if _k in cfg:

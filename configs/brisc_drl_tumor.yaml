@@ -86,6 +86,15 @@ agents:
     # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
     reward_step_penalty: 0.002   # cost per non-STOP step → STOP-at-baseline becomes optimal
     disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
+    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
+    # `scale * (Dice_final - Dice_0)` is added ONLY to the reward of whichever
+    # transition ends the episode, making "reach the best mask and STOP there"
+    # dominate "wander and hope" — directly targets the best-seen ≫ final gap
+    # visible in the BRISC log (init 0.876 → final 0.73-0.77 | best-seen 0.88).
+    # 3.0: BRISC has more headroom (gains up to ~0.04) so a smaller multiplier
+    # than CAMUS already produces a comparably-sized terminal signal.
+    terminal_bonus_scale: 3.0
+
     lr:                  1.0e-4
     gamma:               0.95
     tau:                 0.005
@@ -108,6 +117,15 @@ agents:
     # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
     reward_step_penalty: 0.002   # cost per non-STOP step → STOP-at-baseline becomes optimal
     disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
+    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
+    # `scale * (Dice_final - Dice_0)` is added ONLY to the reward of whichever
+    # transition ends the episode, making "reach the best mask and STOP there"
+    # dominate "wander and hope" — directly targets the best-seen ≫ final gap
+    # visible in the BRISC log (init 0.876 → final 0.73-0.77 | best-seen 0.88).
+    # 3.0: BRISC has more headroom (gains up to ~0.04) so a smaller multiplier
+    # than CAMUS already produces a comparably-sized terminal signal.
+    terminal_bonus_scale: 3.0
+
     lr:                  1.0e-4
     gamma:               0.95
     tau:                 0.005
@@ -119,6 +137,42 @@ agents:
     epsilon_end:         0.05
     epsilon_decay_steps: 25000
     train_steps:         50000
+    eval_every:          2000
+    hard_mining_scale:   8.0
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  # ── Control-point CONTOUR refinement (Paradigm 3) ────────────────────────────
+  # Local boundary deformation (control points + periodic spline) — see
+  # camus_drl_c1.yaml::DuelingDDQN_CONTOUR for the full rationale. Selected by
+  # `env_class: contour`. Tumours are smaller and can be irregular (glioma), so
+  # fewer points, tighter displacement, and lighter spline smoothing than CAMUS.
+  #   cfg = resolve_agent_config(load_drl_class_config('configs/brisc_drl_tumor.yaml'),
+  #                              'DuelingDDQN_CONTOUR')
+  DuelingDDQN_CONTOUR:
+    agent_type:          DUELING
+    env_class:           contour
+    # ── contour geometry ──
+    n_points:            24            # smaller structures → fewer control points
+    disp_px:             1.0           # tighter than CAMUS (1.5) — small targets
+    spline_smooth:       1.0           # lighter smoothing — preserve irregular margins
+    smooth_lambda:       0.5
+    # ── reward shaping ──
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.95
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000
+    train_steps:         60000
     eval_every:          2000
     hard_mining_scale:   8.0
     cache_sdt:           true

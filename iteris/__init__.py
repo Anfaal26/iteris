@@ -15,5 +15,6 @@ from .metrics import dice_score, hd95_batch
 
 # DRL (Week 2+) exports — local mask refinement paradigm (SegmentationEnv v4)
 from .env    import SegmentationEnv
+from .env_contour_refine import ContourRefineEnv   # Paradigm 3: control-point contour
 from .buffer import ReplayBuffer
 from .agents import DQNAgent, DuelingDQNAgent, DDPGAgent

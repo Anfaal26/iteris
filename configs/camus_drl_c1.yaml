@@ -76,6 +76,16 @@ agents:
     # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
     reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
     disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
+    # Path-independent terminal bonus — `scale * (Dice_final - Dice_0)` added ONLY
+    # to the reward of whichever transition ends the episode (STOP / max_steps /
+    # fail-fast). Without this, the per-step `Dice_t - Dice_0` signal rewards a
+    # "spike early, fade late" trajectory under discounting (early high-Dice steps
+    # are weighted by larger γ^t than the later low-Dice steps that erase the gain)
+    # — which matches the observed best-seen ≫ final pathology in training logs.
+    # 5.0 ≈ Dice gains here are tiny (±0.003-0.01), so the bonus needs a large
+    # multiplier to be comparable in magnitude to the cumulative per-step signal.
+    terminal_bonus_scale: 5.0
+
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -97,6 +107,16 @@ agents:
     # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
     reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
     disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
+    # Path-independent terminal bonus — `scale * (Dice_final - Dice_0)` added ONLY
+    # to the reward of whichever transition ends the episode (STOP / max_steps /
+    # fail-fast). Without this, the per-step `Dice_t - Dice_0` signal rewards a
+    # "spike early, fade late" trajectory under discounting (early high-Dice steps
+    # are weighted by larger γ^t than the later low-Dice steps that erase the gain)
+    # — which matches the observed best-seen ≫ final pathology in training logs.
+    # 5.0 ≈ Dice gains here are tiny (±0.003-0.01), so the bonus needs a large
+    # multiplier to be comparable in magnitude to the cumulative per-step signal.
+    terminal_bonus_scale: 5.0
+
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -108,6 +128,45 @@ agents:
     epsilon_end:         0.05
     epsilon_decay_steps: 25000
     train_steps:         50000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  # ── Control-point CONTOUR refinement (Paradigm 3) ────────────────────────────
+  # Local boundary deformation instead of global morphology. The mask boundary is
+  # N control points on a periodic spline; the agent pushes contiguous arcs
+  # (sectors) of the contour outward/inward along their normals, smooths, or stops.
+  # This removes the global-op ceiling: heterogeneous boundary errors (over-seg
+  # here, under-seg there) become independently correctable. Selected by
+  # `env_class: contour`; same 4-channel state + discrete agent as the default env,
+  # so the network/buffer/loops are unchanged. Run with:
+  #   cfg = resolve_agent_config(load_drl_class_config('configs/camus_drl_c1.yaml'),
+  #                              'DuelingDDQN_CONTOUR')
+  DuelingDDQN_CONTOUR:
+    agent_type:          DUELING
+    env_class:           contour       # → ContourRefineEnv (control points + spline)
+    # ── contour geometry ──
+    n_points:            32            # LV_endo is large & smooth → denser sampling
+    disp_px:             1.5           # per-edit normal displacement (px)
+    spline_smooth:       2.0           # periodic-spline smoothing (s in splprep)
+    smooth_lambda:       0.5           # Laplacian strength for the SMOOTH action
+    # ── reward shaping (same machinery as the global-op agents) ──
+    reward_step_penalty: 0.003
+    disable_auto_stop:   true
+    terminal_bonus_scale: 5.0
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000         # 18-action space is smaller but normals shift
+                                       # each step → keep generous exploration
+    train_steps:         60000         # new paradigm: allow a longer learning curve
     eval_every:          2000
     cache_sdt:           true
     seed:                42

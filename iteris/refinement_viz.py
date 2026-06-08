@@ -22,6 +22,31 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from .env import SegmentationEnv, dice_score, hd95_px
+from .env_contour_refine import ContourRefineEnv
+
+
+def refinement_env_cls(cfg: dict):
+    """Resolve the env class from a flat cfg's ``env_class`` (default → global
+    SegmentationEnv; 'contour' → control-point ContourRefineEnv)."""
+    return ContourRefineEnv if cfg.get('env_class') == 'contour' else SegmentationEnv
+
+
+# Map a discrete agent's action-head size → its env class. 24 (SegmentationEnv)
+# and 18 (ContourRefineEnv) are distinct, so the viz can auto-match the env to
+# the agent with no notebook change — the env_cls argument below is an override.
+_NUM_ACTIONS_TO_ENV = {
+    SegmentationEnv.NUM_DISCRETE_ACTIONS: SegmentationEnv,
+    ContourRefineEnv.NUM_DISCRETE_ACTIONS: ContourRefineEnv,
+}
+
+
+def _resolve_env_cls(agent, explicit=None):
+    """Pick the env class: explicit override, else infer from agent.num_actions
+    (discrete), else fall back to SegmentationEnv (continuous / unknown)."""
+    if explicit is not None:
+        return explicit
+    na = getattr(agent, 'num_actions', None)
+    return _NUM_ACTIONS_TO_ENV.get(na, SegmentationEnv)
 
 # Keys SegmentationEnv accepts — used to filter a flat cfg into env kwargs.
 _ENV_KEYS = (
@@ -29,7 +54,8 @@ _ENV_KEYS = (
     'cont_morph_scale', 'cont_trans_scale',
     'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
     'stop_eps_dice', 'stop_eps_hd', 'stop_n', 'fail_thresh', 'fail_n',
-    'reward_step_penalty', 'disable_auto_stop',
+    'reward_step_penalty', 'disable_auto_stop', 'terminal_bonus_scale',
+    'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda',
 )
 
 
@@ -38,8 +64,8 @@ def refinement_env_kwargs(cfg: dict) -> dict:
     return {k: cfg[k] for k in _ENV_KEYS if k in cfg}
 
 
-def _make_env(sample: dict, env_kwargs: dict) -> SegmentationEnv:
-    return SegmentationEnv(
+def _make_env(sample: dict, env_kwargs: dict, env_cls=SegmentationEnv):
+    return env_cls(
         image     = sample['image'],
         gt_mask   = sample['gt_mask'],
         init_mask = sample['init_mask'],
@@ -48,9 +74,11 @@ def _make_env(sample: dict, env_kwargs: dict) -> SegmentationEnv:
     )
 
 
-def replay_one(agent, sample: dict, env_kwargs: dict) -> Dict:
-    """Greedy rollout of one sample. Records per-step masks/dices/actions."""
-    env   = _make_env(sample, env_kwargs)
+def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
+    """Greedy rollout of one sample. Records per-step masks/dices/actions.
+    ``env_cls`` defaults to auto-detection from the agent's action-head size."""
+    env_cls = _resolve_env_cls(agent, env_cls)
+    env   = _make_env(sample, env_kwargs, env_cls=env_cls)
     state = env.reset()
     masks  = [env.mask.copy()]
     dices  = [env.dice_history[0]]
@@ -80,17 +108,22 @@ def replay_one(agent, sample: dict, env_kwargs: dict) -> Dict:
         gain       = final_d - init_d,
         n_steps    = len(acts),
         stopped    = bool(info.get('stop_action', False)),
+        action_names = list(env_cls.DISCRETE_NAMES),
     )
 
 
 def build_replays(agent, samples: List[dict], env_kwargs: dict,
-                  n_viz: int = 8, seed: int = 0) -> List[Dict]:
+                  n_viz: int = 8, seed: int = 0, env_cls=None) -> List[Dict]:
     """Replay ``n_viz`` random samples, sorted ascending by Dice gain
-    (so replays[0]=worst, replays[-1]=best, replays[len//2]=median)."""
+    (so replays[0]=worst, replays[-1]=best, replays[len//2]=median).
+
+    ``env_cls`` defaults to auto-detection from the agent's action-head size
+    (24→SegmentationEnv, 18→ContourRefineEnv), so the same notebook cell works
+    for both paradigms. Pass refinement_env_cls(cfg) to override explicitly."""
     rng = np.random.RandomState(seed)
     n = min(n_viz, len(samples))
     idx = rng.choice(len(samples), size=n, replace=False).tolist()
-    replays = [replay_one(agent, samples[i], env_kwargs) for i in idx]
+    replays = [replay_one(agent, samples[i], env_kwargs, env_cls=env_cls) for i in idx]
     replays.sort(key=lambda r: r['gain'])
     return replays
 
@@ -168,7 +201,8 @@ def plot_behaviour(replays, cfg, class_name='', out_path=None):
 
     # Right: action-usage histogram across all replays
     ax = axes[1]
-    names = SegmentationEnv.DISCRETE_NAMES
+    names = replays[0].get('action_names', SegmentationEnv.DISCRETE_NAMES) \
+            if replays else SegmentationEnv.DISCRETE_NAMES
     all_acts = [a for r in replays for a in r['actions']]
     counts = np.bincount(all_acts, minlength=len(names)).astype(float)
     counts = counts / max(counts.sum(), 1)
@@ -193,11 +227,13 @@ def plot_behaviour(replays, cfg, class_name='', out_path=None):
     return fig
 
 
-def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict) -> Dict:
-    """§10: greedy rollout over the test set → aggregate metrics."""
+def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
+                     env_cls=None) -> Dict:
+    """§10: greedy rollout over the test set → aggregate metrics.
+    ``env_cls`` auto-detects from the agent's action-head size if not given."""
     init_d, final_d, best_d, final_h = [], [], [], []
     for s in test_samples:
-        r = replay_one(agent, s, env_kwargs)
+        r = replay_one(agent, s, env_kwargs, env_cls=env_cls)
         init_d.append(r['init_dice']); final_d.append(r['final_dice'])
         best_d.append(r['best_dice']); final_h.append(r['final_hd95'])
     fh = np.asarray(final_h, dtype=float)

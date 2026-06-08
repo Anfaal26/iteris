@@ -226,6 +226,29 @@ class SegmentationEnv:
                                           # convergence/improvement heuristic that
                                           # otherwise terminates at degraded states
                                           # before the agent can choose STOP.
+        terminal_bonus_scale: float = 0.0,
+                                          # >0 adds `scale * (Dice_final - Dice_0)`
+                                          # to the reward of the LAST transition only
+                                          # (whatever ends the episode: STOP, max_steps,
+                                          # or fail-fast). Default 0.0 = fully backward
+                                          # compatible / off.
+                                          #
+                                          # WHY: with r_t = Dice_t − Dice_0 (or the
+                                          # composite/IoU equivalents) summed under a
+                                          # discount factor γ<1, an agent that spikes to
+                                          # a good Dice early and degrades later still
+                                          # nets a *positive* return — γ-weighting makes
+                                          # early high-Dice steps worth more than the
+                                          # later low-Dice steps that erase the gain.
+                                          # That "spike-then-fade" path is rewarded even
+                                          # though the FINAL mask (what we actually keep
+                                          # at inference time) is worse than baseline —
+                                          # which is exactly the failure mode visible in
+                                          # training logs (best-seen ≫ final). A reward
+                                          # that depends only on the terminal state is
+                                          # path-independent and removes that exploit;
+                                          # this term makes "reach the best state and
+                                          # STOP there" dominate "wander and hope".
     ):
         assert action_type in ('discrete', 'continuous')
         assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
@@ -265,6 +288,7 @@ class SegmentationEnv:
         self.fail_n              = int(fail_n)
         self.reward_step_penalty = float(reward_step_penalty)
         self.disable_auto_stop   = bool(disable_auto_stop)
+        self.terminal_bonus_scale = float(terminal_bonus_scale)
 
         self.reset()
 
@@ -359,9 +383,16 @@ class SegmentationEnv:
             new_dice = dice_score(self.mask, self.gt)
             new_hd95 = self._hd95_vs_gt(self.mask) \
                        if self.reward_mode == 'dice_hd_composite' else float('nan')
+            dice_0 = self.dice_history[0]
             # STOP reward = current improvement, NO step penalty (it's the exit).
             raw_reward = self._compute_reward(new_dice, new_hd95)
-            reward = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
+            # Terminal bonus: STOP always ends the episode, so the terminal-state
+            # bonus (see __init__ docstring on terminal_bonus_scale) always applies
+            # here — it directly rewards stopping AT a final-Dice gain over baseline.
+            if self.terminal_bonus_scale > 0.0:
+                raw_reward += self.terminal_bonus_scale * (new_dice - dice_0)
+            clip = self.reward_clip + self.terminal_bonus_scale
+            reward = float(np.clip(raw_reward, -clip, clip))
             info = {'dice': new_dice, 'hd95': new_hd95, 'delta_dice': raw_reward,
                     'reward_clipped': reward != raw_reward, 'step': self.t,
                     'stop_action': True, 'best_dice': self.best_dice}
@@ -385,11 +416,6 @@ class SegmentationEnv:
             new_hd95 = self._hd95_vs_gt(self.mask)
         else:
             new_hd95 = float('nan')
-
-        # Per-step penalty: subtracted from every non-STOP step so that idle
-        # wandering at baseline costs reward and STOP becomes the optimal exit.
-        raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
-        reward     = float(np.clip(raw_reward, -self.reward_clip, self.reward_clip))
 
         self.dice_history.append(new_dice)
         self.hd95_history.append(new_hd95)
@@ -441,6 +467,21 @@ class SegmentationEnv:
             )
             if recent_bad:
                 done = True
+
+        # Per-step penalty: subtracted from every non-STOP step so that idle
+        # wandering at baseline costs reward and STOP becomes the optimal exit.
+        # Computed AFTER `done` is known so the terminal bonus (if enabled) can
+        # be attached to whichever transition actually ends the episode — not
+        # just explicit STOP. This matters because most episodes currently end
+        # via max_steps / fail-fast rather than STOP (see best-seen ≫ final
+        # diagnostic), and those paths need the same path-independent signal.
+        raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
+        clip = self.reward_clip
+        if done and self.terminal_bonus_scale > 0.0:
+            dice_0 = self.dice_history[0]
+            raw_reward += self.terminal_bonus_scale * (new_dice - dice_0)
+            clip = self.reward_clip + self.terminal_bonus_scale
+        reward = float(np.clip(raw_reward, -clip, clip))
 
         info = {
             'dice': new_dice,
