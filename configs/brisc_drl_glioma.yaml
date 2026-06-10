@@ -26,7 +26,7 @@ reward_alpha:  1.0
 reward_beta:   0.0
 hd_norm:       30.0               # larger normalization — glioma HD95 can be high
 
-# ── Environment (DDPG continuous baseline) ───────────────────────────────────
+# ── Environment (shared by all agents — SegmentationEnv v4) ─────────────────
 image_size:        256
 max_steps:         20
 shift_px:          2               # keep shifts — glioma can have spatial offsets
@@ -63,78 +63,49 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── Paradigm 1 — boundary tracing ────────────────────────────────────────────
-  # Glioma: long perimeter, irregular shape, diffuse boundary.
-  # Largest T_max in the BRISC family — matches upper-tail glioma perimeters.
+  # ── Local mask refinement (SegmentationEnv v4, 24 actions) ───────────────────
+  # Glioma: diffuse margins, large/irregular shape — gamma=0.97 keeps a shorter
+  # effective horizon, with the longer 60k train budget for the hardest class.
+  # STOP-incentive shaping (see camus_drl_c1.yaml for full rationale): breaks
+  # the baseline-indifference trap so "reach best mask, then STOP" is optimal.
+  # Replaces the retired Paradigm-1 boundary-tracing config (env_class:
+  # contour_tracing no longer exists — see archive/paradigm1_boundary_tracing/).
   DQN:
-    agent_type:             DQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       500      # large glioma perimeter can reach ~500px
-    closure_tolerance:      5        # loose — diffuse boundary, irregular return path
-    min_perimeter_steps:    40       # larger minimum for large structures
-    seed_method:            centroid
-    # ── Region-aware reward ──
-    coverage_tolerance:      1.5
-    reward_step_cost:        -0.01
-    reward_coverage_bonus:    0.20
-    reward_off_boundary:     -0.05
-    reward_off_boundary_cap:  5.0
-    reward_terminal_dice:    10.0
-    reward_closure_min_dice:  0.15   # looser gate — diffuse boundary may not hit 0.20
-    reward_closure_bonus:     2.0
-    reward_offimage:        -10.0
-    reward_smoothness_penalty: -0.01  # lighter smoothness — glioma has irregular curves
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    30000
-    train_steps:            60000    # longer — glioma is the hardest class
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DQN
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.97
+    tau:                 0.005
+    embed_dim:           128
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000
+    train_steps:         60000    # longer — glioma is the hardest class
+    eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
   DuelingDDQN:
-    agent_type:             DUELING
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       500
-    closure_tolerance:      5
-    min_perimeter_steps:    40
-    seed_method:            centroid
-    coverage_tolerance:      1.5
-    reward_step_cost:        -0.01
-    reward_coverage_bonus:    0.20
-    reward_off_boundary:     -0.05
-    reward_off_boundary_cap:  5.0
-    reward_terminal_dice:    10.0
-    reward_closure_min_dice:  0.15
-    reward_closure_bonus:     2.0
-    reward_offimage:        -10.0
-    reward_smoothness_penalty: -0.01
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            50000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    30000
-    train_steps:            60000
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DUELING
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.97
+    tau:                 0.005
+    embed_dim:           128
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000
+    train_steps:         60000
+    eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working

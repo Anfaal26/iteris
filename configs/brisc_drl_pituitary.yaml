@@ -58,79 +58,50 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── Paradigm 1 — boundary tracing ────────────────────────────────────────────
-  # Pituitary: small and compact. Short T_max — 100 steps is 1.3-2.1× perimeter.
-  # Fixed anatomy → centroid seed is highly reliable (always near sella turcica).
-  # Tight closure tolerance since the return path is short and predictable.
+  # ── Local mask refinement (SegmentationEnv v4, 24 actions) ───────────────────
+  # Pituitary: small and compact, fixed anatomical location — gamma=0.99 for a
+  # longer-horizon view despite short episodes; fewer train steps since this
+  # class converges fastest.
+  # STOP-incentive shaping (see camus_drl_c1.yaml for full rationale): breaks
+  # the baseline-indifference trap so "reach best mask, then STOP" is optimal.
+  # Replaces the retired Paradigm-1 boundary-tracing config (env_class:
+  # contour_tracing no longer exists — see archive/paradigm1_boundary_tracing/).
   DQN:
-    agent_type:             DQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       120      # 1.5-2.5× expected max perimeter (~78px)
-    closure_tolerance:      3        # tight — compact structure, short return path
-    min_perimeter_steps:    15       # small minimum for small structures
-    seed_method:            centroid
-    coverage_tolerance:      1.5
-    reward_step_cost:        -0.01
-    reward_coverage_bonus:    0.30   # higher per-pixel bonus — each boundary pixel
-                                     # is a larger fraction of total perimeter
-    reward_off_boundary:     -0.05
-    reward_off_boundary_cap:  3.0    # tighter cap — small structure, proportional scale
-    reward_terminal_dice:    10.0
-    reward_closure_min_dice:  0.25   # tighter gate — pituitary should close cleanly
-    reward_closure_bonus:     2.0
-    reward_offimage:        -10.0
-    reward_smoothness_penalty: -0.02
-    lr:                     1.0e-4
-    gamma:                  0.99    # higher gamma — short episodes, need long-horizon view
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            30000   # smaller — short episodes fill buffer quickly
-    prefill_steps:          1000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    20000
-    train_steps:            40000   # fewer steps — compact structure converges faster
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DQN
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           128
+    batch_size:          64
+    buffer_size:         30000   # smaller — short episodes fill buffer quickly
+    prefill_steps:       1000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 20000
+    train_steps:         40000   # fewer steps — compact structure converges faster
+    eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
   DuelingDDQN:
-    agent_type:             DUELING
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       120
-    closure_tolerance:      3
-    min_perimeter_steps:    15
-    seed_method:            centroid
-    coverage_tolerance:      1.5
-    reward_step_cost:        -0.01
-    reward_coverage_bonus:    0.30
-    reward_off_boundary:     -0.05
-    reward_off_boundary_cap:  3.0
-    reward_terminal_dice:    10.0
-    reward_closure_min_dice:  0.25
-    reward_closure_bonus:     2.0
-    reward_offimage:        -10.0
-    reward_smoothness_penalty: -0.02
-    lr:                     1.0e-4
-    gamma:                  0.99
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            30000
-    prefill_steps:          1000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    20000
-    train_steps:            40000
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DUELING
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           128
+    batch_size:          64
+    buffer_size:         30000
+    prefill_steps:       1000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 20000
+    train_steps:         40000
+    eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working

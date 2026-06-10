@@ -58,77 +58,48 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── Paradigm 1 — boundary tracing ────────────────────────────────────────────
-  # Meningioma: medium, convex, well-defined. T_max=300 matches expected perimeter.
-  # Tighter closure_tolerance — boundary is clean and return path is predictable.
+  # ── Local mask refinement (SegmentationEnv v4, 24 actions) ───────────────────
+  # Meningioma: medium, convex, well-defined boundary — easiest BRISC class.
+  # STOP-incentive shaping (see camus_drl_c1.yaml for full rationale): breaks
+  # the baseline-indifference trap so "reach best mask, then STOP" is optimal.
+  # Replaces the retired Paradigm-1 boundary-tracing config (env_class:
+  # contour_tracing no longer exists — see archive/paradigm1_boundary_tracing/).
   DQN:
-    agent_type:             DQN
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       300      # ~1.5× expected max perimeter (~200px)
-    closure_tolerance:      3        # tight — convex, well-defined return path
-    min_perimeter_steps:    30
-    seed_method:            centroid
-    coverage_tolerance:      1.5
-    reward_step_cost:        -0.01
-    reward_coverage_bonus:    0.20
-    reward_off_boundary:     -0.05
-    reward_off_boundary_cap:  5.0
-    reward_terminal_dice:    10.0
-    reward_closure_min_dice:  0.20
-    reward_closure_bonus:     2.0
-    reward_offimage:        -10.0
-    reward_smoothness_penalty: -0.02   # stronger smoothness — meningioma IS smooth
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            40000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    25000
-    train_steps:            50000
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DQN
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.97
+    tau:                 0.005
+    embed_dim:           128
+    batch_size:          64
+    buffer_size:         40000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 25000
+    train_steps:         50000
+    eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working
 
   DuelingDDQN:
-    agent_type:             DUELING
-    env_class:              contour_tracing
-    patch_size:             64
-    max_trace_length:       300
-    closure_tolerance:      3
-    min_perimeter_steps:    30
-    seed_method:            centroid
-    coverage_tolerance:      1.5
-    reward_step_cost:        -0.01
-    reward_coverage_bonus:    0.20
-    reward_off_boundary:     -0.05
-    reward_off_boundary_cap:  5.0
-    reward_terminal_dice:    10.0
-    reward_closure_min_dice:  0.20
-    reward_closure_bonus:     2.0
-    reward_offimage:        -10.0
-    reward_smoothness_penalty: -0.02
-    lr:                     1.0e-4
-    gamma:                  0.97
-    tau:                    0.005
-    embed_dim:              128
-    batch_size:             64
-    buffer_size:            40000
-    prefill_steps:          2000
-    epsilon_start:          1.0
-    epsilon_end:            0.05
-    epsilon_decay_steps:    25000
-    train_steps:            50000
-    num_envs:               16
-    grad_updates:           1
-    eval_every:             5000
-    val_subset:             50
-    seed:                   42
-    checkpoint_dir:         /kaggle/working
+    agent_type:          DUELING
+    reward_step_penalty: 0.002
+    disable_auto_stop:   true
+    terminal_bonus_scale: 3.0
+    lr:                  1.0e-4
+    gamma:               0.97
+    tau:                 0.005
+    embed_dim:           128
+    batch_size:          64
+    buffer_size:         40000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 25000
+    train_steps:         50000
+    eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working
