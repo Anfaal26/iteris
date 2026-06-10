@@ -25,6 +25,7 @@ reward_mode:   iou_delta
 reward_alpha:  1.0
 reward_beta:   0.0
 hd_norm:       30.0               # larger normalization — glioma HD95 can be high
+reward_potential_scale: 15.0      # PBRS Φ scale (dice_pbrs only); baseline-centred
 
 # ── Environment (shared by all agents — SegmentationEnv v4) ─────────────────
 image_size:        256

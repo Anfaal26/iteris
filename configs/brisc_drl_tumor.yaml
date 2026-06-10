@@ -33,6 +33,8 @@ reward_mode:   iou_delta          # smoother than dice_delta for small targets
 reward_alpha:  1.0                # not used for iou_delta; kept for composite ablation
 reward_beta:   0.0                # not used for iou_delta
 hd_norm:       17.0               # 2× mean HD95 (~8.36 px) — for ablation only
+reward_potential_scale: 15.0      # PBRS Φ scale (dice_pbrs only); small targets → tinier
+                                  # Dice deltas → larger K to clear the Q-net noise floor.
 
 # ── Environment (shared by all agents — SegmentationEnv v4) ─────────────────
 image_size:        256
@@ -83,17 +85,15 @@ agents:
 
   DQN:
     agent_type:          DQN
-    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
-    reward_step_penalty: 0.002   # cost per non-STOP step → STOP-at-baseline becomes optimal
-    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
-    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
-    # `scale * (Dice_final - Dice_0)` is added ONLY to the reward of whichever
-    # transition ends the episode, making "reach the best mask and STOP there"
-    # dominate "wander and hope" — directly targets the best-seen ≫ final gap
-    # visible in the BRISC log (init 0.876 → final 0.73-0.77 | best-seen 0.88).
-    # 3.0: BRISC has more headroom (gains up to ~0.04) so a smaller multiplier
-    # than CAMUS already produces a comparably-sized terminal signal.
-    terminal_bonus_scale: 3.0
+    # ── Reward: potential-based shaping (see camus_drl_c1.yaml for full rationale) ──
+    # r_t = γ·Dice_{t+1} − Dice_t telescopes to γ^T·Dice_T − Dice_0, i.e. the
+    # discounted FINAL-mask gain over baseline — directly closing the best-seen ≫
+    # final gap in the BRISC log (init 0.876 → final 0.73-0.77 | best-seen 0.88)
+    # without the path-dependence of the old Dice_t−Dice_0 + terminal_bonus scheme.
+    reward_mode:          dice_pbrs
+    reward_step_penalty:  0.0
+    terminal_bonus_scale: 0.0     # ignored under pbrs
+    disable_auto_stop:    true    # agent's STOP action decides termination
 
     lr:                  1.0e-4
     gamma:               0.95
@@ -107,24 +107,18 @@ agents:
     epsilon_decay_steps: 25000           # slower decay: more exploration over 24-action space
     train_steps:         50000           # 30k→50k: training curve was still rising
     eval_every:          2000
-    hard_mining_scale:   8.0             # override top-level: must be set per-agent to take effect
+    hard_mining_scale:   4.0             # 8→4: keep easy masks represented (train/eval match)
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
 
   DuelingDDQN:
     agent_type:          DUELING
-    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
-    reward_step_penalty: 0.002   # cost per non-STOP step → STOP-at-baseline becomes optimal
-    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
-    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
-    # `scale * (Dice_final - Dice_0)` is added ONLY to the reward of whichever
-    # transition ends the episode, making "reach the best mask and STOP there"
-    # dominate "wander and hope" — directly targets the best-seen ≫ final gap
-    # visible in the BRISC log (init 0.876 → final 0.73-0.77 | best-seen 0.88).
-    # 3.0: BRISC has more headroom (gains up to ~0.04) so a smaller multiplier
-    # than CAMUS already produces a comparably-sized terminal signal.
-    terminal_bonus_scale: 3.0
+    # ── Reward: potential-based shaping (see DQN block / camus_drl_c1.yaml) ──
+    reward_mode:          dice_pbrs
+    reward_step_penalty:  0.0
+    terminal_bonus_scale: 0.0     # ignored under pbrs
+    disable_auto_stop:    true    # agent's STOP action decides termination
 
     lr:                  1.0e-4
     gamma:               0.95
@@ -138,7 +132,7 @@ agents:
     epsilon_decay_steps: 25000
     train_steps:         50000
     eval_every:          2000
-    hard_mining_scale:   8.0
+    hard_mining_scale:   4.0             # 8→4: keep easy masks represented (train/eval match)
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
@@ -159,9 +153,10 @@ agents:
     spline_smooth:       1.0           # lighter smoothing — preserve irregular margins
     smooth_lambda:       0.5
     # ── reward shaping ──
-    reward_step_penalty: 0.002
-    disable_auto_stop:   true
-    terminal_bonus_scale: 3.0
+    reward_mode:          dice_pbrs
+    reward_step_penalty:  0.0
+    disable_auto_stop:    true
+    terminal_bonus_scale: 0.0     # ignored under pbrs
     lr:                  1.0e-4
     gamma:               0.95
     tau:                 0.005
@@ -174,7 +169,7 @@ agents:
     epsilon_decay_steps: 30000
     train_steps:         60000
     eval_every:          2000
-    hard_mining_scale:   8.0
+    hard_mining_scale:   4.0
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working

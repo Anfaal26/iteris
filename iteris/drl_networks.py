@@ -22,7 +22,7 @@ class CNNBackbone(nn.Module):
     only a few unique sample indices, which makes BN statistics unstable.
     """
 
-    def __init__(self, in_channels: int = 4, embed_dim: int = 256):
+    def __init__(self, in_channels: int = 5, embed_dim: int = 256):
         super().__init__()
         ch = (32, 64, 128, 128)
         def block(ic, oc):
@@ -52,7 +52,7 @@ class CNNBackbone(nn.Module):
 
 class QNetwork(nn.Module):
     """Vanilla DQN Q-network."""
-    def __init__(self, in_channels=4, num_actions=13, embed_dim=256):
+    def __init__(self, in_channels=5, num_actions=13, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.head = nn.Sequential(
@@ -71,7 +71,7 @@ class DuelingQNetwork(nn.Module):
     Mean-centred (NOT max-centred) — this is the form that keeps V(s) and
     A(s, a) identifiable. Using max produces V/A drift.
     """
-    def __init__(self, in_channels=4, num_actions=13, embed_dim=256):
+    def __init__(self, in_channels=5, num_actions=13, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.value_head = nn.Sequential(
@@ -108,7 +108,7 @@ class Actor(nn.Module):
     Final-layer init is small-uniform [-3e-3, +3e-3] per Lillicrap et al. 2015
     to prevent tanh saturation during the actor-freeze warmup.
     """
-    def __init__(self, in_channels=4, action_dim=3, action_scale=None, embed_dim=256):
+    def __init__(self, in_channels=5, action_dim=3, action_scale=None, embed_dim=256):
         super().__init__()
         if action_scale is None:
             action_scale = [0.25, 0.02, 0.02]   # [morph, dy, dx] — tunable via YAML
@@ -141,7 +141,7 @@ class Critic(nn.Module):
     Final-layer small-uniform init [-3e-3, +3e-3] keeps initial Q values near
     zero, preventing early actor exploitation of random Q spikes.
     """
-    def __init__(self, in_channels=4, action_dim=3, embed_dim=256):
+    def __init__(self, in_channels=5, action_dim=3, embed_dim=256):
         super().__init__()
         self.backbone = CNNBackbone(in_channels, embed_dim)
         self.action_proj = nn.Sequential(

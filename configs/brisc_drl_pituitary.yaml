@@ -22,6 +22,7 @@ reward_mode:   iou_delta           # smoother than Dice for very small structure
 reward_alpha:  1.0
 reward_beta:   0.0
 hd_norm:       10.0                # tighter — 5px is catastrophic at 15-25px scale
+reward_potential_scale: 15.0       # PBRS Φ scale (dice_pbrs only); baseline-centred
 
 image_size:        256
 max_steps:         20

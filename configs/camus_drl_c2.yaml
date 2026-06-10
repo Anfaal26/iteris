@@ -22,6 +22,7 @@ reward_mode:   dice_hd_composite
 reward_alpha:  0.5               # 50 % Dice
 reward_beta:   0.5               # 50 % HD95 — apex boundary is high-priority
 hd_norm:       16.0              # normalise HD95; 16 ≈ 2× expected HD95 of ~8 px
+reward_potential_scale: 10.0     # PBRS Φ scale (dice_pbrs/dice_hd_pbrs only); baseline-centred
 
 # ── Environment ───────────────────────────────────────────────────────────────
 image_size:        256
@@ -35,8 +36,10 @@ stop_eps_hd:       0.5
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
-# LVepi has more shape variability than LVendo; scale=10 still appropriate.
-hard_mining_scale: 10.0
+# LVepi has more shape variability than LVendo. scale=10 starved the agent of
+# easy masks → degraded them at eval; scale=3 keeps the easy majority in the mix
+# (see camus_drl_c1.yaml for the full train/eval-mismatch rationale).
+hard_mining_scale: 3.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
@@ -64,11 +67,11 @@ agents:
 
   DQN:
     agent_type:          DQN
-    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
-    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
-    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
-    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
-    terminal_bonus_scale: 5.0
+    # ── Reward: potential-based shaping (see camus_drl_c1.yaml for rationale) ──
+    reward_mode:          dice_hd_pbrs
+    reward_step_penalty:  0.0
+    terminal_bonus_scale: 0.0     # ignored under pbrs
+    disable_auto_stop:    true    # agent's STOP action decides termination
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -87,11 +90,11 @@ agents:
 
   DuelingDDQN:
     agent_type:          DUELING
-    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
-    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
-    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
-    # Path-independent terminal bonus — see camus_drl_c1.yaml for full rationale.
-    terminal_bonus_scale: 5.0
+    # ── Reward: potential-based shaping (see camus_drl_c1.yaml for rationale) ──
+    reward_mode:          dice_hd_pbrs
+    reward_step_penalty:  0.0
+    terminal_bonus_scale: 0.0     # ignored under pbrs
+    disable_auto_stop:    true    # agent's STOP action decides termination
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005

@@ -84,7 +84,14 @@ def _make_state_builder(caches: dict, sdt_clip: float):
             sdt = cached_sdt.astype(np.float32)
         else:
             sdt = signed_dt(current_mask, sdt_clip)
-        return torch.from_numpy(np.stack([image, cur, sdt, init], axis=0))
+        # 5th channel: U-Net probability map (static per sample). Falls back to
+        # the binary init mask when warm_start produced no prob_map. MUST match
+        # the channel order in SegmentationEnv._state().
+        if 'prob_map' in caches:
+            prob = caches['prob_map'][idx].astype(np.float32)
+        else:
+            prob = init
+        return torch.from_numpy(np.stack([image, cur, sdt, init, prob], axis=0))
     return build
 
 
@@ -245,11 +252,16 @@ def run_drl_training(
         'fail_thresh', 'fail_n',                       # small-target extras
         'reward_step_penalty', 'disable_auto_stop',    # STOP-incentive shaping
         'terminal_bonus_scale',                        # path-independent terminal reward
+        'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
         'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda',  # contour env (env_class: contour)
     )
     for _k in _env_optional_keys:
         if _k in cfg:
             env_kwargs[_k] = cfg[_k]
+    # Potential-based reward shaping (dice_pbrs / dice_hd_pbrs) needs the SAME
+    # discount the agent uses, so the shaped return telescopes exactly to
+    # γ^T·Φ_T − Φ_0. Always pass it; the env ignores it for non-pbrs modes.
+    env_kwargs['pbrs_gamma'] = cfg.get('gamma', 0.99)
     # cont_trans_scale legacy fallback (old configs use cont_action_scale)
     if 'cont_trans_scale' not in env_kwargs and 'cont_action_scale' in cfg:
         env_kwargs['cont_trans_scale'] = cfg['cont_action_scale']
@@ -257,7 +269,7 @@ def run_drl_training(
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
     # ── Agent ─────────────────────────────────────────────────────────────────
-    common = dict(in_channels=4, gamma=cfg.get('gamma', 0.99),
+    common = dict(in_channels=5, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
                   embed_dim=cfg.get('embed_dim', 256), device=device)
     if action_type == 'discrete':

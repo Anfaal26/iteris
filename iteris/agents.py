@@ -44,7 +44,7 @@ class DQNAgent:
 
     def __init__(
         self,
-        in_channels: int = 4,
+        in_channels: int = 5,
         num_actions: int = 24,   # matches SegmentationEnv v4 (24 actions incl. diagonals + uncertainty)
         lr: float = 1e-4,
         gamma: float = 0.99,

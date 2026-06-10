@@ -22,3 +22,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# DRL validation artifacts (local only)
+scripts/_ckpt/
+scripts/_*.txt

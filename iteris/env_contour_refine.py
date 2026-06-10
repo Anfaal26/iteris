@@ -103,6 +103,7 @@ class ContourRefineEnv:
 
     SECTORS = 8
     NUM_DISCRETE_ACTIONS = 2 * SECTORS + 2          # 18
+    NUM_STATE_CHANNELS   = 5     # image, mask, sdt, init_mask, prob_map
     SMOOTH = 2 * SECTORS                            # 16
     STOP   = 2 * SECTORS + 1                        # 17
     # CONTINUOUS_ACTION_DIM is per-instance (= n_points); the class value is a
@@ -121,7 +122,8 @@ class ContourRefineEnv:
         image: np.ndarray,            # (H, W) float32 in [0, 1]
         gt_mask: np.ndarray,          # (H, W) uint8 in {0, 1}
         init_mask: np.ndarray,        # (H, W) uint8 in {0, 1} — U-Net prediction
-        prob_map: np.ndarray = None,  # accepted for interface parity (unused here)
+        prob_map: np.ndarray = None,  # U-Net confidence — exposed as state channel
+        pbrs_gamma: float = 0.99,     # discount used inside potential-based shaping
         action_type: str = 'discrete',
         max_steps: int = 20,
         sdt_clip: float = 20.0,
@@ -140,6 +142,7 @@ class ContourRefineEnv:
         reward_step_penalty: float = 0.0,
         disable_auto_stop: bool = False,
         terminal_bonus_scale: float = 0.0,
+        reward_potential_scale: float = 1.0,   # PBRS potential scale (baseline-centred Φ)
         # ── contour-specific ──────────────────────────────────────────────────
         n_points: int = 32,           # number of control points on the contour
         disp_px: float = 1.5,         # per-edit displacement along the normal (px)
@@ -148,12 +151,18 @@ class ContourRefineEnv:
         **_ignored,                   # forward-compat: ignore unknown cfg keys
     ):
         assert action_type in ('discrete', 'continuous')
-        assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
+        assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta',
+                               'dice_pbrs', 'dice_hd_pbrs')
         assert image.shape == gt_mask.shape == init_mask.shape
         self.image     = image.astype(np.float32)
         self.gt        = gt_mask.astype(np.uint8)
         self.init_mask = init_mask.astype(np.uint8)
         self.H, self.W = image.shape
+        self.prob_map  = (prob_map.astype(np.float32) if prob_map is not None
+                          else init_mask.astype(np.float32))
+        self.pbrs_gamma = float(pbrs_gamma)
+        self._is_pbrs  = reward_mode in ('dice_pbrs', 'dice_hd_pbrs')
+        self._needs_hd = reward_mode in ('dice_hd_composite', 'dice_hd_pbrs')
 
         self.action_type   = action_type
         self.max_steps     = int(max_steps)
@@ -171,6 +180,7 @@ class ContourRefineEnv:
         self.reward_step_penalty  = float(reward_step_penalty)
         self.disable_auto_stop    = bool(disable_auto_stop)
         self.terminal_bonus_scale = float(terminal_bonus_scale)
+        self.reward_potential_scale = float(reward_potential_scale)
 
         self.n_points      = int(n_points)
         self.disp_px       = float(disp_px)
@@ -195,11 +205,25 @@ class ContourRefineEnv:
         self.dice_history = [d0]
         self.best_dice = d0
         self.best_mask = self.mask.copy()
-        if self.reward_mode == 'dice_hd_composite':
+        if self._needs_hd:
             self.hd95_history = [self._hd95_vs_gt(self.mask)]
         else:
             self.hd95_history = [float('nan')]
         return self._state()
+
+    def _potential(self, dice: float, hd: float) -> float:
+        """Baseline-centred, scaled state potential Φ(s) (see env.py for rationale)."""
+        K = self.reward_potential_scale
+        dice_0 = self.dice_history[0]
+        if self.reward_mode == 'dice_hd_pbrs':
+            hd_term = (0.0 if (np.isnan(hd) or np.isinf(hd))
+                       else 1.0 - float(np.clip(hd / self.hd_norm, 0.0, 1.0)))
+            hd0 = self.hd95_history[0]
+            hd_term0 = (0.0 if (np.isnan(hd0) or np.isinf(hd0))
+                        else 1.0 - float(np.clip(hd0 / self.hd_norm, 0.0, 1.0)))
+            return K * (self.reward_alpha * (dice - dice_0)
+                        + self.reward_beta * (hd_term - hd_term0))
+        return K * (dice - dice_0)   # dice_pbrs
 
     def _init_points(self) -> np.ndarray:
         """Control points from the U-Net init-mask boundary (warm start)."""
@@ -251,8 +275,9 @@ class ContourRefineEnv:
 
         self.t += 1
         new_dice = dice_score(self.mask, self.gt)
-        new_hd95 = self._hd95_vs_gt(self.mask) \
-                   if self.reward_mode == 'dice_hd_composite' else float('nan')
+        new_hd95 = self._hd95_vs_gt(self.mask) if self._needs_hd else float('nan')
+        if self._is_pbrs:
+            phi_prev = self._potential(self.dice_history[-1], self.hd95_history[-1])
         self.dice_history.append(new_dice)
         self.hd95_history.append(new_hd95)
 
@@ -262,11 +287,16 @@ class ContourRefineEnv:
 
         done = self._check_termination()
 
-        raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
-        clip = self.reward_clip
-        if done and self.terminal_bonus_scale > 0.0:
-            raw_reward += self.terminal_bonus_scale * (new_dice - self.dice_history[0])
-            clip = self.reward_clip + self.terminal_bonus_scale
+        if self._is_pbrs:
+            phi_new = self._potential(new_dice, new_hd95)
+            raw_reward = (self.pbrs_gamma * phi_new - phi_prev) - self.reward_step_penalty
+            clip = self.reward_clip
+        else:
+            raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
+            clip = self.reward_clip
+            if done and self.terminal_bonus_scale > 0.0:
+                raw_reward += self.terminal_bonus_scale * (new_dice - self.dice_history[0])
+                clip = self.reward_clip + self.terminal_bonus_scale
         reward = float(np.clip(raw_reward, -clip, clip))
 
         info = {'dice': new_dice, 'hd95': new_hd95, 'delta_dice': raw_reward,
@@ -278,12 +308,16 @@ class ContourRefineEnv:
         """Explicit STOP — terminate now, scoring the current contour."""
         self.t += 1
         new_dice = dice_score(self.mask, self.gt)
-        new_hd95 = self._hd95_vs_gt(self.mask) \
-                   if self.reward_mode == 'dice_hd_composite' else float('nan')
-        raw_reward = self._compute_reward(new_dice, new_hd95)
-        if self.terminal_bonus_scale > 0.0:
-            raw_reward += self.terminal_bonus_scale * (new_dice - self.dice_history[0])
-        clip = self.reward_clip + self.terminal_bonus_scale
+        new_hd95 = self._hd95_vs_gt(self.mask) if self._needs_hd else float('nan')
+        if self._is_pbrs:
+            # STOP commits the current contour; its value was already credited.
+            raw_reward = 0.0
+            clip = self.reward_clip
+        else:
+            raw_reward = self._compute_reward(new_dice, new_hd95)
+            if self.terminal_bonus_scale > 0.0:
+                raw_reward += self.terminal_bonus_scale * (new_dice - self.dice_history[0])
+            clip = self.reward_clip + self.terminal_bonus_scale
         reward = float(np.clip(raw_reward, -clip, clip))
         info = {'dice': new_dice, 'hd95': new_hd95, 'delta_dice': raw_reward,
                 'reward_clipped': reward != raw_reward, 'step': self.t,
@@ -482,4 +516,5 @@ class ContourRefineEnv:
             self.mask.astype(np.float32),
             sdt,
             self.init_mask.astype(np.float32),
+            self.prob_map,                      # U-Net confidence — where to refine
         ], axis=0)

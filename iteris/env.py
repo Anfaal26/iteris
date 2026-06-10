@@ -35,6 +35,14 @@ Reward modes (set per-class via YAML):
     dice_delta          r_t = Dice_t - Dice_0  (episode-start baseline)
     dice_hd_composite   α·ΔDice + β·ΔHD95_norm                — boundary precision
     iou_delta           r_t = IoU_t  - IoU_0                  — small targets
+    dice_pbrs           r_t = γ·Φ(s_{t+1}) − Φ(s_t), Φ = Dice — potential-based
+                        reward shaping (Ng et al. 1999). Telescopes EXACTLY to
+                        γ^T·Dice_T − Dice_0, so the discounted return equals the
+                        true objective "maximise the FINAL mask's Dice" — dense,
+                        per-action credit, no spike-then-fade path exploit, and
+                        an intrinsic stop incentive (γ<1 makes dawdling at a good
+                        state cost (γ−1)Φ per step). This is the recommended mode.
+    dice_hd_pbrs        same shaping with Φ = α·Dice + β·(1 − HD95/hd_norm).
 
 Episode: max_steps steps, OR composite stop
     (|ΔDice| < stop_eps_dice AND |ΔHD95| < stop_eps_hd) for stop_n consecutive
@@ -161,6 +169,7 @@ class SegmentationEnv:
     # 22:    Remove uncertain pixels — exclude U-Net uncertain-borderline pixels
     # 23:    Stop
     NUM_DISCRETE_ACTIONS  = 24
+    NUM_STATE_CHANNELS    = 5     # image, mask, sdt, init_mask, prob_map
     DILATE_N, DILATE_E, DILATE_S, DILATE_W            = 0, 1, 2, 3
     ERODE_N,  ERODE_E,  ERODE_S,  ERODE_W             = 4, 5, 6, 7
     DILATE_NE, DILATE_NW, DILATE_SE, DILATE_SW        = 8, 9, 10, 11
@@ -207,6 +216,34 @@ class SegmentationEnv:
         reward_alpha: float = 0.5,        # weight on Dice component (composite)
         reward_beta: float  = 0.5,        # weight on HD95 component (composite)
         hd_norm: float = 50.0,            # HD95 normalisation in px — tune to 2× expected HD95
+        pbrs_gamma: float = 0.99,         # discount used inside potential-based shaping
+                                          # (dice_pbrs / dice_hd_pbrs). MUST equal the
+                                          # agent's γ for the telescoping identity
+                                          # Σγ^t r_t = γ^T Φ_T − Φ_0 to hold exactly.
+        reward_potential_scale: float = 1.0,
+                                          # Multiplies the (baseline-centred) PBRS
+                                          # potential Φ. CRITICAL at near-optimal
+                                          # baselines (CAMUS ~0.94, BRISC ~0.88):
+                                          #
+                                          # The potential is Φ(s)=K·(Dice(s)−Dice_0)
+                                          # — centred so Φ_0=0. Centring removes the
+                                          # discount DRAG that an *un-centred* Φ=Dice
+                                          # suffers: with Φ≈0.94 and γ=0.99, even
+                                          # holding Dice constant pays (γ−1)·Φ≈−0.009
+                                          # /step, and a real +0.005 Dice gain still
+                                          # nets γΦ'−Φ<0 — so every realistic refine
+                                          # step looks negative and the only non-
+                                          # negative action is STOP-at-baseline. The
+                                          # agent then provably collapses to "do
+                                          # nothing", never beating baseline. Centring
+                                          # makes holding-at-baseline reward exactly 0
+                                          # (== STOP) and any genuine gain strictly
+                                          # positive. K (≈10–20) then lifts the tiny
+                                          # Dice deltas (±0.003–0.01) out of the
+                                          # function-approximation noise floor.
+                                          # Telescopes to γ^T·K·(Dice_T−Dice_0): same
+                                          # "maximise final improvement, soonest"
+                                          # objective, just properly scaled.
         # ── fail-fast (small-target datasets) ───────────────────────────────
         fail_thresh: float = 0.0,         # >0 enables fail-fast: terminate if Dice
                                           # drops ≥ fail_thresh below episode-start
@@ -251,12 +288,23 @@ class SegmentationEnv:
                                           # STOP there" dominate "wander and hope".
     ):
         assert action_type in ('discrete', 'continuous')
-        assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta')
+        assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta',
+                               'dice_pbrs', 'dice_hd_pbrs')
         assert image.shape == gt_mask.shape == init_mask.shape
         self.image     = image.astype(np.float32)
         self.gt        = gt_mask.astype(np.uint8)
         self.init_mask = init_mask.astype(np.uint8)
         self.H, self.W = image.shape
+        # U-Net probability map for the target class — exposed as a STATE channel
+        # so the policy can see *where the U-Net was unsure* (the single most
+        # informative cue for where refinement is worthwhile). Falls back to the
+        # binary init mask when no prob_map is supplied (older warm_start runs).
+        self.prob_map = (prob_map.astype(np.float32) if prob_map is not None
+                         else init_mask.astype(np.float32))
+        # Modes whose reward is potential-based (need new vs. previous potential).
+        self._is_pbrs = reward_mode in ('dice_pbrs', 'dice_hd_pbrs')
+        # HD95 must be tracked whenever the potential / composite depends on it.
+        self._needs_hd = reward_mode in ('dice_hd_composite', 'dice_hd_pbrs')
         # Precompute uncertainty zone masks from the U-Net probability map.
         # uncertain_hi: pixels the U-Net considered "maybe foreground" (0.35–0.65)
         # that aren't in the binary init_mask — candidates to ADD.
@@ -289,8 +337,41 @@ class SegmentationEnv:
         self.reward_step_penalty = float(reward_step_penalty)
         self.disable_auto_stop   = bool(disable_auto_stop)
         self.terminal_bonus_scale = float(terminal_bonus_scale)
+        self.pbrs_gamma          = float(pbrs_gamma)
+        self.reward_potential_scale = float(reward_potential_scale)
 
         self.reset()
+
+    def _potential(self, dice: float, hd: float) -> float:
+        """State potential Φ(s) for potential-based reward shaping.
+
+        BASELINE-CENTRED and SCALED (K = reward_potential_scale):
+
+        dice_pbrs    : Φ = K·(Dice − Dice_0)
+        dice_hd_pbrs : Φ = K·[α·(Dice − Dice_0) + β·(hd_term − hd_term_0)]
+                       with hd_term = 1 − clip(HD95/hd_norm, 0, 1).
+
+        Centring at the episode baseline (Dice_0, hd_term_0 — both fixed at
+        reset()) makes Φ_0 = 0. This is essential at near-optimal baselines:
+        an UN-centred Φ = Dice ≈ 0.94 makes the discount term (γ−1)·Φ ≈ −0.009
+        dominate the genuine per-step Dice deltas (±0.003–0.01), so every
+        realistic refine step scores negative and the agent collapses to STOP
+        (Φ-invariance still holds, but the learnable signal is pure drag).
+        Centred + scaled, holding at baseline pays exactly 0 (== STOP), real
+        gains are strictly positive, and K lifts them above the FA noise floor.
+        Telescopes to γ^T·Φ_T = γ^T·K·(Dice_T − Dice_0): identical objective.
+        """
+        K = self.reward_potential_scale
+        dice_0 = self.dice_history[0]
+        if self.reward_mode == 'dice_hd_pbrs':
+            hd_term = (0.0 if (np.isnan(hd) or np.isinf(hd))
+                       else 1.0 - float(np.clip(hd / self.hd_norm, 0.0, 1.0)))
+            hd0 = self.hd95_history[0]
+            hd_term0 = (0.0 if (np.isnan(hd0) or np.isinf(hd0))
+                        else 1.0 - float(np.clip(hd0 / self.hd_norm, 0.0, 1.0)))
+            return K * (self.reward_alpha * (dice - dice_0)
+                        + self.reward_beta * (hd_term - hd_term0))
+        return K * (dice - dice_0)   # dice_pbrs
 
     def _compute_reward(self, new_dice: float, new_hd: float) -> float:
         """Dataset-tuned reward shaping. Returns RAW reward (will be clipped).
@@ -362,7 +443,7 @@ class SegmentationEnv:
         # this as the achievable ceiling; the agent's job is to STOP at it.
         self.best_dice = d0
         self.best_mask = self.mask.copy()
-        if self.reward_mode != 'dice_delta':
+        if self._needs_hd:
             self.hd95_history = [self._hd95_vs_gt(self.mask)]
         else:
             self.hd95_history = [float('nan')]
@@ -381,17 +462,27 @@ class SegmentationEnv:
         if self.action_type == 'discrete' and a == self.STOP:   # a == 23
             self.t += 1
             new_dice = dice_score(self.mask, self.gt)
-            new_hd95 = self._hd95_vs_gt(self.mask) \
-                       if self.reward_mode == 'dice_hd_composite' else float('nan')
+            new_hd95 = self._hd95_vs_gt(self.mask) if self._needs_hd else float('nan')
             dice_0 = self.dice_history[0]
-            # STOP reward = current improvement, NO step penalty (it's the exit).
-            raw_reward = self._compute_reward(new_dice, new_hd95)
-            # Terminal bonus: STOP always ends the episode, so the terminal-state
-            # bonus (see __init__ docstring on terminal_bonus_scale) always applies
-            # here — it directly rewards stopping AT a final-Dice gain over baseline.
-            if self.terminal_bonus_scale > 0.0:
-                raw_reward += self.terminal_bonus_scale * (new_dice - dice_0)
-            clip = self.reward_clip + self.terminal_bonus_scale
+            if self._is_pbrs:
+                # STOP is a pure "commit" action: it does not change the mask, so
+                # the value of the current state was ALREADY credited by whichever
+                # transition reached it. Crediting it again (γΦ−Φ) would penalise
+                # committing at a good state. Reward 0 makes Q(STOP)=0 a clean
+                # decision boundary: stop iff continuing has negative expected
+                # value (dawdle cost + risk of degrading) — which is exactly the
+                # desired "stop once no further gain is reachable" behaviour.
+                raw_reward = 0.0
+                clip = self.reward_clip
+            else:
+                # STOP reward = current improvement, NO step penalty (it's the exit).
+                raw_reward = self._compute_reward(new_dice, new_hd95)
+                # Terminal bonus: STOP always ends the episode, so the terminal-state
+                # bonus (see __init__ docstring on terminal_bonus_scale) always applies
+                # here — it directly rewards stopping AT a final-Dice gain over baseline.
+                if self.terminal_bonus_scale > 0.0:
+                    raw_reward += self.terminal_bonus_scale * (new_dice - dice_0)
+                clip = self.reward_clip + self.terminal_bonus_scale
             reward = float(np.clip(raw_reward, -clip, clip))
             info = {'dice': new_dice, 'hd95': new_hd95, 'delta_dice': raw_reward,
                     'reward_clipped': reward != raw_reward, 'step': self.t,
@@ -412,10 +503,15 @@ class SegmentationEnv:
         self.t += 1
         new_dice = dice_score(self.mask, self.gt)
 
-        if self.reward_mode == 'dice_hd_composite':
+        if self._needs_hd:
             new_hd95 = self._hd95_vs_gt(self.mask)
         else:
             new_hd95 = float('nan')
+
+        # Capture the PREVIOUS-state potential BEFORE appending the new state —
+        # potential-based shaping needs Φ(s_t) and Φ(s_{t+1}).
+        if self._is_pbrs:
+            phi_prev = self._potential(self.dice_history[-1], self.hd95_history[-1])
 
         self.dice_history.append(new_dice)
         self.hd95_history.append(new_hd95)
@@ -475,12 +571,23 @@ class SegmentationEnv:
         # just explicit STOP. This matters because most episodes currently end
         # via max_steps / fail-fast rather than STOP (see best-seen ≫ final
         # diagnostic), and those paths need the same path-independent signal.
-        raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
-        clip = self.reward_clip
-        if done and self.terminal_bonus_scale > 0.0:
-            dice_0 = self.dice_history[0]
-            raw_reward += self.terminal_bonus_scale * (new_dice - dice_0)
-            clip = self.reward_clip + self.terminal_bonus_scale
+        if self._is_pbrs:
+            # Potential-based shaping: r = γ·Φ(s_{t+1}) − Φ(s_t) − step_penalty.
+            # Summed over the episode this telescopes to γ^T·Φ_T − Φ_0, i.e. the
+            # discounted FINAL-state improvement — the true deployment objective,
+            # with dense per-action credit and no path-dependence. terminal_bonus
+            # is intentionally NOT applied (it is redundant and would re-introduce
+            # path-dependence).
+            phi_new = self._potential(new_dice, new_hd95)
+            raw_reward = (self.pbrs_gamma * phi_new - phi_prev) - self.reward_step_penalty
+            clip = self.reward_clip
+        else:
+            raw_reward = self._compute_reward(new_dice, new_hd95) - self.reward_step_penalty
+            clip = self.reward_clip
+            if done and self.terminal_bonus_scale > 0.0:
+                dice_0 = self.dice_history[0]
+                raw_reward += self.terminal_bonus_scale * (new_dice - dice_0)
+                clip = self.reward_clip + self.terminal_bonus_scale
         reward = float(np.clip(raw_reward, -clip, clip))
 
         info = {
@@ -587,4 +694,5 @@ class SegmentationEnv:
             self.mask.astype(np.float32),
             sdt,
             self.init_mask.astype(np.float32),
+            self.prob_map,                      # U-Net confidence — where to refine
         ], axis=0)

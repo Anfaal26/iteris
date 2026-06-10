@@ -25,6 +25,10 @@ reward_mode:   dice_hd_composite
 reward_alpha:  0.6               # 60 % Dice — still the primary target metric
 reward_beta:   0.4               # 40 % HD95 — boundary precision
 hd_norm:       12.0              # normalise HD95; 12 ≈ 2× mean HD95 of ~6 px
+# PBRS potential scale (used only by dice_pbrs / dice_hd_pbrs agents). The
+# baseline-centred potential Φ=K·(ΔDice…) needs K≫1 to lift the tiny per-step
+# Dice deltas (±0.003–0.01 at this ~0.94 baseline) above the Q-net noise floor.
+reward_potential_scale: 10.0
 
 # ── Environment ───────────────────────────────────────────────────────────────
 image_size:        256
@@ -40,11 +44,15 @@ stop_eps_hd:       0.3
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
-# At Dice 0.93+, most samples provide near-zero gradient. Scale=10 gives
-# Dice=0.85 samples ~100× weight vs Dice=0.95, focusing on the improvable tail.
-# samples (dice=0.85 → ~2×, dice=0.75 → ~5×) while keeping easy samples in
-# the mix so the agent still learns "no-op on already-good states".
-hard_mining_scale: 10.0
+# Mild up-weighting of the improvable tail WITHOUT starving the agent of the
+# easy, already-good masks that dominate the val set. scale=10 was far too
+# aggressive (dice=0.75 got ~100× the weight of dice=0.95): the agent trained
+# almost exclusively on hard cases, never learned "STOP when already good", and
+# at eval applied aggressive edits to good masks → final Dice BELOW baseline.
+# scale=3 gives dice=0.75 ~1.8× the weight of dice=0.95 — enough focus on the
+# tail while keeping the easy majority well represented so STOP-when-good is
+# learned. This train/eval distribution match is essential to beating baseline.
+hard_mining_scale: 3.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.
@@ -73,18 +81,19 @@ agents:
 
   DQN:
     agent_type:          DQN
-    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
-    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
-    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
-    # Path-independent terminal bonus — `scale * (Dice_final - Dice_0)` added ONLY
-    # to the reward of whichever transition ends the episode (STOP / max_steps /
-    # fail-fast). Without this, the per-step `Dice_t - Dice_0` signal rewards a
-    # "spike early, fade late" trajectory under discounting (early high-Dice steps
-    # are weighted by larger γ^t than the later low-Dice steps that erase the gain)
-    # — which matches the observed best-seen ≫ final pathology in training logs.
-    # 5.0 ≈ Dice gains here are tiny (±0.003-0.01), so the bonus needs a large
-    # multiplier to be comparable in magnitude to the cumulative per-step signal.
-    terminal_bonus_scale: 5.0
+    # ── Reward: potential-based shaping (replaces the path-dependent
+    #    Dice_t−Dice_0 + terminal_bonus hack) ──
+    # r_t = γ·Φ(s_{t+1}) − Φ(s_t), Φ = α·Dice + β·(1 − HD95/hd_norm).
+    # Telescopes EXACTLY to γ^T·Φ_T − Φ_0 → the discounted return IS the final
+    # mask's quality gain over baseline. Dense per-action credit, provably
+    # policy-invariant (Ng et al. 1999), no spike-then-fade exploit. The γ<1
+    # factor makes dawdling at a good state cost (γ−1)Φ per step, so STOP (reward
+    # 0) is the optimal exit once no further gain is reachable — no explicit step
+    # penalty or terminal bonus needed.
+    reward_mode:          dice_hd_pbrs
+    reward_step_penalty:  0.0
+    terminal_bonus_scale: 0.0     # ignored under pbrs; kept 0 for clarity
+    disable_auto_stop:    true    # agent's STOP action decides termination
 
     lr:                  1.0e-4
     gamma:               0.99
@@ -104,18 +113,11 @@ agents:
 
   DuelingDDQN:
     agent_type:          DUELING
-    # ── STOP-incentive shaping (breaks baseline-indifference trap) ──
-    reward_step_penalty: 0.003   # cost per non-STOP step → STOP-at-baseline becomes optimal
-    disable_auto_stop:   true    # agent's STOP action decides termination, not a heuristic
-    # Path-independent terminal bonus — `scale * (Dice_final - Dice_0)` added ONLY
-    # to the reward of whichever transition ends the episode (STOP / max_steps /
-    # fail-fast). Without this, the per-step `Dice_t - Dice_0` signal rewards a
-    # "spike early, fade late" trajectory under discounting (early high-Dice steps
-    # are weighted by larger γ^t than the later low-Dice steps that erase the gain)
-    # — which matches the observed best-seen ≫ final pathology in training logs.
-    # 5.0 ≈ Dice gains here are tiny (±0.003-0.01), so the bonus needs a large
-    # multiplier to be comparable in magnitude to the cumulative per-step signal.
-    terminal_bonus_scale: 5.0
+    # ── Reward: potential-based shaping (see DQN block above) ──
+    reward_mode:          dice_hd_pbrs
+    reward_step_penalty:  0.0
+    terminal_bonus_scale: 0.0     # ignored under pbrs; kept 0 for clarity
+    disable_auto_stop:    true    # agent's STOP action decides termination
 
     lr:                  1.0e-4
     gamma:               0.99
@@ -152,9 +154,10 @@ agents:
     spline_smooth:       2.0           # periodic-spline smoothing (s in splprep)
     smooth_lambda:       0.5           # Laplacian strength for the SMOOTH action
     # ── reward shaping (same machinery as the global-op agents) ──
-    reward_step_penalty: 0.003
-    disable_auto_stop:   true
-    terminal_bonus_scale: 5.0
+    reward_mode:          dice_hd_pbrs
+    reward_step_penalty:  0.0
+    disable_auto_stop:    true
+    terminal_bonus_scale: 0.0
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
