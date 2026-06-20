@@ -79,6 +79,48 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
+  # ── TD3 (robust DDPG) on the contour env — CURATED FOR LV_endo ──────────────
+  # WHY TD3-on-contour beats the 3-D global DDPG above: a global SDT-threshold +
+  # translation action cannot fix REGIONAL over/under-segmentation — its best
+  # response to a near-perfect U-Net mask is ~identity, so it is capped at
+  # baseline. The contour action deforms 16 independent angular sectors of the
+  # boundary, so heterogeneous errors become correctable. TD3 (twin critics +
+  # target smoothing + delayed updates) removes the Q-overestimation that makes
+  # plain DDPG stall on this tiny, near-optimal-baseline reward signal.
+  # LV_endo is large and smooth -> dense points (32), 16 sectors, dice_hd_pbrs
+  # (HD95 term keeps the boundary crisp), moderate per-step deformation.
+  TD3:
+    agent_type:          TD3
+    env_class:           contour
+    reward_mode:          dice_hd_pbrs
+    reward_potential_scale: 10.0
+    reward_step_penalty:  0.0
+    disable_auto_stop:    false      # no STOP action in continuous mode; converge-and-hold
+    # contour geometry
+    n_points:            32
+    cont_sectors:        16
+    disp_px:             2.0
+    spline_smooth:       2.0
+    # TD3 hyperparams
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    policy_delay:        2
+    expl_noise:          0.2
+    target_noise:        0.2
+    noise_clip:          0.5
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    max_steps:           10
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
   DQN:
     agent_type:          DQN
     # ── Reward: potential-based shaping (replaces the path-dependent

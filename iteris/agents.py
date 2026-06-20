@@ -293,6 +293,164 @@ class DDPGAgent:
         self.critic_target.load_state_dict(state['critic_target'])
 
 
+# ─── TD3 (robust DDPG) ──────────────────────────────────────────────────────
+
+class TD3Agent:
+    """
+    TD3 — Twin Delayed DDPG (Fujimoto et al. 2018): the robust successor to DDPG.
+
+    Three fixes over vanilla DDPG, all of which matter on the near-optimal
+    medical-segmentation baselines here (small, noisy reward signal → DDPG's
+    single critic overestimates badly and the actor chases the error):
+
+      1. Clipped double-Q   — two critics; the target uses min(Q1', Q2'), which
+                              removes the systematic Q overestimation that makes
+                              DDPG diverge or stall at baseline.
+      2. Target policy smoothing — clipped Gaussian noise on the target action,
+                              so the critic can't exploit sharp Q peaks; gives a
+                              smoother value surface (important for contour
+                              deformation, where nearby actions are near-equal).
+      3. Delayed policy updates — actor + targets update every `policy_delay`
+                              critic steps, so the policy is improved against a
+                              more-converged value estimate.
+
+    Action space is generic (any `action_dim`), so the same agent drives either
+    the 3-D global SegmentationEnv action or the angular-sector contour action.
+    Actions live in [-action_scale, +action_scale] per component (Actor =
+    tanh × action_scale); for the contour env action_scale = 1.0 and the env
+    multiplies by `disp_px`.
+    """
+    action_type = 'continuous'
+
+    def __init__(
+        self,
+        in_channels:   int = 5,
+        action_dim:    int = 16,
+        action_scale       = 1.0,        # scalar or per-component list
+        actor_lr:      float = 1e-4,
+        critic_lr:     float = 1e-3,
+        gamma:         float = 0.99,
+        tau:           float = 0.005,
+        policy_delay:  int   = 2,
+        expl_noise:    float = 0.2,      # exploration std (× action_scale)
+        target_noise:  float = 0.2,      # target-smoothing std (× action_scale)
+        noise_clip:    float = 0.5,      # target-noise clip (× action_scale)
+        embed_dim:     int   = 256,
+        device:        torch.device = None,
+        **_ignored,                       # forward-compat: ignore unused cfg keys
+    ):
+        self.device       = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.action_dim   = action_dim
+        self.gamma        = gamma
+        self.tau          = tau
+        self.policy_delay = int(policy_delay)
+
+        scale = ([float(action_scale)] * action_dim if np.isscalar(action_scale)
+                 else list(action_scale))
+        self.action_scale_np = np.array(scale, dtype=np.float32)
+        sc = torch.tensor(self.action_scale_np, device=self.device)
+        # Noise magnitudes are expressed as a fraction of each component's range.
+        self.expl_noise_np = (expl_noise * self.action_scale_np).astype(np.float32)
+        self._target_noise = (target_noise * sc)
+        self._noise_clip   = (noise_clip * sc)
+        self._scale_t      = sc
+
+        self.actor         = Actor(in_channels, action_dim, scale, embed_dim).to(self.device)
+        self.actor_target  = deepcopy(self.actor).eval()
+        self.critic1       = Critic(in_channels, action_dim, embed_dim).to(self.device)
+        self.critic2       = Critic(in_channels, action_dim, embed_dim).to(self.device)
+        self.critic1_target = deepcopy(self.critic1).eval()
+        self.critic2_target = deepcopy(self.critic2).eval()
+        for net in (self.actor_target, self.critic1_target, self.critic2_target):
+            for p in net.parameters():
+                p.requires_grad_(False)
+
+        self.actor_opt  = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_opt = torch.optim.Adam(
+            list(self.critic1.parameters()) + list(self.critic2.parameters()),
+            lr=critic_lr)
+        self.total_it = 0
+
+    @torch.no_grad()
+    def select_action(self, state: np.ndarray, explore: bool = True) -> np.ndarray:
+        s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
+        a = self.actor(s).cpu().numpy().squeeze(0)        # already tanh×scale
+        if explore:
+            a = a + np.random.randn(self.action_dim).astype(np.float32) * self.expl_noise_np
+        return np.clip(a, -self.action_scale_np, self.action_scale_np).astype(np.float32)
+
+    def _build_states(self, batch, state_builder, key, sdt_key):
+        n  = len(batch['sample_idx'])
+        sd = batch.get(sdt_key)
+        return torch.stack([
+            state_builder(batch['sample_idx'][i], batch[key][i],
+                          sd[i] if sd is not None else None)
+            for i in range(n)
+        ]).to(self.device)
+
+    def update(self, batch: dict, state_builder: Callable) -> dict:
+        states      = self._build_states(batch, state_builder, 'current_mask', 'current_sdt')
+        next_states = self._build_states(batch, state_builder, 'next_mask',    'next_sdt')
+        actions = torch.from_numpy(batch['action']).float().to(self.device)
+        rewards = torch.from_numpy(batch['reward']).to(self.device)
+        dones   = torch.from_numpy(batch['done']).float().to(self.device)
+
+        # ── Critic update: clipped double-Q with target policy smoothing ──────
+        with torch.no_grad():
+            noise = (torch.randn_like(actions) * self._target_noise
+                     ).clamp(-self._noise_clip, self._noise_clip)
+            next_a = (self.actor_target(next_states) + noise
+                      ).clamp(-self._scale_t, self._scale_t)
+            q1 = self.critic1_target(next_states, next_a).squeeze(1)
+            q2 = self.critic2_target(next_states, next_a).squeeze(1)
+            q_next = torch.min(q1, q2)
+            y = rewards + self.gamma * q_next * (1.0 - dones)
+
+        q1_pred = self.critic1(states, actions).squeeze(1)
+        q2_pred = self.critic2(states, actions).squeeze(1)
+        critic_loss = F.smooth_l1_loss(q1_pred, y) + F.smooth_l1_loss(q2_pred, y)
+
+        self.critic_opt.zero_grad()
+        critic_loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            list(self.critic1.parameters()) + list(self.critic2.parameters()), 1.0)
+        self.critic_opt.step()
+
+        self.total_it += 1
+        actor_loss_val = 0.0
+        # ── Delayed policy + target update ────────────────────────────────────
+        if self.total_it % self.policy_delay == 0:
+            actor_loss = -self.critic1(states, self.actor(states)).mean()
+            self.actor_opt.zero_grad()
+            actor_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+            self.actor_opt.step()
+            actor_loss_val = float(actor_loss.item())
+            _soft_update(self.actor_target,   self.actor,   self.tau)
+            _soft_update(self.critic1_target, self.critic1, self.tau)
+            _soft_update(self.critic2_target, self.critic2, self.tau)
+
+        return {'critic_loss': float(critic_loss.item()), 'actor_loss': actor_loss_val}
+
+    def state_dict(self):
+        return {
+            'actor':          self.actor.state_dict(),
+            'actor_target':   self.actor_target.state_dict(),
+            'critic1':        self.critic1.state_dict(),
+            'critic2':        self.critic2.state_dict(),
+            'critic1_target': self.critic1_target.state_dict(),
+            'critic2_target': self.critic2_target.state_dict(),
+        }
+
+    def load_state_dict(self, state):
+        self.actor.load_state_dict(state['actor'])
+        self.actor_target.load_state_dict(state['actor_target'])
+        self.critic1.load_state_dict(state['critic1'])
+        self.critic2.load_state_dict(state['critic2'])
+        self.critic1_target.load_state_dict(state['critic1_target'])
+        self.critic2_target.load_state_dict(state['critic2_target'])
+
+
 # ─── Archived agents ────────────────────────────────────────────────────────
 # DDQNAgent (plain Double-DQN) and MSADuelingDQNAgent (MSA backbone) were
 # archived in the boundary-tracing paradigm shift — see

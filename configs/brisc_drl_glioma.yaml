@@ -71,6 +71,37 @@ agents:
   # the baseline-indifference trap so "reach best mask, then STOP" is optimal.
   # Replaces the retired Paradigm-1 boundary-tracing config (env_class:
   # contour_tracing no longer exists — see archive/paradigm1_boundary_tracing/).
+  # ── TD3 (robust DDPG) on contour env — CURATED FOR glioma (irregular) ───────
+  TD3:
+    agent_type:          TD3
+    env_class:           contour
+    reward_mode:          dice_pbrs
+    reward_potential_scale: 15.0
+    reward_step_penalty:  0.0
+    disable_auto_stop:    false
+    n_points:            20
+    cont_sectors:        12
+    disp_px:             1.5
+    spline_smooth:       1.0
+    actor_lr:            1.0e-4
+    critic_lr:           1.0e-3
+    gamma:               0.99
+    tau:                 0.005
+    policy_delay:        2
+    expl_noise:          0.25
+    target_noise:        0.2
+    noise_clip:          0.5
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    max_steps:           10
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
   DQN:
     agent_type:          DQN
     reward_step_penalty: 0.002

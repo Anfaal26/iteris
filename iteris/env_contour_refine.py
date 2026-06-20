@@ -148,6 +148,17 @@ class ContourRefineEnv:
         disp_px: float = 1.5,         # per-edit displacement along the normal (px)
         spline_smooth: float = 2.0,   # periodic-spline smoothing factor (s in splprep)
         smooth_lambda: float = 0.5,   # Laplacian-smoothing strength for SMOOTH action
+        cont_sectors: int = 16,       # continuous (DDPG/TD3) action dim: number of
+                                      # angular wedges; action[g] ∈ [-1,1] pushes
+                                      # every control point in wedge g along its
+                                      # outward normal by action[g]·disp_px. Angular
+                                      # (not index) binning makes the action↔location
+                                      # mapping STABLE across samples — find_contours
+                                      # starts at an arbitrary point, so a per-index
+                                      # offset would be unlearnable (same bug fixed for
+                                      # the discrete sectors). Lower-dim + spatially
+                                      # grounded → the value surface is smooth and
+                                      # TD3 can actually learn regional corrections.
         **_ignored,                   # forward-compat: ignore unknown cfg keys
     ):
         assert action_type in ('discrete', 'continuous')
@@ -186,7 +197,10 @@ class ContourRefineEnv:
         self.disp_px       = float(disp_px)
         self.spline_smooth = float(spline_smooth)
         self.smooth_lambda = float(smooth_lambda)
-        self.CONTINUOUS_ACTION_DIM = self.n_points
+        self.cont_sectors  = int(cont_sectors)
+        # Continuous action dim = angular wedges (NOT n_points): spatially stable
+        # and lower-dimensional than per-point offsets (see cont_sectors docstring).
+        self.CONTINUOUS_ACTION_DIM = self.cont_sectors
 
         self.reset()
 
@@ -421,11 +435,25 @@ class ContourRefineEnv:
         return self._clip_points(out)
 
     def _apply_continuous(self, a: np.ndarray) -> np.ndarray:
-        """Per-point normal offset (DeepSnake/MARL offset-prediction form)."""
-        if a.shape[0] != self.n_points:
-            raise ValueError(f'continuous action dim {a.shape[0]} != n_points {self.n_points}')
+        """Angular-sector normal push (TD3/DDPG action).
+
+        action[g] ∈ [-1, 1] is the signed displacement (× disp_px) applied along
+        the outward normal to EVERY control point whose angle about the centroid
+        falls in wedge g. Angular binning (not point index) keeps each action
+        component tied to a FIXED spatial direction across samples — find_contours
+        seeds at an arbitrary point, so an index-keyed offset would map to a
+        different region every episode and be unlearnable. This mirrors the
+        discrete sector design that was validated as learnable.
+        """
+        a = np.asarray(a, dtype=np.float32).ravel()
+        nb = a.shape[0]                                  # = self.cont_sectors
+        c = self.points.mean(axis=0)
+        ang = np.mod(np.arctan2(self.points[:, 0] - c[0],
+                                self.points[:, 1] - c[1]), 2.0 * np.pi)
+        bins = np.clip((ang / (2.0 * np.pi / nb)).astype(int), 0, nb - 1)
+        disp = a[bins]                                   # (N,) per-point coefficient
         normals = self._outward_normals(self.points)
-        out = self.points + (a[:, None] * self.disp_px) * normals
+        out = self.points + (disp[:, None] * self.disp_px) * normals
         return self._clip_points(out)
 
     def _clip_points(self, points: np.ndarray) -> np.ndarray:

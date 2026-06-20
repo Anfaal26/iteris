@@ -55,13 +55,21 @@ _ENV_KEYS = (
     'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
     'stop_eps_dice', 'stop_eps_hd', 'stop_n', 'fail_thresh', 'fail_n',
     'reward_step_penalty', 'disable_auto_stop', 'terminal_bonus_scale',
-    'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda',
+    'reward_potential_scale',   # PBRS Φ scale (dice_pbrs / dice_hd_pbrs)
+    'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',
 )
 
 
 def refinement_env_kwargs(cfg: dict) -> dict:
-    """Filter a flat resolved cfg down to SegmentationEnv constructor kwargs."""
-    return {k: cfg[k] for k in _ENV_KEYS if k in cfg}
+    """Filter a flat resolved cfg down to SegmentationEnv constructor kwargs.
+
+    Also derives ``pbrs_gamma`` from the agent's ``gamma`` (same rule
+    drl_training.py uses) so replay/visualisation envs reproduce the exact
+    PBRS telescoping the agent was trained under, not the env's own default.
+    """
+    kwargs = {k: cfg[k] for k in _ENV_KEYS if k in cfg}
+    kwargs['pbrs_gamma'] = cfg.get('gamma', 0.99)
+    return kwargs
 
 
 def _make_env(sample: dict, env_kwargs: dict, env_cls=SegmentationEnv):

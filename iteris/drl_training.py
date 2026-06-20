@@ -25,7 +25,7 @@ from tqdm.auto import trange
 
 from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
 from .buffer  import ReplayBuffer
-from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent
+from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent, TD3Agent
 from .env_contour_refine import ContourRefineEnv
 
 
@@ -48,7 +48,8 @@ CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
 AGENT_REGISTRY = {
     'DQN':     (DQNAgent,        'discrete'),   # 14-action local mask refinement
     'DUELING': (DuelingDQNAgent, 'discrete'),   # same, with V+A dueling heads
-    'DDPG':    (DDPGAgent,       'continuous'), # 3-D continuous morph+shift baseline
+    'DDPG':    (DDPGAgent,       'continuous'), # 3-D global morph+shift (baseline-capped)
+    'TD3':     (TD3Agent,        'continuous'), # robust DDPG on angular-sector contour action
 }
 
 
@@ -183,16 +184,14 @@ def run_drl_training(
     # ── Environment class selection ──────────────────────────────────────────
     # All agents use SegmentationEnv (14-action local mask refinement).
     # env_class is always 'default' — kept as a config key for forward compat.
+    # Both discrete and continuous agents may select the env via env_class.
+    # TD3 in particular runs on env_class: contour (angular-sector continuous
+    # action). DDPG defaults to 'default' (SegmentationEnv 3-D global action).
     env_class_name = cfg.get('env_class', 'default')
-    if action_type == 'continuous':
-        env_cls = SegmentationEnv
-    else:
-        if env_class_name not in ENV_REGISTRY:
-            raise ValueError(
-                f"Unknown env_class '{env_class_name}'. "
-                f"Available: {list(ENV_REGISTRY)}"
-            )
-        env_cls = ENV_REGISTRY[env_class_name]
+    if env_class_name not in ENV_REGISTRY:
+        raise ValueError(
+            f"Unknown env_class '{env_class_name}'. Available: {list(ENV_REGISTRY)}")
+    env_cls = ENV_REGISTRY[env_class_name]
     num_actions_for_cls = env_cls.NUM_DISCRETE_ACTIONS
     print(f"[drl] env_class={env_class_name} ({env_cls.__name__}) "
           f"| discrete actions={num_actions_for_cls} | action_type={action_type}")
@@ -253,7 +252,7 @@ def run_drl_training(
         'reward_step_penalty', 'disable_auto_stop',    # STOP-incentive shaping
         'terminal_bonus_scale',                        # path-independent terminal reward
         'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
-        'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda',  # contour env (env_class: contour)
+        'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',  # contour env
     )
     for _k in _env_optional_keys:
         if _k in cfg:
@@ -268,6 +267,15 @@ def run_drl_training(
     # state_builder needs sdt_clip even if not in cfg (env class default applies).
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
+    # ── Continuous action dim (env-dependent) ─────────────────────────────────
+    #   contour env → cont_sectors angular wedges (TD3, action in [-1,1]^K)
+    #   default env → 3-D global (morph, dy, dx)  (DDPG)
+    is_contour = (env_cls is ContourRefineEnv)
+    cont_action_dim = None
+    if action_type == 'continuous':
+        cont_action_dim = (int(cfg.get('cont_sectors', 16)) if is_contour
+                           else CONTINUOUS_ACTION_DIM)
+
     # ── Agent ─────────────────────────────────────────────────────────────────
     common = dict(in_channels=5, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
@@ -279,23 +287,38 @@ def run_drl_training(
                           lr=cfg.get('lr', 1e-4), **common)
     else:
         common.pop('lr', None)
-        _legacy_scale = cfg.get('cont_action_scale', 0.02)
-        morph_scale   = cfg.get('cont_morph_scale', 0.25)
-        trans_scale   = cfg.get('cont_trans_scale', _legacy_scale)
-        # 3-component: [morph, dy, dx] — see env.SegmentationEnv docstring.
-        action_scale  = [morph_scale, trans_scale, trans_scale]
-        # ou_sigma from config may be scalar (legacy) or list (per-component)
-        ou_sigma_raw  = cfg.get('ou_sigma', None)   # None → DDPGAgent default (10% of scale)
-        agent = agent_cls(
-            action_dim         = CONTINUOUS_ACTION_DIM,
-            action_scale       = action_scale,
-            actor_lr           = cfg.get('actor_lr',  1e-4),
-            critic_lr          = cfg.get('critic_lr', 1e-3),
-            ou_theta           = cfg.get('ou_theta', 0.15),
-            ou_sigma           = ou_sigma_raw,
-            actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
-            **common,
-        )
+        if is_contour:
+            action_scale = [1.0] * cont_action_dim   # env multiplies by disp_px
+        else:
+            _legacy_scale = cfg.get('cont_action_scale', 0.02)
+            morph_scale   = cfg.get('cont_morph_scale', 0.25)
+            trans_scale   = cfg.get('cont_trans_scale', _legacy_scale)
+            action_scale  = [morph_scale, trans_scale, trans_scale]
+
+        if cfg['agent_type'].upper() == 'TD3':
+            agent = agent_cls(
+                action_dim   = cont_action_dim,
+                action_scale = action_scale,
+                actor_lr     = cfg.get('actor_lr',  1e-4),
+                critic_lr    = cfg.get('critic_lr', 1e-3),
+                policy_delay = cfg.get('policy_delay', 2),
+                expl_noise   = cfg.get('expl_noise', 0.2),
+                target_noise = cfg.get('target_noise', 0.2),
+                noise_clip   = cfg.get('noise_clip', 0.5),
+                **common,
+            )
+        else:   # DDPG
+            ou_sigma_raw = cfg.get('ou_sigma', None)
+            agent = agent_cls(
+                action_dim         = cont_action_dim,
+                action_scale       = action_scale,
+                actor_lr           = cfg.get('actor_lr',  1e-4),
+                critic_lr          = cfg.get('critic_lr', 1e-3),
+                ou_theta           = cfg.get('ou_theta', 0.15),
+                ou_sigma           = ou_sigma_raw,
+                actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
+                **common,
+            )
 
     # ── Buffer ────────────────────────────────────────────────────────────────
     # cache_sdt=True is the key speed optimisation: skips ~80% of SDT recomputation
@@ -303,8 +326,8 @@ def run_drl_training(
     buffer = ReplayBuffer(
         capacity   = cfg.get('buffer_size', 10000),
         mask_shape = (H, H),   # BRISC/CAMUS are square (256×256); extend to (H,W) if needed
-        # 3-component continuous action: (morph, dy_norm, dx_norm).
-        action_dim = CONTINUOUS_ACTION_DIM if action_type == 'continuous' else None,
+        # continuous action width: 3 (global DDPG) or cont_sectors (contour TD3).
+        action_dim = cont_action_dim if action_type == 'continuous' else None,
         discrete   = (action_type == 'discrete'),
         # cache_sdt FORCED ON: reusing the SDT computed during env.step() skips
         # ~80% of SDT recomputation in agent.update() — the single biggest
@@ -327,8 +350,11 @@ def run_drl_training(
         while True:
             if action_type == 'discrete':
                 a = np.random.randint(num_actions_for_cls)
+            elif is_contour:
+                # angular-sector action in [-1, 1]^K
+                a = np.random.uniform(-1.0, 1.0, size=cont_action_dim).astype(np.float32)
             else:
-                # 3-component: (morph, dy_norm, dx_norm)
+                # 3-component global: (morph, dy_norm, dx_norm)
                 a = np.array([
                     np.random.uniform(-_morph_scale,  _morph_scale),
                     np.random.uniform(-_trans_scale,  _trans_scale),
@@ -369,7 +395,10 @@ def run_drl_training(
         state = env.reset()
 
         if action_type == 'continuous':
-            agent.noise.reset()
+            # DDPG keeps temporally-correlated OU noise that must reset per
+            # episode; TD3 uses i.i.d. Gaussian exploration and has no such state.
+            if hasattr(agent, 'noise'):
+                agent.noise.reset()
             epsilon = None
         else:
             epsilon = max(eps_end, eps_start - (eps_start - eps_end) * step / eps_decay_steps)
