@@ -12,8 +12,8 @@
 target_class:        1
 class_name:          LV_endo
 dataset:             CAMUS
-baseline_cfg_name:   camus.yaml
-baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_best.pt
+baseline_cfg_name:   camus_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
+baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_lite_unet_best.pt
 
 # ── Reward shaping — LV_endo rationale ───────────────────────────────────────
 # Week-1 baseline: Dice 0.938, HD95 ~6 px.  Pure Dice-delta gives almost no

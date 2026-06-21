@@ -13,7 +13,7 @@ import torch
 from tqdm.auto import tqdm
 
 from .metrics import dice_score, hd95_batch
-from .utils import get_device
+from .utils import get_device, model_suffix
 
 
 @torch.no_grad()
@@ -29,7 +29,7 @@ def evaluate_test_set(model, test_loader, cfg: dict) -> pd.DataFrame:
     rows = []
 
     csv_path = os.path.join(cfg['checkpoint_dir'],
-                            f"{cfg['dataset'].lower()}_test_scores.csv")
+                            f"{cfg['dataset'].lower()}{model_suffix(cfg)}_test_scores.csv")
 
     for batch in tqdm(test_loader, desc='Test eval'):
         imgs   = batch['image'].to(device)
@@ -77,7 +77,7 @@ def export_predicted_masks(model, test_loader, cfg: dict, out_dirname: str = Non
     device = get_device()
     model.eval()
 
-    out_dirname = out_dirname or f"{cfg['dataset'].lower()}_pred_masks"
+    out_dirname = out_dirname or f"{cfg['dataset'].lower()}{model_suffix(cfg)}_pred_masks"
     out_dir = os.path.join(cfg['checkpoint_dir'], out_dirname)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -98,16 +98,18 @@ def export_predicted_masks(model, test_loader, cfg: dict, out_dirname: str = Non
 def save_summary_json(history, scores_df, cfg: dict, best_dice: float) -> str:
     """Write a small JSON snapshot that the next-week pipelines load."""
     path = os.path.join(cfg['checkpoint_dir'],
-                        f"{cfg['dataset'].lower()}_summary.json")
+                        f"{cfg['dataset'].lower()}{model_suffix(cfg)}_summary.json")
 
     test_dice = {name: round(float(scores_df[f'dice_{name}'].mean()), 4)
                  for name in cfg['class_names'][1:]}
     test_hd95 = {name: round(float(scores_df[f'hd95_{name}'].mean()), 2)
                  for name in cfg['class_names'][1:]}
 
+    _model_names = {'attn_resunet': 'AttentionResUNet', 'lite_unet': 'LiteUNet'}
     summary = dict(
         dataset        = cfg['dataset'],
-        model          = 'AttentionResUNet',
+        model          = _model_names.get(cfg.get('model', 'attn_resunet'),
+                                          cfg.get('model', 'attn_resunet')),
         num_classes    = cfg['num_classes'],
         image_size     = list(cfg['image_size']),
         best_val_dice  = round(float(best_dice), 4),

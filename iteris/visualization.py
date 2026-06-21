@@ -6,7 +6,7 @@ import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap
 import torch
 
-from .utils import get_device
+from .utils import get_device, model_suffix
 
 
 def plot_learning_curves(history: dict, cfg: dict, target_dice: float = 0.85):
@@ -27,7 +27,7 @@ def plot_learning_curves(history: dict, cfg: dict, target_dice: float = 0.85):
     plt.suptitle(f"{cfg['dataset']} Attention Residual U-Net — baseline")
     plt.tight_layout()
     out_path = os.path.join(cfg['checkpoint_dir'],
-                            f"{cfg['dataset'].lower()}_learning_curves.png")
+                            f"{cfg['dataset'].lower()}{model_suffix(cfg)}_learning_curves.png")
     plt.savefig(out_path, dpi=150)
     plt.show()
     return out_path
@@ -69,7 +69,7 @@ def plot_qualitative_grid(model, test_loader, cfg: dict, n_show: int = 4):
     plt.suptitle(f"{cfg['dataset']} — Qualitative Results")
     plt.tight_layout()
     out_path = os.path.join(cfg['checkpoint_dir'],
-                            f"{cfg['dataset'].lower()}_qualitative.png")
+                            f"{cfg['dataset'].lower()}{model_suffix(cfg)}_qualitative.png")
     plt.savefig(out_path, dpi=150)
     plt.show()
     return out_path

@@ -20,7 +20,7 @@ from .splits import patient_level_split
 from .models import build_model
 from .losses import build_loss
 from .metrics import dice_score
-from .utils import seed_all, get_device, count_parameters
+from .utils import seed_all, get_device, count_parameters, model_suffix
 
 
 # ─── Epoch loops ──────────────────────────────────────────────────────────────
@@ -86,11 +86,11 @@ def run_training(cfg: dict, return_loaders: bool = True) -> dict:
     device = get_device()
     seed_all(cfg['seed'])
     os.makedirs(cfg['checkpoint_dir'], exist_ok=True)
-    # Tag non-default architectures so the lite baseline and the attention net
-    # don't overwrite each other's checkpoint. attn_resunet keeps the bare name
-    # (back-compat with existing camus_best.pt / brisc_best.pt).
-    _model = cfg.get('model', 'attn_resunet')
-    _tag = '' if _model == 'attn_resunet' else f'_{_model}'
+    # Tag non-default architectures (model_suffix) so the lite baseline and the
+    # attention net don't overwrite each other's checkpoint. attn_resunet keeps
+    # the bare name (back-compat: camus_best.pt / brisc_best.pt). Same suffix the
+    # evaluation/export/summary outputs use, so all artefacts stay consistent.
+    _tag = model_suffix(cfg)
     ckpt_path = os.path.join(cfg['checkpoint_dir'],
                              f"{cfg['dataset'].lower()}{_tag}_best.pt")
 
