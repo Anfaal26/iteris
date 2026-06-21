@@ -149,7 +149,7 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  DuelingDDQN:
+  DuelingDDQN_GLOBAL:
     agent_type:          DUELING
     # ── Reward: potential-based shaping (see DQN block / camus_drl_c1.yaml) ──
     reward_mode:          dice_pbrs
@@ -176,12 +176,12 @@ agents:
 
   # ── Control-point CONTOUR refinement (Paradigm 3) ────────────────────────────
   # Local boundary deformation (control points + periodic spline) — see
-  # camus_drl_c1.yaml::DuelingDDQN_CONTOUR for the full rationale. Selected by
+  # camus_drl_c1.yaml::DuelingDDQN for the full rationale. Selected by
   # `env_class: contour`. Tumours are smaller and can be irregular (glioma), so
   # fewer points, tighter displacement, and lighter spline smoothing than CAMUS.
   #   cfg = resolve_agent_config(load_drl_class_config('configs/brisc_drl_tumor.yaml'),
-  #                              'DuelingDDQN_CONTOUR')
-  DuelingDDQN_CONTOUR:
+  #                              'DuelingDDQN')
+  DuelingDDQN:
     agent_type:          DUELING
     env_class:           contour
     # ── contour geometry ──

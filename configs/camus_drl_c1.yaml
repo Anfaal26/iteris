@@ -153,7 +153,7 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  DuelingDDQN:
+  DuelingDDQN_GLOBAL:
     agent_type:          DUELING
     # ── Reward: potential-based shaping (see DQN block above) ──
     reward_mode:          dice_hd_pbrs
@@ -186,8 +186,8 @@ agents:
   # `env_class: contour`; same 4-channel state + discrete agent as the default env,
   # so the network/buffer/loops are unchanged. Run with:
   #   cfg = resolve_agent_config(load_drl_class_config('configs/camus_drl_c1.yaml'),
-  #                              'DuelingDDQN_CONTOUR')
-  DuelingDDQN_CONTOUR:
+  #                              'DuelingDDQN')
+  DuelingDDQN:
     agent_type:          DUELING
     env_class:           contour       # → ContourRefineEnv (control points + spline)
     # ── contour geometry ──

@@ -120,7 +120,7 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  DuelingDDQN:
+  DuelingDDQN_GLOBAL:
     agent_type:          DUELING
     reward_step_penalty: 0.002
     disable_auto_stop:   true
@@ -137,5 +137,37 @@ agents:
     epsilon_decay_steps: 20000
     train_steps:         40000
     eval_every:          5000
+    seed:                42
+    checkpoint_dir:      /kaggle/working
+
+  # ── DuelingDDQN (discrete contour refinement) — ACTIVE discrete agent ─────────
+  # Dueling Double DQN on ContourRefineEnv (pituitary — smallest): 18 discrete actions =
+  # push each of 8 angular boundary sectors OUT/IN + smooth + stop. Baseline-centred
+  # PBRS reward. This is the discrete counterpart to TD3 (continuous contour).
+  DuelingDDQN:
+    agent_type:          DUELING
+    env_class:           contour
+    n_points:            16
+    disp_px:             1.0
+    spline_smooth:       1.0
+    smooth_lambda:       0.5
+    reward_mode:          dice_pbrs
+    reward_potential_scale: 15.0
+    reward_step_penalty:  0.0
+    disable_auto_stop:    true
+    terminal_bonus_scale: 0.0
+    lr:                  1.0e-4
+    gamma:               0.99
+    tau:                 0.005
+    embed_dim:           256
+    batch_size:          64
+    buffer_size:         50000
+    prefill_steps:       2000
+    epsilon_start:       1.0
+    epsilon_end:         0.05
+    epsilon_decay_steps: 30000
+    train_steps:         60000
+    eval_every:          2000
+    cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
