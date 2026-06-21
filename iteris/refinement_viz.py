@@ -92,9 +92,16 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
     dices  = [env.dice_history[0]]
     acts   = []
     info   = {'dice': dices[0]}
+    # Discrete agents take an int action + epsilon-greedy; continuous agents
+    # (DDPG / TD3) take a vector action + explore flag. Detect via action_type.
+    is_discrete = getattr(agent, 'action_type', 'discrete') == 'discrete'
     while True:
-        a = agent.select_action(state, epsilon=0.0)
-        acts.append(int(a))
+        if is_discrete:
+            a = agent.select_action(state, epsilon=0.0)
+            acts.append(int(a))
+        else:
+            a = agent.select_action(state, explore=False)
+            acts.append(np.asarray(a, dtype=np.float32))
         state, _, done, info = env.step(a)
         masks.append(env.mask.copy())
         dices.append(info['dice'])
@@ -102,6 +109,9 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
             break
     init_d  = env.dice_history[0]
     final_d = info['dice']
+    # action_names only meaningful for discrete heads; None signals "continuous"
+    # to plot_behaviour so it renders a per-sector magnitude bar instead.
+    action_names = list(env_cls.DISCRETE_NAMES) if is_discrete else None
     return dict(
         sample     = sample,
         masks      = masks,
@@ -116,7 +126,7 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
         gain       = final_d - init_d,
         n_steps    = len(acts),
         stopped    = bool(info.get('stop_action', False)),
-        action_names = list(env_cls.DISCRETE_NAMES),
+        action_names = action_names,
     )
 
 
@@ -207,17 +217,29 @@ def plot_behaviour(replays, cfg, class_name='', out_path=None):
     ax.set(xlabel='Step', ylabel='Dice', title=f'{class_name} per-episode Dice trajectory')
     ax.legend(); ax.grid(alpha=0.3)
 
-    # Right: action-usage histogram across all replays
+    # Right: action usage. Discrete agents → action-frequency histogram.
+    # Continuous agents (DDPG/TD3) have no discrete action vocabulary, so show
+    # the mean per-component push magnitude instead (e.g. per angular sector).
     ax = axes[1]
-    names = replays[0].get('action_names', SegmentationEnv.DISCRETE_NAMES) \
-            if replays else SegmentationEnv.DISCRETE_NAMES
-    all_acts = [a for r in replays for a in r['actions']]
-    counts = np.bincount(all_acts, minlength=len(names)).astype(float)
-    counts = counts / max(counts.sum(), 1)
-    ax.bar(range(len(names)), counts)
-    ax.set_xticks(range(len(names)))
-    ax.set_xticklabels(names, rotation=90, fontsize=7)
-    ax.set(ylabel='Frequency', title=f'{class_name} action usage')
+    names = replays[0].get('action_names') if replays else None
+    if names is not None:
+        all_acts = [int(a) for r in replays for a in r['actions']]
+        counts = np.bincount(all_acts, minlength=len(names)).astype(float)
+        counts = counts / max(counts.sum(), 1)
+        ax.bar(range(len(names)), counts)
+        ax.set_xticks(range(len(names)))
+        ax.set_xticklabels(names, rotation=90, fontsize=7)
+        ax.set(ylabel='Frequency', title=f'{class_name} action usage')
+    else:
+        A = np.array([np.asarray(a) for r in replays for a in r['actions']])  # (T, K)
+        if A.ndim == 2 and A.shape[0] > 0:
+            mean_abs = np.abs(A).mean(axis=0)
+            ax.bar(range(len(mean_abs)), mean_abs)
+            ax.set_xticks(range(len(mean_abs)))
+            ax.set(xlabel='action component (sector)', ylabel='mean |push|',
+                   title=f'{class_name} mean per-sector push magnitude')
+        else:
+            ax.text(0.5, 0.5, 'no actions recorded', ha='center', va='center')
     ax.grid(alpha=0.3, axis='y')
 
     plt.suptitle(f'{cfg.get("agent_type","")} behaviour — {class_name}')
