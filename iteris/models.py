@@ -120,7 +120,73 @@ class AttentionResUNet(nn.Module):
         return self.head(d1)
 
 
+class LiteUNet(nn.Module):
+    """
+    Deliberately LIGHTWEIGHT plain U-Net — the RL warm-start baseline.
+
+    No attention gates, no residual blocks, ~1/4 the channels of
+    AttentionResUNet (≈ 20–30x fewer params). It is intentionally weaker so its
+    segmentation errors are *systematic* (smooth, uniform over/under-segmentation)
+    rather than the tiny scattered residuals of the strong attention net — which
+    is exactly the error profile the RL contour agents CAN correct. This creates
+    genuine headroom for refinement while staying a sane, recognisable baseline.
+
+    Pair it with the attention net (kept as the upper-bound competitor): the story
+    is "RL refinement lifts a lightweight baseline toward the heavyweight net".
+    """
+
+    def __init__(self, in_channels: int = 1, num_classes: int = 4,
+                 features=(16, 32, 64, 128)):
+        super().__init__()
+        F_ = features
+        self.pool = nn.MaxPool2d(2)
+
+        def double_conv(ic, oc):
+            return nn.Sequential(
+                nn.Conv2d(ic, oc, 3, padding=1, bias=False), nn.BatchNorm2d(oc), nn.ReLU(inplace=True),
+                nn.Conv2d(oc, oc, 3, padding=1, bias=False), nn.BatchNorm2d(oc), nn.ReLU(inplace=True),
+            )
+
+        self.enc1 = double_conv(in_channels, F_[0])
+        self.enc2 = double_conv(F_[0], F_[1])
+        self.enc3 = double_conv(F_[1], F_[2])
+        self.bottleneck = double_conv(F_[2], F_[3])
+
+        self.up3  = nn.ConvTranspose2d(F_[3], F_[2], 2, stride=2)
+        self.dec3 = double_conv(F_[2] * 2, F_[2])
+        self.up2  = nn.ConvTranspose2d(F_[2], F_[1], 2, stride=2)
+        self.dec2 = double_conv(F_[1] * 2, F_[1])
+        self.up1  = nn.ConvTranspose2d(F_[1], F_[0], 2, stride=2)
+        self.dec1 = double_conv(F_[0] * 2, F_[0])
+
+        self.head = nn.Conv2d(F_[0], num_classes, 1)
+
+    def forward(self, x):
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.pool(e1))
+        e3 = self.enc3(self.pool(e2))
+        b  = self.bottleneck(self.pool(e3))
+        d3 = self.dec3(torch.cat([self.up3(b),  e3], 1))
+        d2 = self.dec2(torch.cat([self.up2(d3), e2], 1))
+        d1 = self.dec1(torch.cat([self.up1(d2), e1], 1))
+        return self.head(d1)
+
+
+# Architecture registry — selected via cfg['model'] (default: attention Res-UNet).
+_MODEL_REGISTRY = {
+    'attn_resunet': AttentionResUNet,   # strong baseline / upper-bound competitor
+    'lite_unet':    LiteUNet,           # lightweight RL warm-start baseline
+}
+
+
 def build_model(cfg: dict) -> nn.Module:
-    """Factory — currently only AttentionResUNet."""
+    """Factory. cfg['model'] selects the architecture (default attn_resunet).
+
+    Both nets take the same (in_channels, num_classes), so the warm-start /
+    DRL pipeline is architecture-agnostic — only the checkpoint + this key change.
+    """
     in_channels = cfg.get('in_channels', 1)
-    return AttentionResUNet(in_channels=in_channels, num_classes=cfg['num_classes'])
+    name = cfg.get('model', 'attn_resunet')
+    if name not in _MODEL_REGISTRY:
+        raise ValueError(f"Unknown model '{name}'. Available: {list(_MODEL_REGISTRY)}")
+    return _MODEL_REGISTRY[name](in_channels=in_channels, num_classes=cfg['num_classes'])

@@ -86,8 +86,13 @@ def run_training(cfg: dict, return_loaders: bool = True) -> dict:
     device = get_device()
     seed_all(cfg['seed'])
     os.makedirs(cfg['checkpoint_dir'], exist_ok=True)
+    # Tag non-default architectures so the lite baseline and the attention net
+    # don't overwrite each other's checkpoint. attn_resunet keeps the bare name
+    # (back-compat with existing camus_best.pt / brisc_best.pt).
+    _model = cfg.get('model', 'attn_resunet')
+    _tag = '' if _model == 'attn_resunet' else f'_{_model}'
     ckpt_path = os.path.join(cfg['checkpoint_dir'],
-                             f"{cfg['dataset'].lower()}_best.pt")
+                             f"{cfg['dataset'].lower()}{_tag}_best.pt")
 
     # ── Data ─────────────────────────────────────────────────────────────────
     records = build_dataset_dicts(cfg)
@@ -167,7 +172,7 @@ def run_training(cfg: dict, return_loaders: bool = True) -> dict:
         if save_every and epoch % save_every == 0:
             safety_path = os.path.join(
                 cfg['checkpoint_dir'],
-                f"{cfg['dataset'].lower()}_epoch{epoch:03d}.pt",
+                f"{cfg['dataset'].lower()}{_tag}_epoch{epoch:03d}.pt",
             )
             torch.save({
                 'epoch':              epoch,

@@ -58,7 +58,7 @@ from typing import Tuple, Dict, List
 import numpy as np
 import scipy.ndimage as ndi
 
-from .env import dice_score, signed_dt, _largest_cc, STRUCT
+from .geometry import dice_score, signed_dt, _largest_cc, STRUCT
 
 
 # ── geometry helpers ─────────────────────────────────────────────────────────

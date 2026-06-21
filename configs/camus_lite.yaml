@@ -1,0 +1,51 @@
+# CAMUS — LITE baseline (lightweight plain U-Net) for the RL warm-start.
+#
+# Identical data/preprocessing to camus.yaml; the ONLY differences are the
+# architecture (`model: lite_unet`) and a distinct checkpoint name. This net is
+# intentionally weaker (~1/4 channels, no attention) so its errors are systematic
+# and the RL contour agents have real headroom to refine. Train it with the same
+# baseline notebook, then point the DRL config's baseline_cfg_name/checkpoint here.
+
+dataset: CAMUS
+modality: ultrasound
+
+data_root: /kaggle/input/datasets/anfaalhossain/camus/CAMUS
+checkpoint_dir: /kaggle/working
+
+model: lite_unet                  # <-- the only architectural change vs camus.yaml
+
+image_size: [256, 256]
+spacing: [1.0, 1.0]
+normalize: minmax
+apply_orientation: false
+
+num_classes: 4
+class_names:  [background, LV_endo, LV_epi, LA]
+class_colors: ['#000000', '#00C9A7', '#F59E0B', '#F87171']
+
+views:  [2CH, 4CH]
+phases: [ED, ES]
+
+val_split: 0.15
+test_split: 0.10
+label_frac: 1.0
+
+batch_size: 8
+epochs: 40                        # lighter net converges sooner; early-stop still applies
+lr: 1.0e-4
+weight_decay: 1.0e-5
+patience: 10
+save_every_n_epochs: 10
+cache_workers: 2
+dataloader_workers: 0
+seed: 42
+
+aug_flip_prob: 0.5
+aug_affine_prob: 0.6
+aug_rotate_range: 0.26
+aug_scale_range: 0.1
+aug_translate_range: 10
+aug_intensity_shift: 0.15
+aug_intensity_shift_prob: 0.4
+aug_gauss_noise_prob: 0.3
+aug_gauss_noise_std: 0.02
