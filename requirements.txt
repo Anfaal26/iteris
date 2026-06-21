@@ -9,3 +9,7 @@ monai>=1.3
 nibabel>=5.0
 SimpleITK
 pyyaml
+# scikit-image: required by the contour-refinement env (skimage.draw / skimage.measure)
+# used by the TD3 contour agent. Pre-installed on Kaggle, but listed explicitly so
+# the package also works on Colab / local envs where it may be missing.
+scikit-image>=0.19
