@@ -12,13 +12,15 @@ import uuid
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
-from . import inference
+from . import inference, llm
 from .schemas import (
     CompareRequest,
     CompareResponse,
     CompareResult,
     HealthResponse,
+    InterpretRequest,
     ModelRecord,
     PredictRequest,
     PredictResponse,
@@ -155,5 +157,7 @@ def compare(body: CompareRequest) -> CompareResponse:
 
 
 @app.post('/interpret')
-def interpret() -> None:
-    raise HTTPException(501, 'LLM interpretation is not wired up on this Space yet.')
+def interpret(body: InterpretRequest) -> StreamingResponse:
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        raise HTTPException(501, 'ANTHROPIC_API_KEY is not configured on this Space.')
+    return StreamingResponse(llm.stream_interpretation(body), media_type='text/plain')

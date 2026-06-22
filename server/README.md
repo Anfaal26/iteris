@@ -22,5 +22,12 @@ Optional: set `HF_REPO_BRISC_CLASSIFIER` to a repo containing
 labels (glioma/meningioma/pituitary) on BRISC predictions instead of the
 "Tumor (unclassified)" placeholder. Unset = falls back gracefully.
 
+Optional: set `ANTHROPIC_API_KEY` (as a Space **secret**, not a public variable)
+to enable `/interpret` — streams a Claude-generated explanation of each
+prediction's metrics/structures in the format `LLMInterpretationPanel.tsx`
+expects. Unset = `/interpret` returns 501 and the "Interpret with Claude"
+button's request fails (UI shows nothing further). Optionally override the
+model via `ANTHROPIC_MODEL` (defaults to `claude-sonnet-4-6`).
+
 See `/health`, `/models`, `/predict` for the live contract — mirrors
 `iteris_ui/src/api/contract.ts`.

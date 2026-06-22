@@ -12,6 +12,8 @@ ModelId = Literal['unet-baseline', 'dqn', 'ddqn', 'dueling-dqn', 'ddpg']
 ViewMode = Literal['single', 'wipe', 'side-by-side']
 Difficulty = Literal['easy', 'medium', 'hard']
 StructureId = Literal['lv_endo', 'lv_epi', 'la', 'glioma', 'meningioma', 'pituitary']
+Modality = Literal['ultrasound', 'mri']
+TumorType = Literal['glioma', 'meningioma', 'pituitary']
 
 
 class StructureMetrics(BaseModel):
@@ -105,6 +107,16 @@ class SampleImage(BaseModel):
     difficulty: Difficulty
     bestDice: float
     dataset: DatasetId
+
+
+class InterpretRequest(BaseModel):
+    modelId: ModelId
+    structures: List[StructureId]
+    metrics: Metrics
+    dataset: DatasetId
+    modality: Modality
+    difficulty: Optional[Difficulty] = None
+    tumorType: Optional[TumorType] = None
 
 
 class HealthResponse(BaseModel):
