@@ -9,6 +9,7 @@ import type { MaskLayer, Metrics } from '@/api/contract';
 /** Props for WipeMode. */
 export interface WipeModeProps {
   anatomyLabel: string;
+  imageB64?: string;
   baselineMasks: MaskLayer[];
   drlMasks: MaskLayer[];
   visibleStructures: Set<string>;
@@ -20,6 +21,7 @@ export interface WipeModeProps {
 /** Wipe comparison view — left half baseline, right half DRL model. */
 export const WipeMode: React.FC<WipeModeProps> = ({
   anatomyLabel,
+  imageB64,
   baselineMasks,
   drlMasks,
   visibleStructures,
@@ -38,29 +40,37 @@ export const WipeMode: React.FC<WipeModeProps> = ({
     <div className="flex flex-col w-full h-full">
       {/* Wipe viewer */}
       <div className="relative flex-1 flex items-center justify-center bg-landing-bg overflow-hidden">
-        <div className="relative" style={{ width: 256, height: 256 }}>
-          {/* Base canvas */}
-          <svg
-            width="256"
-            height="256"
-            viewBox="0 0 256 256"
-            aria-label={`${anatomyLabel} wipe comparison`}
-            role="img"
-            className="rounded-lg"
-          >
-            <rect width="256" height="256" fill="#2a2f3a" rx="8" />
-            <text
-              x="128"
-              y="128"
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fill="#64748b"
-              fontSize="12"
-              fontFamily="system-ui"
+        <div className="relative aspect-square" style={{ width: 'min(85%, 85vh, 640px)' }}>
+          {/* Base image — real scan if available, grey placeholder otherwise */}
+          {imageB64 ? (
+            <img
+              src={imageB64}
+              alt={anatomyLabel}
+              className="absolute inset-0 w-full h-full object-fill rounded-lg bg-[#2a2f3a]"
+            />
+          ) : (
+            <svg
+              width="100%"
+              height="100%"
+              viewBox="0 0 256 256"
+              aria-label={`${anatomyLabel} wipe comparison`}
+              role="img"
+              className="rounded-lg"
             >
-              {anatomyLabel}
-            </text>
-          </svg>
+              <rect width="256" height="256" fill="#2a2f3a" rx="8" />
+              <text
+                x="128"
+                y="128"
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#64748b"
+                fontSize="12"
+                fontFamily="system-ui"
+              >
+                {anatomyLabel}
+              </text>
+            </svg>
+          )}
 
           {/* Left half — baseline masks clipped */}
           <div

@@ -9,6 +9,7 @@ import type { CompareResult } from '@/api/contract';
 /** Props for SideBySideMode. */
 export interface SideBySideModeProps {
   anatomyLabel: string;
+  imageB64?: string;
   results: CompareResult[];
   visibleStructures: Set<string>;
   overlayOpacity: number;
@@ -17,6 +18,7 @@ export interface SideBySideModeProps {
 /** Three-column side-by-side comparison view. */
 export const SideBySideMode: React.FC<SideBySideModeProps> = ({
   anatomyLabel,
+  imageB64,
   results,
   visibleStructures,
   overlayOpacity,
@@ -55,28 +57,36 @@ export const SideBySideMode: React.FC<SideBySideModeProps> = ({
           </div>
 
           {/* Canvas + masks */}
-          <div className="relative" style={{ width: 160, height: 160 }}>
-            <svg
-              width="160"
-              height="160"
-              viewBox="0 0 256 256"
-              aria-label={`${anatomyLabel} — ${r.modelId}`}
-              role="img"
-              className="rounded-lg w-full h-full"
-            >
-              <rect width="256" height="256" fill="#2a2f3a" rx="8" />
-              <text
-                x="128"
-                y="128"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill="#64748b"
-                fontSize="14"
-                fontFamily="system-ui"
+          <div className="relative aspect-square w-full max-w-[320px]">
+            {imageB64 ? (
+              <img
+                src={imageB64}
+                alt={`${anatomyLabel} — ${r.modelId}`}
+                className="absolute inset-0 w-full h-full object-fill rounded-lg bg-[#2a2f3a]"
+              />
+            ) : (
+              <svg
+                width="100%"
+                height="100%"
+                viewBox="0 0 256 256"
+                aria-label={`${anatomyLabel} — ${r.modelId}`}
+                role="img"
+                className="rounded-lg"
               >
-                {anatomyLabel}
-              </text>
-            </svg>
+                <rect width="256" height="256" fill="#2a2f3a" rx="8" />
+                <text
+                  x="128"
+                  y="128"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill="#64748b"
+                  fontSize="14"
+                  fontFamily="system-ui"
+                >
+                  {anatomyLabel}
+                </text>
+              </svg>
+            )}
 
             {r.masks.map((mask) =>
               visibleStructures.has(mask.structure) ? (

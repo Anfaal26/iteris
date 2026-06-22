@@ -19,6 +19,8 @@ import { SideBySideMode } from '../modes/SideBySideMode';
 /** Props for ImageViewer. */
 export interface ImageViewerProps {
   anatomyLabel: string;
+  /** Full `data:<mime>;base64,...` URL of the active image, for display only. */
+  imageB64?: string;
   masks: MaskLayer[];
   baselineMasks: MaskLayer[];
   viewMode: ViewMode;
@@ -36,6 +38,7 @@ export interface ImageViewerProps {
  */
 export const ImageViewer: React.FC<ImageViewerProps> = ({
   anatomyLabel,
+  imageB64,
   masks,
   baselineMasks,
   viewMode,
@@ -87,6 +90,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         {viewMode === 'single' && (
           <SingleMode
             anatomyLabel={anatomyLabel}
+            imageB64={imageB64}
             masks={displayMasks}
             visibleStructures={visibleStructures}
             overlayOpacity={overlayOpacity}
@@ -97,6 +101,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         {viewMode === 'wipe' && (
           <WipeMode
             anatomyLabel={anatomyLabel}
+            imageB64={imageB64}
             baselineMasks={baselineMasks}
             drlMasks={displayMasks}
             visibleStructures={visibleStructures}
@@ -108,6 +113,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         {viewMode === 'side-by-side' && (
           <SideBySideMode
             anatomyLabel={anatomyLabel}
+            imageB64={imageB64}
             results={compareResults ?? []}
             visibleStructures={visibleStructures}
             overlayOpacity={overlayOpacity}

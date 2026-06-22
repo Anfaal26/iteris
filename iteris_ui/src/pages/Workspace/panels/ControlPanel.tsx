@@ -34,7 +34,8 @@ export interface ControlPanelProps {
   onViewModeChange: (m: ViewMode) => void;
   onPlaybackToggle: (v: boolean) => void;
   onSampleSelect: (sample: SampleImage) => void;
-  onImageUpload: (b64: string, filename: string) => void;
+  /** dataUrl is the full `data:<mime>;base64,...` string from FileReader. */
+  onImageUpload: (dataUrl: string, filename: string) => void;
   onRunInference: () => void;
 }
 
@@ -107,9 +108,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        const result = reader.result as string;
-        const b64 = result.split(',')[1] ?? result;
-        onImageUpload(b64, file.name);
+        onImageUpload(reader.result as string, file.name);
       };
       reader.readAsDataURL(file);
     },
@@ -121,9 +120,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      const b64 = result.split(',')[1] ?? result;
-      onImageUpload(b64, file.name);
+      onImageUpload(reader.result as string, file.name);
     };
     reader.readAsDataURL(file);
   };

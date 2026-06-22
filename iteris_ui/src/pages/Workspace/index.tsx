@@ -43,7 +43,9 @@ export default function Workspace() {
   const [playbackEnabled, setPlaybackEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const [activeImage, setActiveImage] = useState<{ b64: string; label: string } | null>(null);
+  const [activeImage, setActiveImage] = useState<
+    { b64: string; previewUrl: string; label: string } | null
+  >(null);
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [baselineResult, setBaselineResult] = useState<PredictResponse | null>(null);
   const [compareResponse, setCompareResponse] = useState<CompareResponse | null>(null);
@@ -54,14 +56,20 @@ export default function Workspace() {
   }, []);
 
   const handleSampleSelect = (sample: SampleImage) => {
-    setActiveImage({ b64: PLACEHOLDER_B64, label: `${sample.anatomy} (${sample.modality})` });
+    setActiveImage({
+      b64: PLACEHOLDER_B64,
+      previewUrl: `data:image/png;base64,${PLACEHOLDER_B64}`,
+      label: `${sample.anatomy} (${sample.modality})`,
+    });
     setResult(null);
     setBaselineResult(null);
     setCompareResponse(null);
   };
 
-  const handleImageUpload = (b64: string, filename: string) => {
-    setActiveImage({ b64, label: filename });
+  /** dataUrl is the full `data:<mime>;base64,...` string straight from FileReader. */
+  const handleImageUpload = (dataUrl: string, filename: string) => {
+    const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    setActiveImage({ b64, previewUrl: dataUrl, label: filename });
     setResult(null);
     setBaselineResult(null);
     setCompareResponse(null);
@@ -154,6 +162,7 @@ export default function Workspace() {
 
         <ImageViewer
           anatomyLabel={activeImage?.label ?? 'Select an image'}
+          imageB64={activeImage?.previewUrl}
           masks={result?.masks ?? []}
           baselineMasks={baselineResult?.masks ?? []}
           viewMode={viewMode}
