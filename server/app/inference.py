@@ -19,7 +19,7 @@ from huggingface_hub import hf_hub_download
 from PIL import Image
 
 from .metrics import dice_iou_per_class, hd95_single, hd_single
-from .models import AttentionResUNet
+from .models import AttentionResUNet, TumorClassifier
 from .schemas import MaskLayer, Metrics, StructureMetrics
 
 IMAGE_SIZE = 256
@@ -33,14 +33,29 @@ STRUCTURE_DEFS = {
         ('lv_epi', 'LV Epicardium', '#f59e0b'),
         ('la', 'Left Atrium', '#f87171'),
     ],
-    # BRISC checkpoint is binary (background/tumor) — no tumor-type classifier
-    # exists yet, so the single foreground channel is reported as 'glioma'
-    # (first enum value) with an explicit "unclassified" label. Replace once a
-    # tumor-type model or per-type checkpoints exist.
+    # BRISC checkpoint is binary (background/tumor); the actual type label
+    # comes from the optional tumor-type classifier below (see
+    # classify_tumor_type / build_masks). This entry is the fallback used
+    # only while HF_REPO_BRISC_CLASSIFIER is unset / unavailable.
     'brisc': [
         ('glioma', 'Tumor (unclassified)', '#818cf8'),
     ],
 }
+
+# Maps iteris.classifier.CLASS_NAMES -> (StructureId, label, color). 'non_tumor'
+# has no matching StructureId in contract.ts (no foreground was found anyway,
+# so it never reaches this map — see build_masks).
+TUMOR_TYPE_STRUCTURE = {
+    'glioma': ('glioma', 'Glioma', '#818cf8'),
+    'meningioma': ('meningioma', 'Meningioma', '#34d399'),
+    'pituitary': ('pituitary', 'Pituitary Tumor', '#fb923c'),
+}
+
+CLASSIFIER_CFG = dict(
+    repo=os.environ.get('HF_REPO_BRISC_CLASSIFIER', ''),
+    filename=os.environ.get('HF_FILE_BRISC_CLASSIFIER', 'brisc_tumor_classifier_best.pt'),
+    class_names=['glioma', 'meningioma', 'pituitary', 'non_tumor'],
+)
 
 DATASET_CFG = {
     'camus': dict(
@@ -80,6 +95,50 @@ def get_model(dataset: str) -> AttentionResUNet:
     return model
 
 
+_CLASSIFIER_CACHE: dict = {}
+
+
+def get_tumor_classifier() -> TumorClassifier | None:
+    """Returns the loaded tumor-type classifier, or None if
+    HF_REPO_BRISC_CLASSIFIER isn't set / the checkpoint can't be fetched.
+    Callers must treat None as 'not available yet', not an error.
+    """
+    if not CLASSIFIER_CFG['repo']:
+        return None
+    if 'model' in _CLASSIFIER_CACHE:
+        return _CLASSIFIER_CACHE['model']
+    try:
+        path = hf_hub_download(repo_id=CLASSIFIER_CFG['repo'], filename=CLASSIFIER_CFG['filename'])
+        model = TumorClassifier(in_channels=1, num_classes=len(CLASSIFIER_CFG['class_names']))
+        state = torch.load(path, map_location='cpu')
+        if isinstance(state, dict) and 'model_state_dict' in state:
+            state = state['model_state_dict']
+        model.load_state_dict(state)
+        model.eval()
+        _CLASSIFIER_CACHE['model'] = model
+        return model
+    except Exception as exc:  # noqa: BLE001 — classifier is optional, never fatal
+        print(f'[classifier] unavailable: {exc}')
+        _CLASSIFIER_CACHE['model'] = None
+        return None
+
+
+def classify_tumor_type(image_b64: str) -> str | None:
+    """Returns one of CLASSIFIER_CFG['class_names'], or None if the
+    classifier isn't deployed.
+    """
+    model = get_tumor_classifier()
+    if model is None:
+        return None
+    img = _decode_b64_image(image_b64)
+    arr = _to_normalized_array(img, 'zscore')
+    tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0)
+    with torch.no_grad():
+        logits = model(tensor)
+        idx = int(logits.argmax(dim=1).item())
+    return CLASSIFIER_CFG['class_names'][idx]
+
+
 def preload_models() -> None:
     """Called on startup so the first real request isn't slowed by a cold load."""
     for dataset in DATASET_CFG:
@@ -87,6 +146,7 @@ def preload_models() -> None:
             get_model(dataset)
         except Exception as exc:  # noqa: BLE001 — log and keep serving /health
             print(f'[startup] failed to load {dataset} checkpoint: {exc}')
+    get_tumor_classifier()  # optional — logs and continues if unset/unavailable
 
 
 def _decode_b64_image(b64: str) -> Image.Image:
@@ -140,10 +200,23 @@ def _mask_to_png_b64(binary_mask: np.ndarray, color_hex: str) -> str:
     return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
 
-def build_masks(dataset: str, pred: torch.Tensor) -> list:
+def get_structure_defs(dataset: str, image_b64: str | None = None) -> list:
+    """Returns the (structure, label, color) list to render for this dataset.
+    For BRISC, swaps in the real tumor type from the classifier when it's
+    deployed and confidently predicts a known type; otherwise falls back to
+    the static 'unclassified' placeholder in STRUCTURE_DEFS.
+    """
+    if dataset == 'brisc' and image_b64:
+        predicted = classify_tumor_type(image_b64)
+        if predicted in TUMOR_TYPE_STRUCTURE:
+            return [TUMOR_TYPE_STRUCTURE[predicted]]
+    return STRUCTURE_DEFS[dataset]
+
+
+def build_masks(dataset: str, pred: torch.Tensor, structure_defs: list) -> list:
     pred_np = pred.cpu().numpy()
     masks = []
-    for i, (structure, label, color) in enumerate(STRUCTURE_DEFS[dataset], start=1):
+    for i, (structure, label, color) in enumerate(structure_defs, start=1):
         binary = (pred_np == i).astype(np.uint8)
         masks.append(MaskLayer(
             structure=structure,
@@ -154,21 +227,21 @@ def build_masks(dataset: str, pred: torch.Tensor) -> list:
     return masks
 
 
-def _empty_metrics(dataset: str) -> Metrics:
+def _empty_metrics(structure_defs: list) -> Metrics:
     """No ground truth supplied — metrics are unavailable, return zeros.
     UI callers should treat dice == 0 with no gtMaskB64 sent as 'not computed'.
     """
     structures = [
         StructureMetrics(structure=s, label=label, dice=0.0, iou=0.0, hd=0.0, hd95=0.0)
-        for s, label, _ in STRUCTURE_DEFS[dataset]
+        for s, label, _ in structure_defs
     ]
     return Metrics(dice=0.0, iou=0.0, hd=0.0, hd95=0.0, structures=structures, baselineDice=0.0)
 
 
-def build_metrics(dataset: str, pred: torch.Tensor, gt_mask_b64: str | None) -> Metrics:
+def build_metrics(dataset: str, pred: torch.Tensor, gt_mask_b64: str | None, structure_defs: list) -> Metrics:
     cfg = DATASET_CFG[dataset]
     if not gt_mask_b64:
-        return _empty_metrics(dataset)
+        return _empty_metrics(structure_defs)
 
     gt_img = _decode_b64_image(gt_mask_b64).convert('L').resize(
         (IMAGE_SIZE, IMAGE_SIZE), Image.NEAREST,
@@ -189,7 +262,7 @@ def build_metrics(dataset: str, pred: torch.Tensor, gt_mask_b64: str | None) -> 
     dice, iou = dice_iou_per_class(pred, gt, cfg['num_classes'])
 
     structures = []
-    for i, (structure, label, _) in enumerate(STRUCTURE_DEFS[dataset]):
+    for i, (structure, label, _) in enumerate(structure_defs):
         pred_bin = pred == (i + 1)
         gt_bin = gt == (i + 1)
         hd95 = hd95_single(pred_bin, gt_bin)

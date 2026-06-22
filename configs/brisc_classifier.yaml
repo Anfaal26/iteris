@@ -1,0 +1,31 @@
+# BRISC 2025 — tumor-TYPE classifier (glioma / meningioma / pituitary / non_tumor).
+# Separate from brisc.yaml (binary tumor segmentation) — this trains
+# iteris.classifier.TumorClassifier, a from-scratch CNN, on the tumor_type
+# label that build_brisc_dicts() already extracts from BRISC's filenames.
+
+dataset: BRISC
+modality: brain_mri
+
+# Override in notebook to match Kaggle mount path (same dataset as brisc.yaml).
+data_root: /kaggle/input/brisc2025
+checkpoint_dir: /kaggle/working
+
+image_size: [256, 256]
+normalize: zscore                  # unused directly (classifier.py normalises itself) but required by load_config
+in_channels: 1
+
+num_classes: 4
+class_names:  [glioma, meningioma, pituitary, non_tumor]
+class_colors: ['#818cf8', '#34d399', '#fb923c', '#000000']
+
+val_split:  0.15
+test_split: 0.10
+label_frac: 1.0
+
+batch_size: 32
+epochs: 30
+lr: 1.0e-3
+weight_decay: 1.0e-5
+patience: 8
+dataloader_workers: 0
+seed: 42

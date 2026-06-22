@@ -121,8 +121,9 @@ def predict(body: PredictRequest) -> PredictResponse:
     pred = inference.run_inference(body.dataset, body.imageB64)
     inference_ms = (time.time() - t0) * 1000
 
-    masks = inference.build_masks(body.dataset, pred)
-    metrics = inference.build_metrics(body.dataset, pred, body.gtMaskB64)
+    structure_defs = inference.get_structure_defs(body.dataset, body.imageB64)
+    masks = inference.build_masks(body.dataset, pred, structure_defs)
+    metrics = inference.build_metrics(body.dataset, pred, body.gtMaskB64, structure_defs)
 
     return PredictResponse(
         sessionId=str(uuid.uuid4()),
@@ -144,10 +145,11 @@ def compare(body: CompareRequest) -> CompareResponse:
         if model_id != DEPLOYED_MODEL_ID:
             continue  # skip undeployed models rather than erroring the whole request
         pred = inference.run_inference(body.dataset, body.imageB64)
+        structure_defs = inference.get_structure_defs(body.dataset, body.imageB64)
         results.append(CompareResult(
             modelId=model_id,
-            masks=inference.build_masks(body.dataset, pred),
-            metrics=inference.build_metrics(body.dataset, pred, None),
+            masks=inference.build_masks(body.dataset, pred, structure_defs),
+            metrics=inference.build_metrics(body.dataset, pred, None, structure_defs),
         ))
     return CompareResponse(results=results)
 

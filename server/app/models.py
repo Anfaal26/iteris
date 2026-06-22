@@ -85,3 +85,42 @@ class AttentionResUNet(nn.Module):
         d1 = self.dec1(torch.cat([self.up1(d2), self.att1(d2, e1)], 1))
 
         return self.head(d1)
+
+
+class TumorClassifier(nn.Module):
+    """Vendored from iteris/classifier.py — BRISC tumor-type classifier
+    (glioma/meningioma/pituitary/non_tumor). Architecture must stay
+    byte-identical to the training code or the checkpoint won't load.
+    """
+
+    def __init__(self, in_channels: int = 1, num_classes: int = 4):
+        super().__init__()
+
+        def block(ic, oc, stride=2):
+            return nn.Sequential(
+                nn.Conv2d(ic, oc, 3, padding=1, bias=False),
+                nn.BatchNorm2d(oc),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(oc, oc, 3, stride=stride, padding=1, bias=False),
+                nn.BatchNorm2d(oc),
+                nn.ReLU(inplace=True),
+            )
+
+        self.features = nn.Sequential(
+            block(in_channels, 32),
+            block(32, 64),
+            block(64, 128),
+            block(128, 256),
+            block(256, 256),
+        )
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.pool(x)
+        return self.classifier(x)
