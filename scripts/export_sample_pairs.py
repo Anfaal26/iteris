@@ -9,19 +9,23 @@ converts each chosen slice to PNG. BRISC is already JPG/PNG and is just copied.
 Output: /kaggle/working/sample_pairs/{camus,brisc}/*.png, zipped at the end.
 """
 import shutil
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
-import nibabel as nib
-import numpy as np
-from PIL import Image
-
-import sys
+# iteris/__init__.py imports monai/nibabel/etc — install before the iteris import below.
 init_files = list(Path('/kaggle/input').rglob('iteris/__init__.py'))
 if not init_files:
     raise RuntimeError('iteris-pkg not attached.')
 PKG_ROOT = init_files[0].parent.parent
+REQ = PKG_ROOT / 'requirements.txt'
+subprocess.run(['pip', 'install', '-r', str(REQ), '--quiet'], check=True)
 sys.path.insert(0, str(PKG_ROOT))
+
+import nibabel as nib
+import numpy as np
+from PIL import Image
 
 from iteris.ingestion import build_camus_dicts, build_brisc_dicts
 
