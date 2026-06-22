@@ -36,6 +36,9 @@ export interface ControlPanelProps {
   onSampleSelect: (sample: SampleImage) => void;
   /** dataUrl is the full `data:<mime>;base64,...` string from FileReader. */
   onImageUpload: (dataUrl: string, filename: string) => void;
+  /** Ground-truth mask, for real Dice/IoU/HD instead of the zeroed placeholder. */
+  onGtMaskUpload: (dataUrl: string) => void;
+  gtMaskLabel?: string;
   onRunInference: () => void;
 }
 
@@ -94,11 +97,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onPlaybackToggle,
   onSampleSelect,
   onImageUpload,
+  onGtMaskUpload,
+  gtMaskLabel,
   onRunInference,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const gtFileInputRef = useRef<HTMLInputElement>(null);
   const steps = usePreprocessingSteps(!!activeImageLabel);
+
+  const handleGtFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      onGtMaskUpload(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -334,13 +350,22 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           </button>
         </div>
 
-        {/* Upload GT mask */}
+        {/* Upload GT mask — enables real Dice/IoU/HD instead of the zeroed placeholder */}
         <button
           type="button"
+          onClick={() => gtFileInputRef.current?.click()}
           className="w-full mb-3 py-2 text-xs font-body text-muted border border-dashed border-border rounded-md hover:border-accent/50 transition-colors duration-panel ease-out"
         >
-          Upload GT mask
+          {gtMaskLabel ? `GT mask: ${gtMaskLabel}` : 'Upload GT mask'}
         </button>
+        <input
+          ref={gtFileInputRef}
+          type="file"
+          accept=".png,.jpg,.jpeg"
+          className="hidden"
+          aria-label="Upload ground truth mask"
+          onChange={handleGtFileChange}
+        />
 
         {/* Run Inference */}
         <button

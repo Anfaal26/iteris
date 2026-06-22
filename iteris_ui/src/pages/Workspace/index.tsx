@@ -49,6 +49,7 @@ export default function Workspace() {
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [baselineResult, setBaselineResult] = useState<PredictResponse | null>(null);
   const [compareResponse, setCompareResponse] = useState<CompareResponse | null>(null);
+  const [gtMask, setGtMask] = useState<{ b64: string; label: string } | null>(null);
 
   useEffect(() => {
     api.models().then(setModels).catch(() => {});
@@ -73,6 +74,12 @@ export default function Workspace() {
     setResult(null);
     setBaselineResult(null);
     setCompareResponse(null);
+    setGtMask(null);
+  };
+
+  const handleGtMaskUpload = (dataUrl: string) => {
+    const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    setGtMask({ b64, label: 'attached' });
   };
 
   const handleRunInference = async () => {
@@ -85,6 +92,7 @@ export default function Workspace() {
         dataset: selectedDataset,
         mode: viewMode,
         playback: playbackEnabled,
+        gtMaskB64: gtMask?.b64,
       });
       setResult(predictResult);
 
@@ -157,6 +165,8 @@ export default function Workspace() {
           onPlaybackToggle={setPlaybackEnabled}
           onSampleSelect={handleSampleSelect}
           onImageUpload={handleImageUpload}
+          onGtMaskUpload={handleGtMaskUpload}
+          gtMaskLabel={gtMask?.label}
           onRunInference={handleRunInference}
         />
 
