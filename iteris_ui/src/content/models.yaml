@@ -3,67 +3,78 @@
 # the mock API. Metrics mirror the research Results table (spec §5/§8).
 # diceCamus / diceBrisc = best Dice per dataset; null = not evaluated there.
 
+# NOTE: DRL agents (dqn/ddqn/dueling-dqn/ddpg) are trained-in-name only —
+# checkpoints don't exist yet, so they're marked deployed:false/selectable:false
+# until the backend can actually serve them. unet-baseline now points at the
+# real trained Attention Res-U-Net checkpoint and is the only selectable model.
+# Replace the dice*/iou/hd null placeholders with real numbers from
+# camus_summary.json / camus_test_scores.csv once available.
+
 - id: unet-baseline
-  name: U-Net Baseline
+  name: Attention U-Net
   family: baseline
   description: >-
-    Standard U-Net segmentation with no post-processing or boundary refinement.
-    Serves only as the comparison baseline for all DRL agents.
-  diceCamus: 0.89
-  diceBrisc: 0.81
-  iou: 0.80
-  hd: 5.6
+    Attention Residual U-Net (Oktay et al. 2018 attention gates, ResNet-style
+    encoder/decoder). The only deployed checkpoint right now — DRL refinement
+    agents below are still training.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
   deployed: true
-  selectable: false
+  selectable: true
 
 - id: dqn
   name: DQN
   family: discrete-drl
   description: >-
     Double Deep Q-Network with a patch-CNN backbone and an 8-direction discrete
-    action space refining the contour one pixel at a time. Huber loss.
-  diceCamus: 0.901
-  diceBrisc: 0.825
-  iou: 0.82
-  hd: 4.8
-  deployed: true
-  selectable: true
+    action space refining the contour one pixel at a time. Training in progress
+    — not yet deployed.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
+  deployed: false
+  selectable: false
 
 - id: ddqn
   name: DDQN
   family: discrete-drl
   description: >-
     Double DQN with separate online and target networks for more stable
-    Q-value estimates during contour refinement.
-  diceCamus: 0.905
-  diceBrisc: 0.830
-  iou: 0.83
-  hd: 4.5
-  deployed: true
-  selectable: true
+    Q-value estimates during contour refinement. Training in progress — not
+    yet deployed.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
+  deployed: false
+  selectable: false
 
 - id: dueling-dqn
   name: Dueling DQN
   family: discrete-drl
   description: >-
     Dueling architecture combining a value stream and an advantage stream with
-    Double DQN. Best-performing discrete agent.
-  diceCamus: 0.908
-  diceBrisc: 0.835
-  iou: 0.84
-  hd: 4.2
-  deployed: true
-  selectable: true
+    Double DQN. Training in progress — not yet deployed.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
+  deployed: false
+  selectable: false
 
 - id: ddpg
   name: DDPG
   family: continuous-drl
   description: >-
     Deterministic Policy Gradient with a continuous action space (vertex
-    displacement) and an actor-critic architecture. Best overall Dice.
-  diceCamus: 0.912
-  diceBrisc: 0.840
-  iou: 0.85
-  hd: 3.9
-  deployed: true
-  selectable: true
+    displacement) and an actor-critic architecture. Training in progress —
+    not yet deployed.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
+  deployed: false
+  selectable: false

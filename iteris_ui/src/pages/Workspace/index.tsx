@@ -37,7 +37,7 @@ export default function Workspace() {
   const [samples, setSamples] = useState<SampleImage[]>([]);
   const [models, setModels] = useState<ModelRecord[]>([]);
 
-  const [selectedModel, setSelectedModel] = useState<ModelId>('ddpg');
+  const [selectedModel, setSelectedModel] = useState<ModelId>('unet-baseline');
   const [selectedDataset, setSelectedDataset] = useState<DatasetId>('camus');
   const [viewMode, setViewMode] = useState<ViewMode>('single');
   const [playbackEnabled, setPlaybackEnabled] = useState(false);
@@ -80,8 +80,8 @@ export default function Workspace() {
       });
       setResult(predictResult);
 
-      // If wipe mode, also get baseline result
-      if (viewMode === 'wipe' || viewMode === 'side-by-side') {
+      // If wipe mode, also get baseline result (skip if it's the same model).
+      if ((viewMode === 'wipe' || viewMode === 'side-by-side') && selectedModel !== 'unet-baseline') {
         const baselineRes = await api.predict({
           imageB64: activeImage.b64,
           modelId: 'unet-baseline',
@@ -91,11 +91,13 @@ export default function Workspace() {
         setBaselineResult(baselineRes);
       }
 
-      // If side-by-side, compare multiple models
+      // If side-by-side, compare across whatever models are actually deployed
+      // (DRL agents are excluded server-side until trained — see models.yaml).
       if (viewMode === 'side-by-side') {
+        const deployedIds = models.filter((m) => m.deployed).map((m) => m.id);
         const compareRes = await api.compare({
           imageB64: activeImage.b64,
-          modelIds: ['unet-baseline', selectedModel, 'ddpg'],
+          modelIds: deployedIds,
           dataset: selectedDataset,
         });
         setCompareResponse(compareRes);
