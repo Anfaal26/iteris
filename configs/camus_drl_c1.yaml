@@ -189,10 +189,11 @@ agents:
   #                              'DuelingDDQN')
   DuelingDDQN:
     agent_type:          DUELING
+    max_steps         : 10            # cap excursion past peak (agent doesn't always STOP)
     env_class:           contour       # → ContourRefineEnv (control points + spline)
     # ── contour geometry ──
     n_points:            32            # LV_endo is large & smooth → denser sampling
-    disp_px:             1.5           # per-edit normal displacement (px)
+    disp_px           : 2.0          # match TD3 + headroom diagnostic
     spline_smooth:       2.0           # periodic-spline smoothing (s in splprep)
     smooth_lambda:       0.5           # Laplacian strength for the SMOOTH action
     # ── reward shaping (same machinery as the global-op agents) ──

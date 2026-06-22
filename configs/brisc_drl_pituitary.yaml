@@ -77,10 +77,10 @@ agents:
     reward_potential_scale: 15.0
     reward_step_penalty:  0.0
     disable_auto_stop:    false
-    n_points:            16
+    n_points          : 24          # small structure (~15-25 px) — fewer points
     cont_sectors:        10
-    disp_px:             1.0
-    spline_smooth:       1.0
+    disp_px           : 1.5           # smaller push so one bad edit can't overshoot
+    spline_smooth     : 0.0     # NO smoothing
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3
     gamma:               0.99
@@ -93,7 +93,7 @@ agents:
     batch_size:          64
     buffer_size:         50000
     prefill_steps:       2000
-    max_steps:           10
+    max_steps         : 8             # tighter — small targets degrade faster
     train_steps:         60000
     eval_every:          2000
     cache_sdt:           true
@@ -146,10 +146,11 @@ agents:
   # PBRS reward. This is the discrete counterpart to TD3 (continuous contour).
   DuelingDDQN:
     agent_type:          DUELING
+    max_steps         : 8             # tighter — small targets degrade faster
     env_class:           contour
-    n_points:            16
-    disp_px:             1.0
-    spline_smooth:       1.0
+    n_points          : 24          # small structure (~15-25 px) — fewer points
+    disp_px           : 1.5           # smaller push so one bad edit can't overshoot
+    spline_smooth     : 0.0     # NO smoothing
     smooth_lambda:       0.5
     reward_mode:          dice_pbrs
     reward_potential_scale: 15.0

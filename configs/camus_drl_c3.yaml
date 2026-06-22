@@ -157,9 +157,10 @@ agents:
   # PBRS reward. This is the discrete counterpart to TD3 (continuous contour).
   DuelingDDQN:
     agent_type:          DUELING
+    max_steps         : 10            # cap excursion past peak (agent doesn't always STOP)
     env_class:           contour
     n_points:            32
-    disp_px:             2.0
+    disp_px           : 2.0          # match TD3 + headroom diagnostic
     spline_smooth:       2.5
     smooth_lambda:       0.5
     reward_mode:          dice_hd_pbrs
