@@ -27,6 +27,7 @@ from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent, TD3Agent
 from .env_contour_refine import ContourRefineEnv
+from . import bc_demo
 
 
 # ─── Environment registry ────────────────────────────────────────────────────
@@ -253,6 +254,7 @@ def run_drl_training(
         'terminal_bonus_scale',                        # path-independent terminal reward
         'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
         'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',  # contour env
+        'uncertainty_gate', 'gate_lo', 'gate_hi', 'gate_margin',  # U-Net confidence gate
     )
     for _k in _env_optional_keys:
         if _k in cfg:
@@ -284,7 +286,8 @@ def run_drl_training(
         # num_actions is env-class-dependent — agent's output head must match
         # exactly or argmax will produce invalid indices.
         agent = agent_cls(num_actions=num_actions_for_cls,
-                          lr=cfg.get('lr', 1e-4), **common)
+                          lr=cfg.get('lr', 1e-4),
+                          spatial=cfg.get('spatial_head', False), **common)
     else:
         common.pop('lr', None)
         if is_contour:
@@ -305,6 +308,7 @@ def run_drl_training(
                 expl_noise   = cfg.get('expl_noise', 0.2),
                 target_noise = cfg.get('target_noise', 0.2),
                 noise_clip   = cfg.get('noise_clip', 0.5),
+                spatial      = cfg.get('spatial_head', False),
                 **common,
             )
         else:   # DDPG
@@ -319,6 +323,37 @@ def run_drl_training(
                 actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
                 **common,
             )
+
+    # ── TD3+BC: oracle-demonstration actor warm-start (opt-in) ─────────────────
+    # Fujimoto & Gu 2021. Vanilla TD3's deterministic actor starts near-identity
+    # (small-uniform final-layer init) and the reward landscape around zero is
+    # the only "safe" region, so the actor never escapes it. Pretraining on
+    # GT-privileged oracle demonstrations (train-time only — never used at
+    # deployment) gives it a competent starting policy instead; `bc_lambda`
+    # regularisation during RL fine-tuning (see below) keeps it from drifting
+    # back to identity. Only applies to TD3 on the continuous contour env.
+    demo_buffer = None
+    bc_warm_start = (cfg['agent_type'].upper() == 'TD3' and is_contour
+                     and cfg.get('bc_warm_start', False))
+    if bc_warm_start:
+        bc_demo_episodes = cfg.get('bc_demo_episodes', 150)
+        bc_demo_max_steps = cfg.get('bc_demo_max_steps', 8)
+        bc_pretrain_epochs = cfg.get('bc_pretrain_epochs', 30)
+        print(f'[drl] BC warm-start: collecting {bc_demo_episodes} oracle demo '
+              f'episodes (max_steps={bc_demo_max_steps})...')
+        demos = bc_demo.collect_continuous_oracle_demos(
+            train_samples, env_kwargs, cont_action_dim,
+            bc_demo_episodes, bc_demo_max_steps, seed=cfg.get('seed', 42))
+        demo_buffer = bc_demo.DemoBuffer(demos, mask_shape=(H, H))
+        bc_loss = agent.pretrain_actor_bc(
+            demo_buffer, state_builder,
+            epochs=bc_pretrain_epochs, batch_size=cfg.get('batch_size', 64))
+        print(f'[drl] BC warm-start: {len(demos)} demo transitions, '
+              f'pretrain loss={bc_loss:.4f}')
+
+    bc_lambda_start = cfg.get('bc_lambda_start', 0.5)
+    bc_lambda_end = cfg.get('bc_lambda_end', 0.05)
+    bc_lambda_decay_steps = cfg.get('bc_lambda_decay_steps', 20000)
 
     # ── Buffer ────────────────────────────────────────────────────────────────
     # cache_sdt=True is the key speed optimisation: skips ~80% of SDT recomputation
@@ -417,7 +452,14 @@ def run_drl_training(
                         current_sdt=prev_sdt, next_sdt=next_state[2])
 
             if len(buffer) >= batch_size:
-                agent.update(buffer.sample(batch_size), state_builder)
+                if demo_buffer is not None and len(demo_buffer) > 0:
+                    bc_batch = demo_buffer.sample(batch_size)
+                    bc_lambda = max(bc_lambda_end, bc_lambda_start
+                                    - (bc_lambda_start - bc_lambda_end) * step / bc_lambda_decay_steps)
+                    agent.update(buffer.sample(batch_size), state_builder,
+                                bc_batch=bc_batch, bc_lambda=bc_lambda)
+                else:
+                    agent.update(buffer.sample(batch_size), state_builder)
 
             state = next_state
             step += 1

@@ -75,6 +75,11 @@ agents:
     reward_mode:          dice_hd_pbrs
     reward_potential_scale: 10.0
     reward_step_penalty:  0.0
+    reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
+    uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
+    gate_lo:             0.35
+    gate_hi:             0.65
+    gate_margin:         0.10
     disable_auto_stop:    false
     n_points:            32
     cont_sectors:        16
@@ -98,6 +103,14 @@ agents:
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
+    bc_warm_start:       true          # TD3+BC (Fujimoto & Gu 2021): pretrain the actor on oracle demonstrations (GT used at TRAIN time only, never at deployment) so it starts from competent behaviour instead of the near-zero identity its small-init final layer collapses to; the bc_lambda regulariser then keeps RL fine-tuning from drifting back to identity under the catastrophic-downside reward landscape.
+    bc_demo_episodes:    150
+    bc_demo_max_steps:   8
+    bc_pretrain_epochs:  30
+    bc_lambda_start:     0.5
+    bc_lambda_end:       0.05
+    bc_lambda_decay_steps: 20000
+    spatial_head:        false         # opt-in: per-sector local-feature actor/critic head (vs. the default globally-pooled embedding). Implemented + verified but left OFF by default -- flip to true and dry-run-compare before committing full training budget to it, since it's architecturally newer than the rest of the pipeline.
 
   DQN:
     agent_type:          DQN
@@ -160,6 +173,11 @@ agents:
     reward_mode:          dice_hd_pbrs
     reward_potential_scale: 10.0
     reward_step_penalty:  0.0
+    reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
+    uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
+    gate_lo:             0.35
+    gate_hi:             0.65
+    gate_margin:         0.10
     disable_auto_stop:    true
     terminal_bonus_scale: 0.0
     lr:                  1.0e-4
@@ -171,9 +189,13 @@ agents:
     prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 30000
+    epsilon_decay_steps: 18000         # reduced from 30000 — with the uncertainty gate bounding
+                                       # downside risk, push more of the training budget into
+                                       # exploitation so STOP/minimal-edit-when-already-good is
+                                       # reliably learned
     train_steps:         60000
     eval_every:          2000
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
+    spatial_head:        false         # opt-in: per-sector local-feature actor/critic head (vs. the default globally-pooled embedding). Implemented + verified but left OFF by default -- flip to true and dry-run-compare before committing full training budget to it, since it's architecturally newer than the rest of the pipeline.

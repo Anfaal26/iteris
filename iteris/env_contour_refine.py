@@ -52,6 +52,17 @@ Reward / termination semantics are identical to ``SegmentationEnv`` (dice_delta 
 dice_hd_composite / iou_delta, episode-start baseline, per-step penalty,
 path-independent terminal bonus, best-mask tracking) so results are directly
 comparable across paradigms.
+
+Uncertainty gate (opt-in, ``uncertainty_gate=True``)
+─────────────────────────────────────────────────────
+A sector push can move a control point the U-Net was already confident and
+correct about, causing large single-step Dice drops. When enabled, every edit's
+per-point displacement is scaled by ``_gate_weights`` — a function of the
+U-Net's own ``prob_map`` that is 1.0 in the uncertain band ``[gate_lo, gate_hi]``
+and ramps to 0.0 (over ``gate_margin``) as the U-Net's confidence approaches 0
+or 1. This bounds worst-case per-step degradation and concentrates edits where
+the U-Net is actually unsure, without ever consulting ground truth. It is
+disabled by default and only activates when a real ``prob_map`` is supplied.
 """
 
 from typing import Tuple, Dict, List
@@ -159,6 +170,10 @@ class ContourRefineEnv:
                                       # the discrete sectors). Lower-dim + spatially
                                       # grounded → the value surface is smooth and
                                       # TD3 can actually learn regional corrections.
+        uncertainty_gate: bool = False,   # gate edit magnitude by U-Net confidence (prob_map)
+        gate_lo: float = 0.35,            # below this prob, U-Net is confident background
+        gate_hi: float = 0.65,            # above this prob, U-Net is confident foreground
+        gate_margin: float = 0.10,        # linear ramp width outside [gate_lo, gate_hi]
         **_ignored,                   # forward-compat: ignore unknown cfg keys
     ):
         assert action_type in ('discrete', 'continuous')
@@ -171,6 +186,14 @@ class ContourRefineEnv:
         self.H, self.W = image.shape
         self.prob_map  = (prob_map.astype(np.float32) if prob_map is not None
                           else init_mask.astype(np.float32))
+        self.uncertainty_gate = bool(uncertainty_gate)
+        self.gate_lo    = float(gate_lo)
+        self.gate_hi    = float(gate_hi)
+        self.gate_margin = float(gate_margin)
+        # Only gate when a REAL prob_map was supplied: the fallback prob_map
+        # (= init_mask, a binary {0,1} array) would never fall inside the
+        # uncertain band, so gating against it would freeze every point.
+        self._gate_active = bool(uncertainty_gate) and (prob_map is not None)
         self.pbrs_gamma = float(pbrs_gamma)
         self._is_pbrs  = reward_mode in ('dice_pbrs', 'dice_hd_pbrs')
         self._needs_hd = reward_mode in ('dice_hd_composite', 'dice_hd_pbrs')
@@ -361,6 +384,24 @@ class ContourRefineEnv:
 
     # ── contour operations ────────────────────────────────────────────────────
 
+    def _gate_weights(self, points: np.ndarray) -> np.ndarray:
+        """Per-control-point uncertainty gate in [0,1] from self.prob_map.
+        1.0 inside the uncertain band [gate_lo, gate_hi]; ramps linearly to 0.0
+        over `gate_margin` outside that band. Bounds how much a single edit can
+        move a point the U-Net is already confident about, so the worst-case
+        per-step Dice drop is bounded and learning concentrates on the U-Net's
+        genuinely correctable errors. Uses prob_map (the U-Net's own confidence),
+        never ground truth — fully valid at deployment time."""
+        if not self._gate_active:
+            return np.ones(points.shape[0], dtype=np.float32)
+        ys = np.clip(points[:, 0].round().astype(int), 0, self.H - 1)
+        xs = np.clip(points[:, 1].round().astype(int), 0, self.W - 1)
+        p = self.prob_map[ys, xs]
+        lo, hi, m = self.gate_lo, self.gate_hi, max(self.gate_margin, 1e-6)
+        below = np.clip((p - (lo - m)) / m, 0.0, 1.0)
+        above = np.clip(((hi + m) - p) / m, 0.0, 1.0)
+        return np.minimum(below, above).astype(np.float32)
+
     def _outward_normals(self, points: np.ndarray) -> np.ndarray:
         """Unit outward normal at each control point (N, 2) in (y, x).
 
@@ -410,6 +451,7 @@ class ContourRefineEnv:
         the local analogue of a directional dilation/erosion.
         """
         normals = self._outward_normals(points)
+        gate = self._gate_weights(points)
         idx = self._sector_indices(points, sector)
         out = points.copy()
         m = len(idx)
@@ -423,7 +465,7 @@ class ContourRefineEnv:
         dtheta = np.abs(np.mod(ang - centre_ang + np.pi, 2.0 * np.pi) - np.pi)
         taper = np.clip(1.0 - dtheta / (wedge), 0.0, 1.0)
         sign = 1.0 if outward else -1.0
-        out[idx] = points[idx] + sign * self.disp_px * taper[:, None] * normals[idx]
+        out[idx] = points[idx] + sign * self.disp_px * taper[:, None] * gate[idx, None] * normals[idx]
         return self._clip_points(out)
 
     def _laplacian_smooth(self, points: np.ndarray) -> np.ndarray:
@@ -452,6 +494,8 @@ class ContourRefineEnv:
                                 self.points[:, 1] - c[1]), 2.0 * np.pi)
         bins = np.clip((ang / (2.0 * np.pi / nb)).astype(int), 0, nb - 1)
         disp = a[bins]                                   # (N,) per-point coefficient
+        gate = self._gate_weights(self.points)
+        disp = disp * gate
         normals = self._outward_normals(self.points)
         out = self.points + (disp[:, None] * self.disp_px) * normals
         return self._clip_points(out)

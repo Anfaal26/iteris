@@ -17,7 +17,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .drl_networks import QNetwork, DuelingQNetwork, Actor, Critic
+from .drl_networks import (
+    QNetwork, DuelingQNetwork, Actor, Critic,
+    SpatialActor, SpatialCritic, SpatialDuelingQNetwork,
+)
 
 
 def _soft_update(target_net: nn.Module, source_net: nn.Module, tau: float):
@@ -53,6 +56,7 @@ class DQNAgent:
         dueling: bool = False,
         embed_dim: int = 256,
         device: torch.device = None,
+        spatial: bool = False,
     ):
         self.device      = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.num_actions = num_actions
@@ -60,10 +64,18 @@ class DQNAgent:
         self.tau         = tau
         self.double      = double
         self.dueling     = dueling
+        self.spatial     = spatial
 
         # Full-image (4, H, W) input — local mask refinement paradigm.
         # PatchQNetwork (64×64) was for the archived contour-tracing paradigm.
-        NetCls = DuelingQNetwork if dueling else QNetwork
+        if spatial:
+            if not dueling:
+                raise ValueError(
+                    'spatial head only implemented for the dueling variant — '
+                    'pass dueling=True')
+            NetCls = SpatialDuelingQNetwork
+        else:
+            NetCls = DuelingQNetwork if dueling else QNetwork
         self.q = NetCls(in_channels, num_actions, embed_dim).to(self.device)
         self.q_target = deepcopy(self.q).eval()
         for p in self.q_target.parameters():
@@ -337,6 +349,7 @@ class TD3Agent:
         noise_clip:    float = 0.5,      # target-noise clip (× action_scale)
         embed_dim:     int   = 256,
         device:        torch.device = None,
+        spatial:       bool = False,
         **_ignored,                       # forward-compat: ignore unused cfg keys
     ):
         self.device       = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -344,6 +357,7 @@ class TD3Agent:
         self.gamma        = gamma
         self.tau          = tau
         self.policy_delay = int(policy_delay)
+        self.spatial      = spatial
 
         scale = ([float(action_scale)] * action_dim if np.isscalar(action_scale)
                  else list(action_scale))
@@ -355,10 +369,11 @@ class TD3Agent:
         self._noise_clip   = (noise_clip * sc)
         self._scale_t      = sc
 
-        self.actor         = Actor(in_channels, action_dim, scale, embed_dim).to(self.device)
+        ActorCls, CriticCls = (SpatialActor, SpatialCritic) if spatial else (Actor, Critic)
+        self.actor         = ActorCls(in_channels, action_dim, scale, embed_dim).to(self.device)
         self.actor_target  = deepcopy(self.actor).eval()
-        self.critic1       = Critic(in_channels, action_dim, embed_dim).to(self.device)
-        self.critic2       = Critic(in_channels, action_dim, embed_dim).to(self.device)
+        self.critic1       = CriticCls(in_channels, action_dim, embed_dim).to(self.device)
+        self.critic2       = CriticCls(in_channels, action_dim, embed_dim).to(self.device)
         self.critic1_target = deepcopy(self.critic1).eval()
         self.critic2_target = deepcopy(self.critic2).eval()
         for net in (self.actor_target, self.critic1_target, self.critic2_target):
@@ -388,7 +403,37 @@ class TD3Agent:
             for i in range(n)
         ]).to(self.device)
 
-    def update(self, batch: dict, state_builder: Callable) -> dict:
+    def pretrain_actor_bc(self, demo_buffer, state_builder, epochs: int = 50,
+                          batch_size: int = 64, lr: float = None) -> float:
+        """TD3+BC actor warm-start (Fujimoto & Gu 2021): supervised MSE
+        pretraining of `self.actor` ONLY (critics untouched) on (state, action)
+        pairs sampled from `demo_buffer` (an oracle-demonstration buffer, e.g.
+        `bc_demo.DemoBuffer`). Escapes the near-identity init basin that traps
+        vanilla TD3 on this task — see module docstring / bc_demo.py.
+
+        Returns the final epoch's mean loss.
+        """
+        opt = torch.optim.Adam(self.actor.parameters(), lr=lr or 1e-4)
+        n_batches = max(1, len(demo_buffer) // batch_size)
+        epoch_loss = 0.0
+        for _ in range(epochs):
+            losses = []
+            for _ in range(n_batches):
+                batch = demo_buffer.sample(batch_size)
+                states = self._build_states(batch, state_builder, 'current_mask', 'current_sdt')
+                target = torch.from_numpy(batch['action']).float().to(self.device)
+                pred = self.actor(states)
+                loss = F.mse_loss(pred, target)
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+                losses.append(float(loss.item()))
+            epoch_loss = float(np.mean(losses))
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        return epoch_loss
+
+    def update(self, batch: dict, state_builder: Callable,
+              bc_batch: dict = None, bc_lambda: float = 0.0) -> dict:
         states      = self._build_states(batch, state_builder, 'current_mask', 'current_sdt')
         next_states = self._build_states(batch, state_builder, 'next_mask',    'next_sdt')
         actions = torch.from_numpy(batch['action']).float().to(self.device)
@@ -421,6 +466,11 @@ class TD3Agent:
         # ── Delayed policy + target update ────────────────────────────────────
         if self.total_it % self.policy_delay == 0:
             actor_loss = -self.critic1(states, self.actor(states)).mean()
+            if bc_batch is not None and bc_lambda > 0:
+                bc_states = self._build_states(bc_batch, state_builder, 'current_mask', 'current_sdt')
+                bc_target = torch.from_numpy(bc_batch['action']).float().to(self.device)
+                bc_loss = F.mse_loss(self.actor(bc_states), bc_target)
+                actor_loss = actor_loss + bc_lambda * bc_loss
             self.actor_opt.zero_grad()
             actor_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)

@@ -19,10 +19,23 @@ Two numbers per dataset:
                   the best a perfect contour policy could reach -> the practical
                   ceiling for the discrete agent. headroom = oracle_greedy - init.
 
+IMPORTANT CAVEAT on oracle_greedy / oracle_greedy_ceiling: the oracle reads GROUND
+TRUTH (`info['dice']` vs GT) to choose every action. No deployed RL policy has
+access to GT, so this ceiling is GT-PRIVILEGED -- it is an upper bound on the
+contour ACTION SPACE's expressiveness (can the discrete moves reach a
+high-Dice contour at all), not a target any image-only policy can actually
+reach. Treat `oracle_greedy_ceiling` / `headroom` as "is the action space rich
+enough to be worth training on", never as "RL should get close to this number".
+To get a realistic, non-GT-privileged estimate of achievable headroom, pass
+`attention_dice` (a fully-supervised competitor's Dice on the same class/
+dataset) to `headroom_report` -- it derives `realistic_headroom_estimate` from
+that instead.
+
 Usage (notebook, on warm-start samples):
     from iteris.diagnostics import headroom_report
     headroom_report(val_samples, n_points=32, cont_sectors=8, disp_px=2.0,
-                    spline_smooth=2.0, max_steps=20, n_samples=60, label='CAMUS')
+                    spline_smooth=2.0, max_steps=20, n_samples=60, label='CAMUS',
+                    attention_dice=0.938)
 """
 from copy import deepcopy
 from typing import List, Dict
@@ -86,8 +99,15 @@ def oracle_greedy(sample: dict, env_kwargs: dict, max_steps: int) -> Dict[str, f
 def headroom_report(samples: List[dict], n_points: int = 32, cont_sectors: int = 8,
                     disp_px: float = 2.0, spline_smooth: float = 2.0,
                     max_steps: int = 20, n_samples: int = 60,
-                    label: str = '') -> Dict[str, float]:
-    """Aggregate ceiling diagnostic over a sample subset. Prints + returns means."""
+                    label: str = '', attention_dice: float = None) -> Dict[str, float]:
+    """Aggregate ceiling diagnostic over a sample subset. Prints + returns means.
+
+    `attention_dice`, if given, is a fully-supervised competitor's (e.g. an
+    attention U-Net) test Dice on this same class/dataset. When provided, it is
+    used to derive `realistic_headroom_estimate` -- a non-GT-privileged estimate
+    of achievable headroom, since `oracle_greedy_ceiling` itself is GT-privileged
+    (see module docstring) and should not be read as an achievable RL target.
+    """
     rng = np.random.RandomState(0)
     idx = rng.choice(len(samples), size=min(n_samples, len(samples)), replace=False)
     sub = [samples[i] for i in idx]
@@ -105,13 +125,28 @@ def headroom_report(samples: List[dict], n_points: int = 32, cont_sectors: int =
         contour_repr_ceiling = float(np.mean(repr_c)),
         oracle_greedy_ceiling = float(np.mean(oracle)),
         headroom = float(np.mean(oracle) - np.mean(init)),
+        oracle_is_gt_privileged = True,
     )
     print(f"[ceiling:{label}] n={out['n']} | baseline {out['baseline_init_dice']:.4f} "
           f"| contour-repr cap {out['contour_repr_ceiling']:.4f} "
-          f"| oracle-greedy {out['oracle_greedy_ceiling']:.4f} "
+          f"| oracle-greedy (GT-PRIVILEGED, NOT achievable at deployment) {out['oracle_greedy_ceiling']:.4f} "
           f"| HEADROOM {out['headroom']:+.4f}")
-    verdict = ('GOOD: RL has room to improve' if out['headroom'] > 0.02 else
-               'MARGINAL: little reachable gain' if out['headroom'] > 0.005 else
-               'NO HEADROOM: contour cannot beat this baseline')
-    print(f"[ceiling:{label}] verdict -> {verdict}")
+
+    if attention_dice is not None:
+        realistic = float(attention_dice) - out['baseline_init_dice']
+        out['attention_dice'] = float(attention_dice)
+        out['realistic_headroom_estimate'] = realistic
+        print(f"[ceiling:{label}] realistic (non-GT) headroom estimate = "
+              f"attention({attention_dice:.4f}) - baseline({out['baseline_init_dice']:.4f}) "
+              f"= {realistic:+.4f}")
+        verdict = ('GOOD: RL has room to improve' if realistic > 0.02 else
+                   'MARGINAL: little reachable gain' if realistic > 0.005 else
+                   'NO HEADROOM: contour cannot beat this baseline')
+        print(f"[ceiling:{label}] verdict (realistic, non-GT-privileged) -> {verdict}")
+    else:
+        verdict = ('GOOD: RL has room to improve' if out['headroom'] > 0.02 else
+                   'MARGINAL: little reachable gain' if out['headroom'] > 0.005 else
+                   'NO HEADROOM: contour cannot beat this baseline')
+        print(f"[ceiling:{label}] verdict [GT-PRIVILEGED ESTIMATE, may not reflect "
+              f"deployment-achievable improvement] -> {verdict}")
     return out
