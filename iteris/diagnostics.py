@@ -41,8 +41,10 @@ from copy import deepcopy
 from typing import List, Dict
 import numpy as np
 
+import scipy.ndimage as ndi
+
 from .env_contour_refine import ContourRefineEnv
-from .geometry import dice_score
+from .geometry import dice_score, _largest_cc, STRUCT
 
 
 def _base_env_kwargs(n_points, cont_sectors, disp_px, spline_smooth, max_steps):
@@ -150,3 +152,127 @@ def headroom_report(samples: List[dict], n_points: int = 32, cont_sectors: int =
         print(f"[ceiling:{label}] verdict [GT-PRIVILEGED ESTIMATE, may not reflect "
               f"deployment-achievable improvement] -> {verdict}")
     return out
+
+
+# ─── Pillar 4: offline pipeline diagnostics (no GPU, no training) ─────────────
+# Three cheap checks to run on warm-start samples BEFORE spending a GPU round, so
+# you don't full-train a class whose ceiling is structurally capped or whose
+# inputs can't even support the gate. None of these use the agent; all are static
+# analyses of (init_mask, gt_mask, prob_map).
+
+def prob_map_informativeness(samples, gate_lo=0.35, gate_hi=0.65,
+                             n_samples=80, label=''):
+    """Is the U-Net prob_map usable, or is the lite net overconfident?
+
+    The uncertainty gate and the 5th state channel both rely on the prob_map
+    carrying a graded confidence signal. If the lite net is overconfident
+    (probabilities pinned near 0/1), the prob_map is effectively binary, the gate
+    is inert, and the agent is blind to where it is wrong -- a genuine
+    preprocessing-stage failure, fixable only by retraining the lite net with
+    label smoothing / temperature.
+
+    Reports, averaged over a sample subset:
+      uncertain_band_frac : mean fraction of pixels with gate_lo <= prob <= gate_hi
+                            (the band the gate actually lets the agent edit)
+      mean_entropy        : mean per-pixel binary entropy of prob (0=binary, 1=max)
+      has_real_probmap    : whether prob_map differs from the binary init mask at all
+    """
+    rng = np.random.RandomState(0)
+    idx = rng.choice(len(samples), size=min(n_samples, len(samples)), replace=False)
+    band, ent, real = [], [], 0
+    for i in idx:
+        s = samples[int(i)]
+        pm = s.get('prob_map')
+        if pm is None:
+            continue
+        pm = np.asarray(pm, dtype=np.float32)
+        # is it a genuine soft map, or just the binary init mask cast to float?
+        if not np.array_equal(np.unique(pm), np.array([0.0, 1.0], dtype=np.float32)):
+            real += 1
+        band.append(float(((pm >= gate_lo) & (pm <= gate_hi)).mean()))
+        p = np.clip(pm, 1e-6, 1 - 1e-6)
+        ent.append(float((-p * np.log2(p) - (1 - p) * np.log2(1 - p)).mean()))
+    n = max(len(band), 1)
+    out = dict(label=label, n=len(band),
+               uncertain_band_frac=float(np.mean(band)) if band else 0.0,
+               mean_entropy=float(np.mean(ent)) if ent else 0.0,
+               real_probmap_frac=real / n)
+    verdict = ('USABLE: prob_map carries graded confidence' if out['uncertain_band_frac'] > 0.01
+               else 'INERT: prob_map ~binary -> gate does nothing, agent is blind to error '
+                    'location (retrain lite net with label smoothing/temperature)')
+    print(f"[probmap:{label}] band_frac={out['uncertain_band_frac']:.4f} "
+          f"entropy={out['mean_entropy']:.4f} real_probmap={out['real_probmap_frac']:.2f} "
+          f"-> {verdict}")
+    return out
+
+
+def error_type_audit(samples, band_px=4, n_samples=80, label=''):
+    """What fraction of the lite-mask error is contour-fixable vs structural?
+
+    Decomposes init-vs-GT disagreement into:
+      boundary_frac : error within band_px of the init-mask boundary -- the ONLY
+                      error a contour-nudging agent can address
+      topology_frac : whole connected components present in GT but missing from
+                      init (missed objects) or present in init but absent from GT
+                      (false blobs) -- UNreachable by boundary nudging
+      interior_frac : the remainder (interior holes / far-from-boundary error)
+
+    A high topology_frac/interior_frac means the action space caps achievable
+    Dice no matter how good the RL is -- the case for Pillar 5 (richer actions).
+    """
+    rng = np.random.RandomState(0)
+    idx = rng.choice(len(samples), size=min(n_samples, len(samples)), replace=False)
+    b_frac, t_frac, i_frac = [], [], []
+    for i in idx:
+        s = samples[int(i)]
+        init = np.asarray(s['init_mask']).astype(bool)
+        gt = np.asarray(s['gt_mask']).astype(bool)
+        err = init ^ gt
+        tot = int(err.sum())
+        if tot == 0:
+            b_frac.append(1.0); t_frac.append(0.0); i_frac.append(0.0)
+            continue
+        # boundary band of the init mask
+        bnd = init ^ ndi.binary_erosion(init, STRUCT)
+        band = ndi.binary_dilation(bnd, STRUCT, iterations=int(band_px))
+        band_err = int((err & band).sum())
+        # topology: GT components not touching init, + init components not touching GT
+        topo = np.zeros_like(err)
+        for src, other in ((gt, init), (init, gt)):
+            lab, ncc = ndi.label(src)
+            for c in range(1, ncc + 1):
+                comp = lab == c
+                if not (comp & other).any():     # this whole object has no counterpart
+                    topo |= comp
+        topo_err = int((err & topo).sum())
+        # avoid double-counting topo pixels that also fall in the boundary band
+        band_only = int((err & band & ~topo).sum())
+        inter_err = tot - band_only - topo_err
+        b_frac.append(band_only / tot); t_frac.append(topo_err / tot)
+        i_frac.append(max(inter_err, 0) / tot)
+    out = dict(label=label, n=len(b_frac),
+               boundary_frac=float(np.mean(b_frac)),
+               topology_frac=float(np.mean(t_frac)),
+               interior_frac=float(np.mean(i_frac)))
+    cap = out['topology_frac'] + out['interior_frac']
+    verdict = ('GOOD: most error is boundary-shaped (contour-fixable)' if out['boundary_frac'] > 0.7
+               else f'CAPPED: {cap:.0%} of error is topology/interior -> contour nudging '
+                    f'structurally cannot fix it (needs richer actions)')
+    print(f"[errtype:{label}] boundary={out['boundary_frac']:.2f} "
+          f"topology={out['topology_frac']:.2f} interior={out['interior_frac']:.2f} -> {verdict}")
+    return out
+
+
+def pillar4_report(samples, gate_lo=0.35, gate_hi=0.65, band_px=4,
+                   n_samples=80, label=''):
+    """Run all Pillar-4 offline checks and print a combined go/no-go.
+
+    Cheap (CPU, no agent, no training). Run on val_samples before committing a
+    GPU training round for a class. Returns the two sub-reports as a dict."""
+    print(f"\n=== Pillar 4 diagnostics: {label} (n<={n_samples}) ===")
+    pm = prob_map_informativeness(samples, gate_lo, gate_hi, n_samples, label)
+    et = error_type_audit(samples, band_px, n_samples, label)
+    go = pm['uncertain_band_frac'] > 0.01 and et['boundary_frac'] > 0.5
+    print(f"[pillar4:{label}] OVERALL -> "
+          f"{'worth a training round' if go else 'low expected payoff — reconsider before spending GPU'}")
+    return dict(prob_map=pm, error_type=et, go=go)

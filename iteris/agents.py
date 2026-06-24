@@ -90,6 +90,18 @@ class DQNAgent:
         s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
         return int(self.q(s).argmax(dim=1).item())
 
+    @torch.no_grad()
+    def state_value(self, state: np.ndarray) -> float:
+        """Deployable state value V(s) = max_a Q(s, a).
+
+        Uses NO ground truth — valid at deployment. Consumed by the value-floored
+        ('do no harm') mask selector in refinement_viz: the agent commits the
+        trajectory state it values highest, falling back to the init mask if it
+        never values any edited state above the start. max-Q is a valid state
+        value for both the plain and dueling heads."""
+        s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
+        return float(self.q(s).max(dim=1).values.item())
+
     def update(self, batch: dict, state_builder: Callable) -> dict:
         n = len(batch['sample_idx'])
         cs = batch.get('current_sdt')           # may be None if buffer.cache_sdt=False
@@ -240,6 +252,12 @@ class DDPGAgent:
             a = a + self.noise.sample()
         # Clip per-component to ±action_scale
         return np.clip(a, -self.action_scale_np, self.action_scale_np).astype(np.float32)
+
+    @torch.no_grad()
+    def state_value(self, state: np.ndarray) -> float:
+        """Deployable state value V(s) = Q(s, π(s)). No ground truth used."""
+        s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
+        return float(self.critic(s, self.actor(s)).item())
 
     def update(self, batch: dict, state_builder: Callable) -> dict:
         n = len(batch['sample_idx'])
@@ -393,6 +411,16 @@ class TD3Agent:
         if explore:
             a = a + np.random.randn(self.action_dim).astype(np.float32) * self.expl_noise_np
         return np.clip(a, -self.action_scale_np, self.action_scale_np).astype(np.float32)
+
+    @torch.no_grad()
+    def state_value(self, state: np.ndarray) -> float:
+        """Deployable state value V(s) = min(Q1, Q2)(s, π(s)). No ground truth
+        used — valid at deployment. Consumed by the value-floored ('do no harm')
+        mask selector in refinement_viz. The clipped-double-Q min mirrors TD3's
+        own conservative target, so it under- rather than over-estimates."""
+        s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
+        a = self.actor(s)
+        return float(torch.min(self.critic1(s, a), self.critic2(s, a)).item())
 
     def _build_states(self, batch, state_builder, key, sdt_key):
         n  = len(batch['sample_idx'])

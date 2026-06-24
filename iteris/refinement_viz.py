@@ -95,6 +95,12 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
     # Discrete agents take an int action + epsilon-greedy; continuous agents
     # (DDPG / TD3) take a vector action + explore flag. Detect via action_type.
     is_discrete = getattr(agent, 'action_type', 'discrete') == 'discrete'
+    # Pillar 1 (value-based "do no harm" floor): record the agent's OWN value
+    # estimate V(s) of each visited state — GT-free, so usable at deployment.
+    # values[t] is the value of masks[t]. We commit the highest-valued state and
+    # fall back to init if nothing is valued above it (see below).
+    has_value = hasattr(agent, 'state_value')
+    values = [agent.state_value(state)] if has_value else None
     while True:
         if is_discrete:
             a = agent.select_action(state, epsilon=0.0)
@@ -105,10 +111,29 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
         state, _, done, info = env.step(a)
         masks.append(env.mask.copy())
         dices.append(info['dice'])
+        if has_value:
+            values.append(agent.state_value(state))
         if done:
             break
     init_d  = env.dice_history[0]
     final_d = info['dice']
+
+    # ── Value-floored ("do no harm") deployable mask selection (Pillar 1) ──────
+    # SELECTION uses only the agent's value estimates (no GT). We then score the
+    # selected mask's Dice for REPORTING, exactly as we do for final/best — the
+    # GT here measures the result, it does not drive the choice.
+    if has_value:
+        v = np.asarray(values, dtype=np.float64)
+        best_t = int(v.argmax())
+        vf_idx = best_t if v[best_t] > v[0] else 0   # else keep init = guaranteed parity
+        vf_mask = masks[vf_idx]
+        vf_dice = float(dice_score(vf_mask, sample['gt_mask']))
+        vf_hd95 = hd95_px(vf_mask, sample['gt_mask'])
+    else:
+        values = None
+        vf_idx, vf_mask = 0, masks[0]
+        vf_dice, vf_hd95 = init_d, hd95_px(masks[0], sample['gt_mask'])
+
     # action_names only meaningful for discrete heads; None signals "continuous"
     # to plot_behaviour so it renders a per-sector magnitude bar instead.
     action_names = list(env_cls.DISCRETE_NAMES) if is_discrete else None
@@ -117,13 +142,19 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
         masks      = masks,
         dices      = dices,
         actions    = acts,
+        values     = values,
         final_mask = env.mask.copy(),
         best_mask  = env.get_best_mask(),
+        value_floored_mask = vf_mask,
+        value_floored_idx  = vf_idx,
         init_dice  = init_d,
         final_dice = final_d,
         best_dice  = env.best_dice,
+        value_floored_dice = vf_dice,
         final_hd95 = hd95_px(env.mask, sample['gt_mask']),
+        value_floored_hd95 = vf_hd95,
         gain       = final_d - init_d,
+        value_floored_gain = vf_dice - init_d,
         n_steps    = len(acts),
         stopped    = bool(info.get('stop_action', False)),
         action_names = action_names,
@@ -261,17 +292,23 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
                      env_cls=None) -> Dict:
     """§10: greedy rollout over the test set → aggregate metrics.
     ``env_cls`` auto-detects from the agent's action-head size if not given."""
-    init_d, final_d, best_d, final_h = [], [], [], []
+    init_d, final_d, best_d, final_h, vf_d = [], [], [], [], []
     for s in test_samples:
         r = replay_one(agent, s, env_kwargs, env_cls=env_cls)
         init_d.append(r['init_dice']); final_d.append(r['final_dice'])
         best_d.append(r['best_dice']); final_h.append(r['final_hd95'])
+        vf_d.append(r['value_floored_dice'])
     fh = np.asarray(final_h, dtype=float)
     fh = fh[~np.isnan(fh)]
-    return dict(
+    out = dict(
         init_dice_mean  = float(np.mean(init_d)),
-        final_dice_mean = float(np.mean(final_d)),
-        best_dice_mean  = float(np.mean(best_d)),
+        final_dice_mean = float(np.mean(final_d)),       # raw last-state deploy (can go < init)
+        best_dice_mean  = float(np.mean(best_d)),        # GT-privileged ceiling (NOT deployable)
+        # Pillar 1: deployable value-floored deploy — GT-free selection, guaranteed
+        # >= init by the agent's own value estimate. THIS is the honest deploy number.
+        value_floored_dice_mean  = float(np.mean(vf_d)),
+        value_floored_delta_mean = float(np.mean([v - i for v, i in zip(vf_d, init_d)])),
         final_hd95_mean = float(fh.mean()) if fh.size else float('nan'),
         delta_dice_mean = float(np.mean([f - i for f, i in zip(final_d, init_d)])),
     )
+    return out
