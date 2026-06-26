@@ -96,11 +96,13 @@ agents:
     reward_potential_scale: 10.0
     reward_step_penalty:  0.0
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
+    uncertainty_gate:    false         # OFF for LV_endo (TD3) — same INERT prob_map as the DuelingDDQN block (Pillar4 2026-06-25: band_frac=0.0073, ~binary). On TD3 this is worse than wasteful: `_apply_continuous` multiplies the actor's displacement by the gate (env_contour_refine.py:498), so an INERT gate zeroes the actor's moves AND zeroes the BC oracle's trial moves (bc_demo.py inherits env_kwargs+prob_map) — the actor is BC-pretrained toward identity and then can't move at all. Re-enable (together with the DuelingDDQN block) only after the label-smoothing lite retrain is confirmed USABLE.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10
     disable_auto_stop:    false      # no STOP action in continuous mode; converge-and-hold
+    fail_thresh:         0.02          # interim Pillar-2 safety net: TD3 has no learned STOP and _check_termination's dice_converged branch commits whatever the contour converged to, even below baseline. Terminate early if Dice sits >0.02 below baseline for fail_n steps so a drifting actor can't lock in a sub-baseline final mask (the deploy number).
+    fail_n:              2
     # contour geometry
     n_points:            32
     cont_sectors:        16
@@ -213,7 +215,7 @@ agents:
     reward_mode:          dice_hd_pbrs
     reward_step_penalty:  0.0
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
+    uncertainty_gate:    false         # OFF for LV_endo — lite U-Net's prob_map is INERT here (Pillar4, 2026-06-25: band_frac=0.0073, ~binary), so the gate clamps edit magnitude to ~0 at ~99% of contour points, blocking the confirmed +0.047 realistic headroom. Re-enable only after the lite net is retrained with label smoothing to produce a graded prob_map.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10

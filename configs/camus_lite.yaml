@@ -34,6 +34,10 @@ batch_size: 8
 epochs: 40                        # lighter net converges sooner; early-stop still applies
 lr: 1.0e-4
 weight_decay: 1.0e-5
+loss_label_smoothing: 0.1         # softens CE targets so softmax isn't pinned at 0/1 -- fixes the
+                                   # INERT prob_map (Pillar4, 2026-06-25: LV_endo band_frac=0.0073,
+                                   # LA band_frac=0.0063) that was blocking the DRL uncertainty gate
+                                   # and starving the contour env's 5th state channel of signal.
 patience: 10
 save_every_n_epochs: 10
 cache_workers: 2

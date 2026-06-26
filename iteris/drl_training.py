@@ -111,11 +111,21 @@ def _make_env(caches: dict, idx: int, env_kwargs: dict,
     )
 
 
-def _save_agent(agent, history, best_dice, path):
+def _save_agent(agent, history, best_dice, path, step=None):
+    # Persist optimizer state generically (DQN: self.opt; DDPG/TD3: actor_opt +
+    # critic_opt) so a resumed run continues with warm Adam moments, plus `step`
+    # so epsilon / bc_lambda schedules pick up where they left off. Older
+    # checkpoints without these keys still load (the resume path treats them as
+    # missing → fresh optimizer/step).
+    opt_states = {name: o.state_dict()
+                  for name, o in vars(agent).items()
+                  if isinstance(o, torch.optim.Optimizer)}
     torch.save({
-        'agent':     agent.state_dict(),
-        'best_dice': best_dice,
-        'history':   history,
+        'agent':      agent.state_dict(),
+        'optimizers': opt_states,
+        'best_dice':  best_dice,
+        'history':    history,
+        'step':       step,
     }, path)
 
 
@@ -418,12 +428,38 @@ def run_drl_training(
     best_dice  = 0.0
     ckpt_dir   = Path(cfg.get('checkpoint_dir', '/kaggle/working'))
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path  = ckpt_dir / f"{cfg.get('dataset','camus').lower()}_{cfg['agent_type'].lower()}_c{target_class}_best.pt"
+    _stem      = f"{cfg.get('dataset','camus').lower()}_{cfg['agent_type'].lower()}_c{target_class}"
+    ckpt_path  = ckpt_dir / f"{_stem}_best.pt"     # best-val mask, for deployment
+    last_path  = ckpt_dir / f"{_stem}_last.pt"     # latest full state, for resume
 
-    print(f'[drl] Training: {train_steps} steps  →  {ckpt_path}')
-    pbar = trange(train_steps, desc=f"{cfg['agent_type']} c{target_class}")
+    # ── Resume (opt-in) ───────────────────────────────────────────────────────
+    # Split a long run into chunks WITHOUT redoing earlier steps: run e.g.
+    # train_steps=20000 once, inspect the curve, then re-run with resume=True and
+    # a larger train_steps to continue. Restores agent weights, optimizer moments,
+    # the step counter (so epsilon/bc_lambda continue), history, and best_dice.
+    # The replay buffer is NOT persisted (too large) — it re-prefills cold, but
+    # eval uses the greedy policy directly so the resumed curve stays continuous.
+    start_step = 0
+    if cfg.get('resume', False) and last_path.exists():
+        ck = torch.load(last_path, map_location=device)
+        agent.load_state_dict(ck['agent'])
+        for name, st in ck.get('optimizers', {}).items():
+            opt = getattr(agent, name, None)
+            if isinstance(opt, torch.optim.Optimizer):
+                opt.load_state_dict(st)
+        start_step = int(ck.get('step') or 0)
+        best_dice  = float(ck.get('best_dice', 0.0))
+        _h = ck.get('history')
+        history = _h.to_dict('records') if hasattr(_h, 'to_dict') else (list(_h) if _h else [])
+        print(f'[drl] RESUMED from {last_path} at step {start_step} '
+              f'(best_dice={best_dice:.4f}) → continuing to {train_steps}')
+    elif cfg.get('resume', False):
+        print(f'[drl] resume=True but no {last_path.name} found — starting fresh.')
 
-    step = 0
+    print(f'[drl] Training: steps {start_step}→{train_steps}  →  {ckpt_path}')
+    pbar = trange(start_step, train_steps, desc=f"{cfg['agent_type']} c{target_class}")
+
+    step = start_step
     while step < train_steps:
         idx = _sample_idx()
         env = _make_env(train_caches, idx, env_kwargs, env_cls=env_cls)
@@ -475,7 +511,10 @@ def run_drl_training(
                 improved = metrics['final_dice_mean'] > best_dice
                 if improved:
                     best_dice = metrics['final_dice_mean']
-                    _save_agent(agent, history, best_dice, ckpt_path)
+                    _save_agent(agent, history, best_dice, ckpt_path, step=step)
+                # Always refresh the resume checkpoint (latest full state), even
+                # when val didn't improve, so a chunked run can continue from here.
+                _save_agent(agent, history, best_dice, last_path, step=step)
                 pbar.write(
                     f"step {step:6d} | init {metrics['init_dice_mean']:.4f} "
                     f"→ final {metrics['final_dice_mean']:.4f} "
