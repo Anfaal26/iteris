@@ -34,9 +34,12 @@ batch_size: 8
 epochs: 40                        # lighter net converges sooner; early-stop still applies
 lr: 1.0e-4
 weight_decay: 1.0e-5
-loss_label_smoothing: 0.1         # softens CE targets so softmax isn't pinned at 0/1 -- fixes the
-                                   # INERT prob_map (Pillar4, 2026-06-25: LV_endo band_frac=0.0073,
-                                   # LA band_frac=0.0063) that was blocking the DRL uncertainty gate
+loss_label_smoothing: 0.25        # raised from 0.1 -- verified by direct re-measurement on the
+                                   # 0.1-retrained checkpoint (real CAMUS images, 2026-06-26):
+                                   # LV_endo band_frac 0.0073->0.0079, LA 0.0063->0.0100 -- both
+                                   # still ~at/below the 0.01 usable threshold. 0.1 is too weak to
+                                   # meaningfully de-bias this net's confidence; re-verify band_frac
+                                   # on the 0.25 retrain before assuming it's fixed.
                                    # and starving the contour env's 5th state channel of signal.
 patience: 10
 save_every_n_epochs: 10

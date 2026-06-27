@@ -31,12 +31,17 @@ batch_size: 8
 epochs: 40
 lr: 1.0e-4
 weight_decay: 1.0e-5
-loss_label_smoothing: 0.1         # softens CE targets so softmax isn't pinned at 0/1 -- fixes the
+loss_label_smoothing: 0.25        # softens CE targets so softmax isn't pinned at 0/1 -- fixes the
                                    # INERT prob_map (Pillar4: BRISC_tumor band_frac=0.0007, the WORST
-                                   # of all 4 classes, ~9x more inert than CAMUS LA) that was blocking
-                                   # the DRL uncertainty gate and starving the contour env's 5th
-                                   # state channel of signal. Re-run prob_map_informativeness after
-                                   # retraining -- if band_frac is still <0.01, raise to 0.15-0.2.
+                                   # of all 4 classes) that was blocking the DRL uncertainty gate and
+                                   # starving the contour env's 5th state channel of signal. Raised
+                                   # straight to 0.25 (not 0.1): on CAMUS, 0.1 only moved band_frac
+                                   # 0.0073->0.0079 (LV_endo) and 0.0063->0.0100 (LA) -- too weak.
+                                   # IMPORTANT: a prior BRISC retrain (results(3).zip, 2026-06-26)
+                                   # showed band_frac UNCHANGED at 0.0006 -- almost certainly because
+                                   # it ran before iteris-pkg was re-uploaded with this key at all.
+                                   # Confirm cfg['loss_label_smoothing']==0.25 prints correctly in the
+                                   # notebook BEFORE training starts this time.
 patience: 10
 save_every_n_epochs: 10
 cache_rate: 1.0
