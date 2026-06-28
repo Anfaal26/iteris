@@ -24,6 +24,7 @@ import torch
 from tqdm.auto import trange
 
 from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
+from .geometry import iou_score, precision_recall, boundary_iou, mean_surface_distance_px
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent, TD3Agent
 from .env_contour_refine import ContourRefineEnv
@@ -111,6 +112,18 @@ def _make_env(caches: dict, idx: int, env_kwargs: dict,
     )
 
 
+def _extract_loss(upd: dict) -> float:
+    """Pull one representative scalar loss out of agent.update()'s return dict.
+    DQN-family returns {'loss': ...}; DDPG/TD3 return {'critic_loss':...,
+    'actor_loss':...} — critic_loss is computed every call (actor_loss is 0.0
+    on non-policy-delay steps for TD3, which would bias a mean toward 0)."""
+    if 'loss' in upd:
+        return float(upd['loss'])
+    if 'critic_loss' in upd:
+        return float(upd['critic_loss'])
+    return float('nan')
+
+
 def _save_agent(agent, history, best_dice, path, step=None):
     # Persist optimizer state generically (DQN: self.opt; DDPG/TD3: actor_opt +
     # critic_opt) so a resumed run continues with warm Adam moments, plus `step`
@@ -146,6 +159,11 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         caches = _build_state_caches(samples, samples[0]['image'].shape[0])
 
     init_d, final_d, final_h, best_d = [], [], [], []
+    # Extra literature-standard segmentation metrics (Dice/IoU/PPV/SEN/BIoU/HD95
+    # is the table shape used by most DRL-segmentation papers — see project
+    # research notes). Computed ONCE per finished rollout (final mask vs GT),
+    # never per env.step(), so this adds no hot-loop cost.
+    final_iou, final_prec, final_sen, final_biou, final_msd = [], [], [], [], []
     for i in range(n):
         env = _make_env(caches, i, env_kwargs, env_cls=env_cls)
         state = env.reset()
@@ -164,14 +182,28 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         # if STOP timing were perfect). final_dice = the deployment number.
         best_d.append(info.get('best_dice', info['dice']))
 
+        gt = caches['gt_mask'][i]
+        final_iou.append(iou_score(env.mask, gt))
+        p, r = precision_recall(env.mask, gt)
+        final_prec.append(p); final_sen.append(r)
+        final_biou.append(boundary_iou(env.mask, gt))
+        final_msd.append(mean_surface_distance_px(env.mask, gt))
+
     final_h_arr = np.asarray(final_h, dtype=float)
     valid_h = final_h_arr[~np.isnan(final_h_arr)]
+    msd_arr = np.asarray(final_msd, dtype=float)
+    valid_msd = msd_arr[~np.isnan(msd_arr)]
     return dict(
         init_dice_mean  = float(np.mean(init_d)),
         final_dice_mean = float(np.mean(final_d)),
         best_dice_mean  = float(np.mean(best_d)),    # diagnostic ceiling
         final_hd95_mean = float(valid_h.mean()) if valid_h.size else float('nan'),
         delta_dice_mean = float(np.mean([f - i for f, i in zip(final_d, init_d)])),
+        final_iou_mean         = float(np.mean(final_iou)),
+        final_precision_mean   = float(np.mean(final_prec)),
+        final_sensitivity_mean = float(np.mean(final_sen)),
+        final_biou_mean        = float(np.mean(final_biou)),
+        final_msd_mean         = float(valid_msd.mean()) if valid_msd.size else float('nan'),
     )
 
 
@@ -456,8 +488,21 @@ def run_drl_training(
     elif cfg.get('resume', False):
         print(f'[drl] resume=True but no {last_path.name} found — starting fresh.')
 
+    # Milestone checkpoints — periodic snapshots distinct from ckpt_path (best)
+    # and last_path (resume), kept by step number so any milestone can be
+    # rolled back to, not just the most recent one.
+    checkpoint_every = cfg.get('checkpoint_every')
+
     print(f'[drl] Training: steps {start_step}→{train_steps}  →  {ckpt_path}')
+    if checkpoint_every:
+        print(f'[drl] Milestone checkpoints every {checkpoint_every} steps  →  {ckpt_dir}/{_stem}_step<N>.pt')
     pbar = trange(start_step, train_steps, desc=f"{cfg['agent_type']} c{target_class}")
+
+    # RL training diagnostics accumulated between evals (no extra rollouts —
+    # just the loss/reward already produced by the existing update()/step()
+    # calls), reset after each eval so each history row reports its own window.
+    _loss_buf, _ep_reward_buf = [], []
+    _ep_reward = 0.0
 
     step = start_step
     while step < train_steps:
@@ -486,27 +531,43 @@ def run_drl_training(
             next_state, r, done, _ = env.step(a)
             buffer.push(idx, prev_mask, a, r, env.mask.copy(), done,
                         current_sdt=prev_sdt, next_sdt=next_state[2])
+            _ep_reward += float(r)
 
             if len(buffer) >= batch_size:
                 if demo_buffer is not None and len(demo_buffer) > 0:
                     bc_batch = demo_buffer.sample(batch_size)
                     bc_lambda = max(bc_lambda_end, bc_lambda_start
                                     - (bc_lambda_start - bc_lambda_end) * step / bc_lambda_decay_steps)
-                    agent.update(buffer.sample(batch_size), state_builder,
-                                bc_batch=bc_batch, bc_lambda=bc_lambda)
+                    upd = agent.update(buffer.sample(batch_size), state_builder,
+                                      bc_batch=bc_batch, bc_lambda=bc_lambda)
                 else:
-                    agent.update(buffer.sample(batch_size), state_builder)
+                    upd = agent.update(buffer.sample(batch_size), state_builder)
+                _loss_buf.append(_extract_loss(upd))
 
             state = next_state
             step += 1
             episode_steps += 1
             pbar.update(1)
 
-            # Periodic eval
+            if done:
+                _ep_reward_buf.append(_ep_reward)
+                _ep_reward = 0.0
+
+            # Periodic eval — also the cadence at which the resume/best
+            # checkpoints refresh (eval_every controls both).
             if step % eval_every == 0:
                 metrics = evaluate_agent(agent, val_caches, env_kwargs, env_cls=env_cls)
                 metrics['step']    = step
                 metrics['epsilon'] = epsilon if epsilon is not None else None
+                # RL training diagnostics for this window (since the last eval),
+                # not re-derived from anything — just the loss/reward already
+                # produced above. NaN-safe: empty windows (e.g. eval_every <
+                # one episode) report NaN rather than crashing.
+                metrics['loss_mean'] = (float(np.nanmean(_loss_buf))
+                                        if _loss_buf else float('nan'))
+                metrics['episode_reward_mean'] = (float(np.mean(_ep_reward_buf))
+                                                  if _ep_reward_buf else float('nan'))
+                _loss_buf, _ep_reward_buf = [], []
                 history.append(metrics)
                 improved = metrics['final_dice_mean'] > best_dice
                 if improved:
@@ -519,9 +580,17 @@ def run_drl_training(
                     f"step {step:6d} | init {metrics['init_dice_mean']:.4f} "
                     f"→ final {metrics['final_dice_mean']:.4f} "
                     f"| best-seen {metrics.get('best_dice_mean', float('nan')):.4f} "
-                    f"(Δ {metrics['delta_dice_mean']:+.4f}, HD95 {metrics['final_hd95_mean']:.2f}px)"
+                    f"(Δ {metrics['delta_dice_mean']:+.4f}, HD95 {metrics['final_hd95_mean']:.2f}px, "
+                    f"IoU {metrics['final_iou_mean']:.4f}, BIoU {metrics['final_biou_mean']:.4f})"
                     f"{' ✓' if improved else ''}"
                 )
+
+            # Milestone checkpoint — independent of eval_every / improvement,
+            # a distinct snapshot every `checkpoint_every` steps.
+            if checkpoint_every and step % checkpoint_every == 0:
+                milestone_path = ckpt_dir / f"{_stem}_step{step}.pt"
+                _save_agent(agent, history, best_dice, milestone_path, step=step)
+                pbar.write(f"  [checkpoint] milestone saved → {milestone_path}")
 
             if done or step >= train_steps:
                 break

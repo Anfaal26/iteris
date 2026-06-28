@@ -92,3 +92,73 @@ def shifted(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
     out[y_dst, x_dst] = mask[y_src, x_src]
     return out
 
+
+# ── Eval-only extra metrics (segmentation-literature standard set) ───────────
+# NOT used in the env's per-step reward path (that stays Dice/HD95-only, per
+# the hot-loop cost note on hd95_px above) — call these only at evaluation
+# cadence (evaluate_agent / evaluate_testset / replay_one), once per finished
+# rollout, never per env.step().
+
+def iou_score(m1: np.ndarray, m2: np.ndarray, eps: float = 1e-6) -> float:
+    """IoU / Jaccard index."""
+    m1b = m1.astype(bool); m2b = m2.astype(bool)
+    inter = (m1b & m2b).sum()
+    union = (m1b | m2b).sum()
+    return float((inter + eps) / (union + eps))
+
+
+def precision_recall(pred: np.ndarray, gt: np.ndarray, eps: float = 1e-6):
+    """(Precision/PPV, Recall/Sensitivity) — pred vs gt, both binary."""
+    pred_b = pred.astype(bool); gt_b = gt.astype(bool)
+    tp = (pred_b & gt_b).sum()
+    fp = (pred_b & ~gt_b).sum()
+    fn = (~pred_b & gt_b).sum()
+    precision = (tp + eps) / (tp + fp + eps)
+    recall    = (tp + eps) / (tp + fn + eps)
+    return float(precision), float(recall)
+
+
+def _mask_to_boundary_band(mask: np.ndarray, dilation_px: int) -> np.ndarray:
+    """Boundary band = mask minus its `dilation_px`-eroded core (Cheng et al.
+    2021, the standard practical Boundary-IoU implementation)."""
+    m = mask.astype(bool)
+    if not m.any():
+        return m
+    eroded = ndi.binary_erosion(m, STRUCT, iterations=dilation_px, border_value=0)
+    return m & ~eroded
+
+
+def boundary_iou(pred: np.ndarray, gt: np.ndarray, dilation_px: int = 2,
+                 eps: float = 1e-6) -> float:
+    """Boundary IoU (Cheng, Girshick, Dollár, Kirillov, CVPR 2021): IoU
+    restricted to each mask's own boundary band. The metric where DRL
+    contour-refinement gains are typically most visible (see literature
+    review — PixelDRL-MG, MARL-MambaContour)."""
+    pred_b = _mask_to_boundary_band(pred, dilation_px)
+    gt_b   = _mask_to_boundary_band(gt,   dilation_px)
+    inter = (pred_b & gt_b).sum()
+    union = (pred_b | gt_b).sum()
+    return float((inter + eps) / (union + eps))
+
+
+def mean_surface_distance_px(m1: np.ndarray, m2: np.ndarray) -> float:
+    """Mean Surface Distance / Average Surface Distance (ASD) in pixels —
+    same edge-extraction + EDT approach as hd95_px, but the mean of all
+    boundary-to-boundary distances instead of the 95th percentile. A
+    separate function (not a refactor of hd95_px) so the per-step reward
+    hot path is untouched."""
+    m1b = _largest_cc(m1); m2b = _largest_cc(m2)
+    if not m1b.any() and not m2b.any():
+        return 0.0
+    if not m1b.any() or not m2b.any():
+        return float('nan')
+    edges_1 = m1b ^ ndi.binary_erosion(m1b, STRUCT)
+    edges_2 = m2b ^ ndi.binary_erosion(m2b, STRUCT)
+    if not edges_1.any() or not edges_2.any():
+        return 0.0
+    dt_2 = ndi.distance_transform_edt(~edges_2)
+    dt_1 = ndi.distance_transform_edt(~edges_1)
+    d_12 = dt_2[edges_1]
+    d_21 = dt_1[edges_2]
+    return float(np.mean(np.concatenate([d_12, d_21])))
+

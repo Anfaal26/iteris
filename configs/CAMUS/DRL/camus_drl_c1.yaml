@@ -122,8 +122,9 @@ agents:
     buffer_size:         50000
     prefill_steps:       2000
     max_steps:           10
-    train_steps:         60000
-    eval_every:          2000
+    train_steps:         50000
+    eval_every:           5000
+    checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
@@ -234,8 +235,9 @@ agents:
                                        # downside risk, push more of the training budget into
                                        # exploitation so STOP/minimal-edit-when-already-good is
                                        # reliably learned
-    train_steps:         60000         # new paradigm: allow a longer learning curve
-    eval_every:          2000
+    train_steps:         50000
+    eval_every:           5000
+    checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working

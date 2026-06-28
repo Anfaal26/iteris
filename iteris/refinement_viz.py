@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from .env import SegmentationEnv, dice_score, hd95_px
+from .geometry import iou_score, precision_recall, boundary_iou, mean_surface_distance_px
 from .env_contour_refine import ContourRefineEnv
 
 
@@ -137,6 +138,14 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
     # action_names only meaningful for discrete heads; None signals "continuous"
     # to plot_behaviour so it renders a per-sector magnitude bar instead.
     action_names = list(env_cls.DISCRETE_NAMES) if is_discrete else None
+
+    # Extra literature-standard segmentation metrics (final mask vs GT only —
+    # computed once per finished rollout, not per step; see geometry.py).
+    final_iou       = iou_score(env.mask, sample['gt_mask'])
+    final_precision, final_sensitivity = precision_recall(env.mask, sample['gt_mask'])
+    final_biou      = boundary_iou(env.mask, sample['gt_mask'])
+    final_msd       = mean_surface_distance_px(env.mask, sample['gt_mask'])
+
     return dict(
         sample     = sample,
         masks      = masks,
@@ -153,6 +162,11 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
         value_floored_dice = vf_dice,
         final_hd95 = hd95_px(env.mask, sample['gt_mask']),
         value_floored_hd95 = vf_hd95,
+        final_iou         = final_iou,
+        final_precision   = final_precision,
+        final_sensitivity = final_sensitivity,
+        final_biou        = final_biou,
+        final_msd         = final_msd,
         gain       = final_d - init_d,
         value_floored_gain = vf_dice - init_d,
         n_steps    = len(acts),
@@ -283,6 +297,8 @@ def plot_behaviour(replays, cfg, class_name='', out_path=None):
     print(f'  Mean init Dice  : {np.mean([r["init_dice"] for r in replays]):.4f}')
     print(f'  Mean final Dice : {np.mean([r["final_dice"] for r in replays]):.4f}')
     print(f'  Mean best-seen  : {np.mean([r["best_dice"] for r in replays]):.4f}')
+    print(f'  Mean final IoU  : {np.mean([r["final_iou"] for r in replays]):.4f}')
+    print(f'  Mean final BIoU : {np.mean([r["final_biou"] for r in replays]):.4f}')
     print(f'  STOP-action rate: {stop_rate*100:.0f}%  (rest hit max_steps)')
     print(f'  Mean # steps    : {np.mean([r["n_steps"] for r in replays]):.1f}')
     return fig
@@ -293,13 +309,19 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
     """§10: greedy rollout over the test set → aggregate metrics.
     ``env_cls`` auto-detects from the agent's action-head size if not given."""
     init_d, final_d, best_d, final_h, vf_d = [], [], [], [], []
+    final_iou, final_prec, final_sen, final_biou, final_msd = [], [], [], [], []
     for s in test_samples:
         r = replay_one(agent, s, env_kwargs, env_cls=env_cls)
         init_d.append(r['init_dice']); final_d.append(r['final_dice'])
         best_d.append(r['best_dice']); final_h.append(r['final_hd95'])
         vf_d.append(r['value_floored_dice'])
+        final_iou.append(r['final_iou']); final_prec.append(r['final_precision'])
+        final_sen.append(r['final_sensitivity']); final_biou.append(r['final_biou'])
+        final_msd.append(r['final_msd'])
     fh = np.asarray(final_h, dtype=float)
     fh = fh[~np.isnan(fh)]
+    msd_arr = np.asarray(final_msd, dtype=float)
+    msd_arr = msd_arr[~np.isnan(msd_arr)]
     out = dict(
         init_dice_mean  = float(np.mean(init_d)),
         final_dice_mean = float(np.mean(final_d)),       # raw last-state deploy (can go < init)
@@ -310,5 +332,11 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
         value_floored_delta_mean = float(np.mean([v - i for v, i in zip(vf_d, init_d)])),
         final_hd95_mean = float(fh.mean()) if fh.size else float('nan'),
         delta_dice_mean = float(np.mean([f - i for f, i in zip(final_d, init_d)])),
+        # Literature-standard extra metrics (final mask vs GT, full test set).
+        final_iou_mean         = float(np.mean(final_iou)),
+        final_precision_mean   = float(np.mean(final_prec)),
+        final_sensitivity_mean = float(np.mean(final_sen)),
+        final_biou_mean        = float(np.mean(final_biou)),
+        final_msd_mean         = float(msd_arr.mean()) if msd_arr.size else float('nan'),
     )
     return out
