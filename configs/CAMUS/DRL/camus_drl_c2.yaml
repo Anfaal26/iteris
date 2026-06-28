@@ -8,7 +8,7 @@
 target_class:        2
 class_name:          LV_epi
 dataset:             CAMUS
-baseline_cfg_name:   camus_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
+baseline_cfg_name:   CAMUS/camus_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
 baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_lite_unet_best.pt
 
 # ── Reward shaping — LV_epi rationale ────────────────────────────────────────

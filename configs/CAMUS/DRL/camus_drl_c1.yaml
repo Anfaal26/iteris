@@ -1,60 +1,68 @@
-﻿# CAMUS DRL — Class 3: LA (left atrium)
+﻿# CAMUS DRL — Class 1: LV_endo (left ventricular endocardium)
 #
 # Load with:
 #   from iteris.config import load_drl_class_config, resolve_agent_config
-#   cfg_full = load_drl_class_config('configs/camus_drl_c3.yaml')
+#   cfg_full = load_drl_class_config('configs/camus_drl_c1.yaml')
 #   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
+#   results  = run_drl_training(cfg, train_samples, val_samples)
+#
+# The ``agents:`` block contains per-algorithm hyperparams.
+# All env/reward keys at the top level are shared across agents.
 
-target_class:        3
-class_name:          LA
+target_class:        1
+class_name:          LV_endo
 dataset:             CAMUS
-baseline_cfg_name:   camus_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
+baseline_cfg_name:   CAMUS/camus_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
 baseline_checkpoint: /kaggle/input/camus-baseline-outputs/camus_lite_unet_best.pt
 
-# ── Reward shaping — LA rationale ─────────────────────────────────────────────
-# Week-1 baseline: Dice 0.896, HD95 ~10 px.  The left atrium has high shape
-# variability across patients and views — some are nearly circular, others
-# highly elongated.  HD95 is less reliable here because a single outlier
-# boundary pixel can spike HD95 regardless of overall segmentation quality.
-# Pure Dice-delta is safer: it rewards overlap improvement consistently.
-# hd_norm kept in config for potential ablations using dice_hd_composite.
-reward_mode:   dice_hd_composite  # LA: add HD95 signal to prevent mask ballooning.
-                                  # Pure dice_delta was failing (curve degraded to 0.848).
-                                  # The alpha/beta balance keeps Dice dominant but the
-                                  # HD95 term prevents boundary blow-outs.
-reward_alpha:  0.7               # 70% Dice — primary overlap objective
-reward_beta:   0.3               # 30% HD95 — boundary precision guard
-hd_norm:       22.0              # 2× expected HD95 of ~10 px
-reward_potential_scale: 10.0     # PBRS Φ scale (dice_pbrs/dice_hd_pbrs only); baseline-centred
+# ── Reward shaping — LV_endo rationale ───────────────────────────────────────
+# Week-1 baseline: Dice 0.938, HD95 ~6 px.  Pure Dice-delta gives almost no
+# gradient signal at this level (step gain ≈ 0.003–0.005).  The HD95 component
+# adds boundary-precision signal that remains informative even at high Dice.
+# hd_norm = 2× mean HD95 so a typical improvement (6→4 px) contributes ~0.17
+# to the composite reward — meaningful without dominating.
+reward_mode:   dice_hd_composite
+reward_alpha:  0.6               # 60 % Dice — still the primary target metric
+reward_beta:   0.4               # 40 % HD95 — boundary precision
+hd_norm:       12.0              # normalise HD95; 12 ≈ 2× mean HD95 of ~6 px
+# PBRS potential scale (used only by dice_pbrs / dice_hd_pbrs agents). The
+# baseline-centred potential Φ=K·(ΔDice…) needs K≫1 to lift the tiny per-step
+# Dice deltas (±0.003–0.01 at this ~0.94 baseline) above the Q-net noise floor.
+reward_potential_scale: 10.0
 
 # ── Environment ───────────────────────────────────────────────────────────────
 image_size:        256
-max_steps:         30         # LA corrections are more complex than LV; more headroom
+max_steps:         20
 shift_px:          2
 sdt_clip:          20.0
 reward_clip:       1.0
 min_area_fraction: 0.01
-stop_eps_dice:     0.005      # 0.001→0.005: episodes were terminating in ~3 steps
-                              # before the agent could explore meaningful changes.
-stop_eps_hd:       0.5
+stop_eps_dice:     0.005      # 0.0005→0.005: a 1-px cardinal op on LV_endo changes
+                              # Dice by ~0.003–0.007. 0.0005 caused false-convergence
+                              # in 3 steps before the agent could explore.
+stop_eps_hd:       0.3
 stop_n:            3
 
 # ── Hard sample mining ────────────────────────────────────────────────────────
-# Run showed only 7.3% of samples have init Dice < 0.90.
-# scale=10 made Dice=0.80 ~100× the weight of Dice=0.95 — so aggressive the
-# agent never saw the easy majority, never learned STOP-when-good, and degraded
-# good masks at eval. scale=3 focuses the improvable minority while keeping the
-# easy majority represented (see camus_drl_c1.yaml).
+# Mild up-weighting of the improvable tail WITHOUT starving the agent of the
+# easy, already-good masks that dominate the val set. scale=10 was far too
+# aggressive (dice=0.75 got ~100× the weight of dice=0.95): the agent trained
+# almost exclusively on hard cases, never learned "STOP when already good", and
+# at eval applied aggressive edits to good masks → final Dice BELOW baseline.
+# scale=3 gives dice=0.75 ~1.8× the weight of dice=0.95 — enough focus on the
+# tail while keeping the easy majority well represented so STOP-when-good is
+# learned. This train/eval distribution match is essential to beating baseline.
 hard_mining_scale: 3.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
+# resolve_agent_config() merges the chosen block over the top-level dict.
 agents:
 
   DDPG:
     agent_type:          DDPG
-    cont_morph_scale:    0.25
-    cont_trans_scale:    0.02
-    ou_sigma:            [0.025, 0.002, 0.002]
+    cont_morph_scale:    0.25        # ±5 px dilation/erosion  (at sdt_clip=20)
+    cont_trans_scale:    0.02        # ±5 px translation        (at H=256)
+    ou_sigma:            [0.025, 0.002, 0.002]   # [morph, dy, dx]
     ou_theta:            0.15
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3
@@ -63,7 +71,7 @@ agents:
     actor_freeze_steps:  2000
     embed_dim:           256
     batch_size:          64
-    buffer_size:         50000     # 10000→50000: retains 5× more experience
+    buffer_size:         50000
     prefill_steps:       2000
     train_steps:         100000
     eval_every:          2500
@@ -71,10 +79,16 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── TD3 (robust DDPG) on contour env — CURATED FOR LA (left atrium) ─────────
-  # LA tends to balloon, so a slightly stronger spline smoothing keeps the
-  # deformed contour anatomically plausible. 16 sectors of independent boundary
-  # control surpass the global-op DDPG ceiling; TD3 stabilises the value est.
+  # ── TD3 (robust DDPG) on the contour env — CURATED FOR LV_endo ──────────────
+  # WHY TD3-on-contour beats the 3-D global DDPG above: a global SDT-threshold +
+  # translation action cannot fix REGIONAL over/under-segmentation — its best
+  # response to a near-perfect U-Net mask is ~identity, so it is capped at
+  # baseline. The contour action deforms 16 independent angular sectors of the
+  # boundary, so heterogeneous errors become correctable. TD3 (twin critics +
+  # target smoothing + delayed updates) removes the Q-overestimation that makes
+  # plain DDPG stall on this tiny, near-optimal-baseline reward signal.
+  # LV_endo is large and smooth -> dense points (32), 16 sectors, dice_hd_pbrs
+  # (HD95 term keeps the boundary crisp), moderate per-step deformation.
   TD3:
     agent_type:          TD3
     env_class:           contour
@@ -82,17 +96,19 @@ agents:
     reward_potential_scale: 10.0
     reward_step_penalty:  0.0
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    false         # OFF for LA (TD3) — same INERT prob_map as the DuelingDDQN block (Pillar4 2026-06-25: band_frac=0.0063, the most binary of the 3 CAMUS classes). On TD3 this also poisons the BC warm-start: `_apply_continuous` multiplies the actor's displacement by the gate (env_contour_refine.py:498) and bc_demo.py inherits the same env_kwargs+prob_map, so both the oracle demos and the actor collapse to identity. Re-enable (with the DuelingDDQN block) only after the label-smoothing lite retrain is confirmed USABLE.
+    uncertainty_gate:    false         # OFF for LV_endo (TD3) — same INERT prob_map as the DuelingDDQN block (Pillar4 2026-06-25: band_frac=0.0073, ~binary). On TD3 this is worse than wasteful: `_apply_continuous` multiplies the actor's displacement by the gate (env_contour_refine.py:498), so an INERT gate zeroes the actor's moves AND zeroes the BC oracle's trial moves (bc_demo.py inherits env_kwargs+prob_map) — the actor is BC-pretrained toward identity and then can't move at all. Re-enable (together with the DuelingDDQN block) only after the label-smoothing lite retrain is confirmed USABLE.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10
-    disable_auto_stop:    false
+    disable_auto_stop:    false      # no STOP action in continuous mode; converge-and-hold
     fail_thresh:         0.02          # interim Pillar-2 safety net: TD3 has no learned STOP and _check_termination's dice_converged branch commits whatever the contour converged to, even below baseline. Terminate early if Dice sits >0.02 below baseline for fail_n steps so a drifting actor can't lock in a sub-baseline final mask (the deploy number).
     fail_n:              2
+    # contour geometry
     n_points:            32
     cont_sectors:        16
     disp_px:             2.0
-    spline_smooth:       2.5
+    spline_smooth:       2.0
+    # TD3 hyperparams
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3
     gamma:               0.99
@@ -122,11 +138,20 @@ agents:
 
   DQN:
     agent_type:          DQN
-    # ── Reward: potential-based shaping (see camus_drl_c1.yaml for rationale) ──
+    # ── Reward: potential-based shaping (replaces the path-dependent
+    #    Dice_t−Dice_0 + terminal_bonus hack) ──
+    # r_t = γ·Φ(s_{t+1}) − Φ(s_t), Φ = α·Dice + β·(1 − HD95/hd_norm).
+    # Telescopes EXACTLY to γ^T·Φ_T − Φ_0 → the discounted return IS the final
+    # mask's quality gain over baseline. Dense per-action credit, provably
+    # policy-invariant (Ng et al. 1999), no spike-then-fade exploit. The γ<1
+    # factor makes dawdling at a good state cost (γ−1)Φ per step, so STOP (reward
+    # 0) is the optimal exit once no further gain is reachable — no explicit step
+    # penalty or terminal bonus needed.
     reward_mode:          dice_hd_pbrs
     reward_step_penalty:  0.0
-    terminal_bonus_scale: 0.0     # ignored under pbrs
+    terminal_bonus_scale: 0.0     # ignored under pbrs; kept 0 for clarity
     disable_auto_stop:    true    # agent's STOP action decides termination
+
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -145,11 +170,12 @@ agents:
 
   DuelingDDQN_GLOBAL:
     agent_type:          DUELING
-    # ── Reward: potential-based shaping (see camus_drl_c1.yaml for rationale) ──
+    # ── Reward: potential-based shaping (see DQN block above) ──
     reward_mode:          dice_hd_pbrs
     reward_step_penalty:  0.0
-    terminal_bonus_scale: 0.0     # ignored under pbrs
+    terminal_bonus_scale: 0.0     # ignored under pbrs; kept 0 for clarity
     disable_auto_stop:    true    # agent's STOP action decides termination
+
     lr:                  1.0e-4
     gamma:               0.99
     tau:                 0.005
@@ -166,23 +192,30 @@ agents:
     seed:                42
     checkpoint_dir:      /kaggle/working
 
-  # ── DuelingDDQN (discrete contour refinement) — ACTIVE discrete agent ─────────
-  # Dueling Double DQN on ContourRefineEnv (LA — large; stronger smoothing curbs ballooning): 18 discrete actions =
-  # push each of 8 angular boundary sectors OUT/IN + smooth + stop. Baseline-centred
-  # PBRS reward. This is the discrete counterpart to TD3 (continuous contour).
+  # ── Control-point CONTOUR refinement (Paradigm 3) ────────────────────────────
+  # Local boundary deformation instead of global morphology. The mask boundary is
+  # N control points on a periodic spline; the agent pushes contiguous arcs
+  # (sectors) of the contour outward/inward along their normals, smooths, or stops.
+  # This removes the global-op ceiling: heterogeneous boundary errors (over-seg
+  # here, under-seg there) become independently correctable. Selected by
+  # `env_class: contour`; same 4-channel state + discrete agent as the default env,
+  # so the network/buffer/loops are unchanged. Run with:
+  #   cfg = resolve_agent_config(load_drl_class_config('configs/camus_drl_c1.yaml'),
+  #                              'DuelingDDQN')
   DuelingDDQN:
     agent_type:          DUELING
     max_steps         : 10            # cap excursion past peak (agent doesn't always STOP)
-    env_class:           contour
-    n_points:            32
+    env_class:           contour       # → ContourRefineEnv (control points + spline)
+    # ── contour geometry ──
+    n_points:            32            # LV_endo is large & smooth → denser sampling
     disp_px           : 2.0          # match TD3 + headroom diagnostic
-    spline_smooth:       2.5
-    smooth_lambda:       0.5
+    spline_smooth:       2.0           # periodic-spline smoothing (s in splprep)
+    smooth_lambda:       0.5           # Laplacian strength for the SMOOTH action
+    # ── reward shaping (same machinery as the global-op agents) ──
     reward_mode:          dice_hd_pbrs
-    reward_potential_scale: 10.0
     reward_step_penalty:  0.0
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    false         # OFF for LA — lite U-Net's prob_map is INERT here (Pillar4, 2026-06-25: band_frac=0.0063, the most binary of the 3 CAMUS classes), so the gate clamps edit magnitude to ~0 at ~99% of contour points, blocking the confirmed +0.049 realistic headroom. Re-enable only after the lite net is retrained with label smoothing to produce a graded prob_map.
+    uncertainty_gate:    false         # OFF for LV_endo — lite U-Net's prob_map is INERT here (Pillar4, 2026-06-25: band_frac=0.0073, ~binary), so the gate clamps edit magnitude to ~0 at ~99% of contour points, blocking the confirmed +0.047 realistic headroom. Re-enable only after the lite net is retrained with label smoothing to produce a graded prob_map.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10
@@ -201,7 +234,7 @@ agents:
                                        # downside risk, push more of the training budget into
                                        # exploitation so STOP/minimal-edit-when-already-good is
                                        # reliably learned
-    train_steps:         60000
+    train_steps:         60000         # new paradigm: allow a longer learning curve
     eval_every:          2000
     cache_sdt:           true
     seed:                42

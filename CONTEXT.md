@@ -24,7 +24,7 @@ The agent starts from a U-Net mask and deforms its **boundary contour** locally.
 
 Angular (not index-based) sectoring keeps each action tied to a fixed spatial direction across samples → learnable.
 
-**Why contour, not global morphology:** global dilate/erode/shift cannot fix masks that are over-segmented in one region and under-segmented in another → capped at baseline. Global morphology (the old `SegmentationEnv`) is **archived** (`iteris/archive_paradigm_a/`) and kept only as a negative-control ablation. Pixel-by-pixel boundary tracing was retired earlier (`iteris/archive/paradigm1_boundary_tracing/`).
+**Why contour, not global morphology:** global dilate/erode/shift cannot fix masks that are over-segmented in one region and under-segmented in another → capped at baseline. Global morphology (the old `SegmentationEnv`) is **archived** (`iteris/archive/paradigm_a/`) and kept only as a negative-control ablation. Pixel-by-pixel boundary tracing was retired earlier (`iteris/archive/paradigm1_boundary_tracing/`).
 
 ---
 
@@ -79,14 +79,14 @@ Centring (`Φ_0 = 0`) removes the discount drag that made an un-centred `Φ=Dice
 | `iteris/models.py` | `AttentionResUNet` (competitor) + `LiteUNet` (RL baseline); `build_model` |
 | `iteris/warm_start.py` | U-Net inference → init masks + prob-maps |
 | `iteris/refinement_viz.py` | Replays / comparison / playback / behaviour / test eval (discrete + continuous) |
-| `iteris/archive_paradigm_a/` | Global-morphology `SegmentationEnv` — ablation only |
+| `iteris/archive/paradigm_a/` | Global-morphology `SegmentationEnv` — ablation only |
 | `iteris/archive/paradigm1_boundary_tracing/` | Retired boundary-tracing paradigm |
-| `configs/{camus,brisc}_lite.yaml` | Lite-baseline training configs (`model: lite_unet`) |
-| `configs/camus_drl_c{1,2,3}.yaml`, `brisc_drl_*.yaml` | DRL configs (DuelingDDQN + TD3 active; `*_GLOBAL`/DQN/DDPG = ablation) |
-| `notebooks/01_camus_lite.ipynb`, `02_brisc_lite.ipynb` | Train the **lite** baselines (RL warm-start) |
-| `notebooks/03_camus_attnunet.ipynb`, `04_brisc_attnunet.ipynb` | Train the **attention** baselines (competitor) |
-| `notebooks/03{a,b,c}_camus_drl_*.ipynb`, `04_brisc_drl.ipynb` | DRL training (Kaggle) |
-| `notebooks/local_{camus,brisc}_drl.ipynb` | DRL training (local fyp_env GPU) |
+| `configs/CAMUS/camus_lite.yaml`, `configs/BRISC/brisc_lite.yaml` | Lite-baseline training configs (`model: lite_unet`) |
+| `configs/CAMUS/DRL/camus_drl_c{1,2,3}.yaml`, `configs/BRISC/DRL/brisc_drl_*.yaml` | DRL configs (DuelingDDQN + TD3 active; `*_GLOBAL`/DQN/DDPG = ablation) |
+| `notebooks/unet/01_camus_lite.ipynb`, `unet/02_brisc_lite.ipynb` | Train the **lite** baselines (RL warm-start) |
+| `notebooks/unet/03_camus_attnunet.ipynb`, `unet/04_brisc_attnunet.ipynb` | Train the **attention** baselines (competitor) |
+| `notebooks/camus/drl/03{a,b,c}_camus_drl_*.ipynb`, `notebooks/brisc/drl/04_brisc_drl.ipynb` | DRL training (Kaggle) |
+| `notebooks/local/local_{camus,brisc}_drl.ipynb` | DRL training (local fyp_env GPU) |
 
 ---
 
@@ -99,7 +99,7 @@ Centring (`Φ_0 = 0`) removes the discount drag that made an un-centred `Φ=Dice
 | Baseline-centred PBRS reward + 5-channel state | ✅ |
 | Lite U-Net model + configs (`LiteUNet`, `*_lite.yaml`) | ✅ |
 | Ceiling diagnostic (`headroom_report`) | ✅ verified on synthetic (+0.097) |
-| Paradigm A (global morph) archived | ✅ `archive_paradigm_a/` |
+| Paradigm A (global morph) archived | ✅ `archive/paradigm_a/` |
 | Notebooks/configs cleaned to DuelingDDQN + TD3 only | ✅ |
 | Lite U-Net baselines trained (CAMUS, BRISC) | ⏳ this week |
 | DRL runs (DuelingDDQN + TD3 × CAMUS c1/c2/c3 + BRISC) | ⏳ this week |

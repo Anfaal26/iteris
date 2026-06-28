@@ -3,7 +3,7 @@ from typing import Tuple, Dict
 import numpy as np
 import scipy.ndimage as ndi
 
-from ..geometry import (STRUCT, SE_N, SE_S, SE_W, SE_E, SE_NE, SE_NW, SE_SE,
+from ...geometry import (STRUCT, SE_N, SE_S, SE_W, SE_E, SE_NE, SE_NW, SE_SE,
                         SE_SW, dice_score, _largest_cc, hd95_px, signed_dt, shifted)
 
 

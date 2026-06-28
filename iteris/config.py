@@ -22,7 +22,7 @@ def load_config(path: Union[str, Path]) -> dict:
     Load a YAML config and validate the required keys.
 
     Override any field from the notebook after loading by mutating the dict:
-        cfg = load_config('configs/camus.yaml')
+        cfg = load_config('configs/CAMUS/camus.yaml')
         cfg['data_root'] = '/some/other/path'
 
     Raises

@@ -1,53 +1,48 @@
-# BRISC DRL — Glioma (class filter: tumor_type == 'glioma')
+# BRISC DRL — Meningioma (class filter: tumor_type == 'meningioma')
 #
-# Glioma characteristics:
-#   - Diffuse, infiltrative margins, no sharp boundary
-#   - Can be very large (perimeter up to ~500-600px at 256×256)
-#   - Most variable shape across all tumor types — hardest for tracing
-#   - U-Net init Dice likely lower than meningioma/pituitary
-#   - Can occur anywhere in the cerebral hemispheres
+# Meningioma characteristics:
+#   - Well-defined, often spherical or lobulated
+#   - Strong contrast enhancement — clear boundary in T1+Gd MRI
+#   - Medium size: diameter ~40-80px at 256×256 → perimeter ~125-250px
+#   - Roughly convex — easiest case for boundary tracing
+#   - Located at brain periphery (adjacent to dura)
 #
 # Load with:
-#   cfg_full = load_drl_class_config('configs/brisc_drl_glioma.yaml')
+#   cfg_full = load_drl_class_config('configs/brisc_drl_meningioma.yaml')
 #   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
 
 target_class:        1
-class_name:          glioma
-tumor_type_filter:   glioma          # filters warm_start samples by tumor_type field
+class_name:          meningioma
+tumor_type_filter:   meningioma
 dataset:             BRISC
-baseline_cfg_name:   brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
+baseline_cfg_name:   BRISC/brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
 baseline_checkpoint: /kaggle/input/brisc-baseline-outputs/brisc_lite_unet_best.pt
 
-# ── Reward shaping — glioma rationale ────────────────────────────────────────
-# Gliomas have diffuse boundaries — Dice fluctuates more than meningioma.
-# IoU-delta is smoother for irregular, large structures.
 reward_mode:   iou_delta
 reward_alpha:  1.0
 reward_beta:   0.0
-hd_norm:       30.0               # larger normalization — glioma HD95 can be high
+hd_norm:       20.0
 reward_potential_scale: 15.0      # PBRS Φ scale (dice_pbrs only); baseline-centred
 
-# ── Environment (shared by all agents — SegmentationEnv v4) ─────────────────
 image_size:        256
 max_steps:         20
-shift_px:          2               # keep shifts — glioma can have spatial offsets
-sdt_clip:          20.0
+shift_px:          1
+sdt_clip:          15.0
 reward_clip:       1.0
-min_area_fraction: 0.01
+min_area_fraction: 0.005
 stop_eps_dice:     0.001
 stop_eps_hd:       0.5
 stop_n:            3
 
-hard_mining_scale: 5.0             # re-enable — glioma hard cases are tractable
+hard_mining_scale: 3.0
 
-# ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
 
   DDPG:
     agent_type:          DDPG
-    cont_morph_scale:    0.25
-    cont_trans_scale:    0.02
-    ou_sigma:            [0.025, 0.002, 0.002]
+    cont_morph_scale:    0.15
+    cont_trans_scale:    0.01
+    ou_sigma:            [0.015, 0.001, 0.001]
     ou_theta:            0.15
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3
@@ -65,13 +60,12 @@ agents:
     checkpoint_dir:      /kaggle/working
 
   # ── Local mask refinement (SegmentationEnv v4, 24 actions) ───────────────────
-  # Glioma: diffuse margins, large/irregular shape — gamma=0.97 keeps a shorter
-  # effective horizon, with the longer 60k train budget for the hardest class.
+  # Meningioma: medium, convex, well-defined boundary — easiest BRISC class.
   # STOP-incentive shaping (see camus_drl_c1.yaml for full rationale): breaks
   # the baseline-indifference trap so "reach best mask, then STOP" is optimal.
   # Replaces the retired Paradigm-1 boundary-tracing config (env_class:
   # contour_tracing no longer exists — see archive/paradigm1_boundary_tracing/).
-  # ── TD3 (robust DDPG) on contour env — CURATED FOR glioma (irregular) ───────
+  # ── TD3 (robust DDPG) on contour env — CURATED FOR meningioma (rounder) ─────
   TD3:
     agent_type:          TD3
     env_class:           contour
@@ -125,12 +119,12 @@ agents:
     tau:                 0.005
     embed_dim:           128
     batch_size:          64
-    buffer_size:         50000
+    buffer_size:         40000
     prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 30000
-    train_steps:         60000    # longer — glioma is the hardest class
+    epsilon_decay_steps: 25000
+    train_steps:         50000
     eval_every:          5000
     seed:                42
     checkpoint_dir:      /kaggle/working
@@ -145,18 +139,18 @@ agents:
     tau:                 0.005
     embed_dim:           128
     batch_size:          64
-    buffer_size:         50000
+    buffer_size:         40000
     prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 30000
-    train_steps:         60000
+    epsilon_decay_steps: 25000
+    train_steps:         50000
     eval_every:          5000
     seed:                42
     checkpoint_dir:      /kaggle/working
 
   # ── DuelingDDQN (discrete contour refinement) — ACTIVE discrete agent ─────────
-  # Dueling Double DQN on ContourRefineEnv (glioma — irregular): 18 discrete actions =
+  # Dueling Double DQN on ContourRefineEnv (meningioma — rounder): 18 discrete actions =
   # push each of 8 angular boundary sectors OUT/IN + smooth + stop. Baseline-centred
   # PBRS reward. This is the discrete counterpart to TD3 (continuous contour).
   DuelingDDQN:

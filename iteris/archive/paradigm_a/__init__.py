@@ -8,6 +8,6 @@ The live refinement paradigm is the contour env (iteris.env_contour_refine).
 Kept here so the failed global-morphology runs remain reproducible as an
 ablation / negative control. Import explicitly:
 
-    from iteris.archive_paradigm_a import SegmentationEnv
+    from iteris.archive.paradigm_a import SegmentationEnv
 """
 from .segmentation_env import SegmentationEnv

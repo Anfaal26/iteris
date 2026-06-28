@@ -14,7 +14,7 @@ subprocess (not multiprocessing.Process) is used deliberately:
 Usage (one call per GPU, launched concurrently):
     CUDA_VISIBLE_DEVICES=0 python scripts/run_drl_config.py \\
         --pkg-root /kaggle/input/.../iteris-pkg \\
-        --drl-config configs/camus_drl_c1.yaml --agent TD3 \\
+        --drl-config configs/CAMUS/DRL/camus_drl_c1.yaml --agent TD3 \\
         --data-root /kaggle/input/.../CAMUS \\
         --checkpoint /kaggle/input/.../camus_lite_unet_best.pt \\
         --checkpoint-dir /kaggle/working/c1_td3

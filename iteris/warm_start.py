@@ -38,7 +38,7 @@ def precompute_init_masks(
 
     Parameters
     ----------
-    baseline_cfg        : the baseline YAML config (e.g. configs/camus.yaml).
+    baseline_cfg        : the baseline YAML config (e.g. configs/CAMUS/camus.yaml).
     baseline_checkpoint : path to camus_best.pt produced by Week 1.
     target_class        : class index to binarise to (1=LV_endo, 2=LV_epi, 3=LA).
     min_area_fraction   : drop samples whose GT structure covers less than this

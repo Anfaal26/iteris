@@ -20,7 +20,7 @@
 target_class:        1
 class_name:          tumor
 dataset:             BRISC
-baseline_cfg_name:   brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
+baseline_cfg_name:   BRISC/brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
 baseline_checkpoint: /kaggle/input/brisc-baseline-outputs/brisc_lite_unet_best.pt
 
 # ── Reward shaping — tumor rationale ─────────────────────────────────────────

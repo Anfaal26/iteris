@@ -18,7 +18,7 @@ access to your deployed frontend's origin, e.g.
 
 Optional: set `HF_REPO_BRISC_CLASSIFIER` to a repo containing
 `brisc_tumor_classifier_best.pt` (see `iteris/classifier.py` and
-`notebooks/05_brisc_tumor_classifier.ipynb`) to enable real tumor-type
+`notebooks/unet/05_brisc_tumor_classifier.ipynb`) to enable real tumor-type
 labels (glioma/meningioma/pituitary) on BRISC predictions instead of the
 "Tumor (unclassified)" placeholder. Unset = falls back gracefully.
 

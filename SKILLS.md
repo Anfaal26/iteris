@@ -23,9 +23,9 @@ DRL agent (`DuelingDDQN` discrete or `TD3` continuous) refines a **lite U-Net** 
 | BC warm-start demos | `iteris/bc_demo.py` |
 | Deploy-time replay/eval + value-floored selector | `iteris/refinement_viz.py` |
 | Models (LiteUNet, AttentionResUNet) | `iteris/models.py` |
-| Configs (one YAML block per dataset×agent) | `configs/{camus,brisc}_{lite,drl_*}.yaml` |
+| Configs (one YAML block per dataset×agent) | `configs/{CAMUS,BRISC}/{,DRL/}{camus,brisc}_{lite,drl_*}.yaml` |
 | Back-compat shim for old global-morph env | `iteris/env.py` (do not add new logic here) |
-| Archived Paradigm A (global morphology, ablation only) | `iteris/archive_paradigm_a/` |
+| Archived Paradigm A (global morphology, ablation only) | `iteris/archive/paradigm_a/` |
 | Multi-GPU concurrent runner | `scripts/run_drl_config.py` |
 
 Config resolution: `resolve_agent_config(load_drl_class_config(path), AGENT_NAME)`. Artefacts are model-suffixed via `utils.model_suffix` so lite/attention checkpoints never collide.

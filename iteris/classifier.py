@@ -9,7 +9,7 @@ classifier directly on that label — no extra annotation needed.
 
 Deliberately NOT using an ImageNet-pretrained backbone: those expect 3-channel
 RGB with ImageNet normalisation, which would fight the project's existing
-1-channel z-score preprocessing (transforms.py / configs/brisc.yaml) and break
+1-channel z-score preprocessing (transforms.py / configs/BRISC/brisc.yaml) and break
 train/serve consistency with the FastAPI backend (server/app/inference.py).
 A compact from-scratch CNN keeps the same preprocessing everywhere.
 """

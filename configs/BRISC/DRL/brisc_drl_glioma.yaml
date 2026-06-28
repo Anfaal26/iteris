@@ -1,48 +1,53 @@
-# BRISC DRL — Pituitary Tumor (class filter: tumor_type == 'pituitary')
+# BRISC DRL — Glioma (class filter: tumor_type == 'glioma')
 #
-# Pituitary characteristics:
-#   - Small: diameter ~15-25px at 256×256 → perimeter ~47-78px
-#   - Compact, relatively well-defined
-#   - Fixed anatomical location: sella turcica (bottom-center of brain)
-#   - Very small area — 1 bad step can drop Dice significantly
-#   - U-Net init generally reliable due to consistent location
+# Glioma characteristics:
+#   - Diffuse, infiltrative margins, no sharp boundary
+#   - Can be very large (perimeter up to ~500-600px at 256×256)
+#   - Most variable shape across all tumor types — hardest for tracing
+#   - U-Net init Dice likely lower than meningioma/pituitary
+#   - Can occur anywhere in the cerebral hemispheres
 #
 # Load with:
-#   cfg_full = load_drl_class_config('configs/brisc_drl_pituitary.yaml')
+#   cfg_full = load_drl_class_config('configs/brisc_drl_glioma.yaml')
 #   cfg      = resolve_agent_config(cfg_full, AGENT_NAME)
 
 target_class:        1
-class_name:          pituitary
-tumor_type_filter:   pituitary
+class_name:          glioma
+tumor_type_filter:   glioma          # filters warm_start samples by tumor_type field
 dataset:             BRISC
-baseline_cfg_name:   brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
+baseline_cfg_name:   BRISC/brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
 baseline_checkpoint: /kaggle/input/brisc-baseline-outputs/brisc_lite_unet_best.pt
 
-reward_mode:   iou_delta           # smoother than Dice for very small structures
+# ── Reward shaping — glioma rationale ────────────────────────────────────────
+# Gliomas have diffuse boundaries — Dice fluctuates more than meningioma.
+# IoU-delta is smoother for irregular, large structures.
+reward_mode:   iou_delta
 reward_alpha:  1.0
 reward_beta:   0.0
-hd_norm:       10.0                # tighter — 5px is catastrophic at 15-25px scale
-reward_potential_scale: 15.0       # PBRS Φ scale (dice_pbrs only); baseline-centred
+hd_norm:       30.0               # larger normalization — glioma HD95 can be high
+reward_potential_scale: 15.0      # PBRS Φ scale (dice_pbrs only); baseline-centred
 
+# ── Environment (shared by all agents — SegmentationEnv v4) ─────────────────
 image_size:        256
 max_steps:         20
-shift_px:          1
-sdt_clip:          10.0            # tighter SDT range for very small structures
+shift_px:          2               # keep shifts — glioma can have spatial offsets
+sdt_clip:          20.0
 reward_clip:       1.0
-min_area_fraction: 0.002           # keep tiny pituitaries (~6×6px minimum)
-stop_eps_dice:     0.002
+min_area_fraction: 0.01
+stop_eps_dice:     0.001
 stop_eps_hd:       0.5
-stop_n:            2               # quick convergence detection for small structures
+stop_n:            3
 
-hard_mining_scale: 2.0             # moderate — pituitary hard cases mostly solvable
+hard_mining_scale: 5.0             # re-enable — glioma hard cases are tractable
 
+# ── Per-agent hyperparams ─────────────────────────────────────────────────────
 agents:
 
   DDPG:
     agent_type:          DDPG
-    cont_morph_scale:    0.10       # finer morph scale — tiny structure needs precision
-    cont_trans_scale:    0.005      # very fine translation for small target
-    ou_sigma:            [0.01, 0.0005, 0.0005]
+    cont_morph_scale:    0.25
+    cont_trans_scale:    0.02
+    ou_sigma:            [0.025, 0.002, 0.002]
     ou_theta:            0.15
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3
@@ -60,16 +65,13 @@ agents:
     checkpoint_dir:      /kaggle/working
 
   # ── Local mask refinement (SegmentationEnv v4, 24 actions) ───────────────────
-  # Pituitary: small and compact, fixed anatomical location — gamma=0.99 for a
-  # longer-horizon view despite short episodes; fewer train steps since this
-  # class converges fastest.
+  # Glioma: diffuse margins, large/irregular shape — gamma=0.97 keeps a shorter
+  # effective horizon, with the longer 60k train budget for the hardest class.
   # STOP-incentive shaping (see camus_drl_c1.yaml for full rationale): breaks
   # the baseline-indifference trap so "reach best mask, then STOP" is optimal.
   # Replaces the retired Paradigm-1 boundary-tracing config (env_class:
   # contour_tracing no longer exists — see archive/paradigm1_boundary_tracing/).
-  # ── TD3 (robust DDPG) on contour env — CURATED FOR pituitary (smallest) ─────
-  # Smallest structures (~15-25 px): fewest sectors (10), fewer points (16),
-  # smallest displacement (1.0 px) so a single edit cannot overshoot the target.
+  # ── TD3 (robust DDPG) on contour env — CURATED FOR glioma (irregular) ───────
   TD3:
     agent_type:          TD3
     env_class:           contour
@@ -82,10 +84,10 @@ agents:
     gate_hi:             0.65
     gate_margin:         0.10
     disable_auto_stop:    false
-    n_points          : 24          # small structure (~15-25 px) — fewer points
-    cont_sectors:        10
-    disp_px           : 1.5           # smaller push so one bad edit can't overshoot
-    spline_smooth     : 0.0     # NO smoothing
+    n_points          : 32          # match headroom diagnostic; preserve tumour shape
+    cont_sectors:        12
+    disp_px           : 2.0           # bigger push so per-step Dice change clears Q-noise
+    spline_smooth     : 0.0     # NO smoothing — irregular boundaries need every detail
     actor_lr:            1.0e-4
     critic_lr:           1.0e-3
     gamma:               0.99
@@ -98,7 +100,7 @@ agents:
     batch_size:          64
     buffer_size:         50000
     prefill_steps:       2000
-    max_steps         : 8             # tighter — small targets degrade faster
+    max_steps         : 10            # cap excursion past peak
     train_steps:         60000
     eval_every:          2000
     cache_sdt:           true
@@ -119,16 +121,16 @@ agents:
     disable_auto_stop:   true
     terminal_bonus_scale: 3.0
     lr:                  1.0e-4
-    gamma:               0.99
+    gamma:               0.97
     tau:                 0.005
     embed_dim:           128
     batch_size:          64
-    buffer_size:         30000   # smaller — short episodes fill buffer quickly
-    prefill_steps:       1000
+    buffer_size:         50000
+    prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 20000
-    train_steps:         40000   # fewer steps — compact structure converges faster
+    epsilon_decay_steps: 30000
+    train_steps:         60000    # longer — glioma is the hardest class
     eval_every:          5000
     seed:                42
     checkpoint_dir:      /kaggle/working
@@ -139,31 +141,31 @@ agents:
     disable_auto_stop:   true
     terminal_bonus_scale: 3.0
     lr:                  1.0e-4
-    gamma:               0.99
+    gamma:               0.97
     tau:                 0.005
     embed_dim:           128
     batch_size:          64
-    buffer_size:         30000
-    prefill_steps:       1000
+    buffer_size:         50000
+    prefill_steps:       2000
     epsilon_start:       1.0
     epsilon_end:         0.05
-    epsilon_decay_steps: 20000
-    train_steps:         40000
+    epsilon_decay_steps: 30000
+    train_steps:         60000
     eval_every:          5000
     seed:                42
     checkpoint_dir:      /kaggle/working
 
   # ── DuelingDDQN (discrete contour refinement) — ACTIVE discrete agent ─────────
-  # Dueling Double DQN on ContourRefineEnv (pituitary — smallest): 18 discrete actions =
+  # Dueling Double DQN on ContourRefineEnv (glioma — irregular): 18 discrete actions =
   # push each of 8 angular boundary sectors OUT/IN + smooth + stop. Baseline-centred
   # PBRS reward. This is the discrete counterpart to TD3 (continuous contour).
   DuelingDDQN:
     agent_type:          DUELING
-    max_steps         : 8             # tighter — small targets degrade faster
+    max_steps         : 10            # cap excursion past peak
     env_class:           contour
-    n_points          : 24          # small structure (~15-25 px) — fewer points
-    disp_px           : 1.5           # smaller push so one bad edit can't overshoot
-    spline_smooth     : 0.0     # NO smoothing
+    n_points          : 32          # match headroom diagnostic; preserve tumour shape
+    disp_px           : 2.0           # bigger push so per-step Dice change clears Q-noise
+    spline_smooth     : 0.0     # NO smoothing — irregular boundaries need every detail
     smooth_lambda:       0.5
     reward_mode:          dice_pbrs
     reward_potential_scale: 15.0
