@@ -213,7 +213,7 @@ agents:
     smooth_lambda:       0.5           # Laplacian strength for the SMOOTH action
     # ── reward shaping (same machinery as the global-op agents) ──
     reward_mode:          dice_hd_pbrs
-    reward_step_penalty:  0.0
+    reward_step_penalty:  0.02         # optimal-stopping cost: STOP is the only penalty-free action (_terminal_step adds no penalty), so once a move's marginal Dice gain falls below ~0.002 (=penalty/[K*gamma], K=10), Q(STOP)=0 beats Q(move)<0 and the agent stops at the peak instead of overshooting to max_steps. Fixes the 0%-STOP / sub-baseline-final pathology. A positive penalty can only make the agent stop EARLIER, so the deploy mask moves toward (never past) the peak — bounded no-worse than the old overshoot.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
     uncertainty_gate:    false         # OFF for LV_endo — lite U-Net's prob_map is INERT here (Pillar4, 2026-06-25: band_frac=0.0073, ~binary), so the gate clamps edit magnitude to ~0 at ~99% of contour points, blocking the confirmed +0.047 realistic headroom. Re-enable only after the lite net is retrained with label smoothing to produce a graded prob_map.
     gate_lo:             0.35
