@@ -259,11 +259,17 @@ def run_drl_training(
     # Keeps easy samples in the mix (they teach "no-op when already good"),
     # but amplifies learning signal from samples where improvement is possible.
     _hard_mining_scale = cfg.get('hard_mining_scale', 0.0)
-    if _hard_mining_scale > 0:
+    # Curriculum needs per-sample init Dice too — compute it once and share
+    # with hard-mining instead of duplicating the pass over train_caches.
+    _curriculum_on = bool(cfg.get('curriculum_max_steps', False))
+    _init_dices = None
+    if _hard_mining_scale > 0 or _curriculum_on:
         _init_dices = np.array([
             dice_score(train_caches['init_mask'][i], train_caches['gt_mask'][i])
             for i in range(len(train_samples))
         ])
+
+    if _hard_mining_scale > 0:
         _raw = (1.0 - _init_dices) * _hard_mining_scale
         _raw -= _raw.max()   # numerical stability before exp
         _sample_weights = np.exp(_raw)
@@ -308,6 +314,39 @@ def run_drl_training(
     # cont_trans_scale legacy fallback (old configs use cont_action_scale)
     if 'cont_trans_scale' not in env_kwargs and 'cont_action_scale' in cfg:
         env_kwargs['cont_trans_scale'] = cfg['cont_action_scale']
+
+    # ── Per-sample curriculum max_steps (TRAINING ONLY) ───────────────────────
+    # GT-based difficulty (init Dice) is only knowable because GT is available
+    # during training — never at deployment/eval, so the EVAL/TEST env always
+    # uses the single fixed `max_steps` from env_kwargs unchanged (see
+    # evaluate_agent / evaluate_testset, which never see this override).
+    # Rationale: hard_mining oversamples low-init-Dice cases, which rarely
+    # *reach* a near-converged state within a short episode, so the buffer was
+    # starved of "already near peak, should stop" terminal transitions — the
+    # likely reason reward_step_penalty alone didn't induce STOP usage. Forcing
+    # SHORT episodes on easy samples manufactures many more such transitions
+    # without reducing hard-sample representation; hard samples get a LONGER
+    # episode so they have more room to travel toward the boundary.
+    _sample_max_steps = None
+    if _curriculum_on:
+        _base_max_steps = int(env_kwargs.get('max_steps', 20))
+        _easy_dice  = float(cfg.get('curriculum_easy_dice', 0.90))
+        _hard_dice  = float(cfg.get('curriculum_hard_dice', 0.80))
+        _easy_steps = int(cfg.get('curriculum_easy_steps', max(2, _base_max_steps // 2)))
+        _hard_steps = int(cfg.get('curriculum_hard_steps', _base_max_steps + 5))
+        _sample_max_steps = np.where(
+            _init_dices >= _easy_dice, _easy_steps,
+            np.where(_init_dices < _hard_dice, _hard_steps, _base_max_steps)
+        ).astype(int)
+        n_easy = int((_init_dices >= _easy_dice).sum())
+        n_hard = int((_init_dices < _hard_dice).sum())
+        n_med  = len(_init_dices) - n_easy - n_hard
+        print(f'[drl] Curriculum max_steps ON (train-only; eval always uses '
+              f'max_steps={_base_max_steps}): '
+              f'easy(d>={_easy_dice})→{_easy_steps} steps [{n_easy} samples]  |  '
+              f'medium→{_base_max_steps} steps [{n_med} samples]  |  '
+              f'hard(d<{_hard_dice})→{_hard_steps} steps [{n_hard} samples]')
+
     # state_builder needs sdt_clip even if not in cfg (env class default applies).
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
 
@@ -413,6 +452,9 @@ def run_drl_training(
     )
 
     # ── Pre-fill buffer with random rollouts ──────────────────────────────────
+    # Scoped out of curriculum deliberately: prefill is pure random exploration
+    # to warm the buffer, not where the STOP/terminal-density problem lives —
+    # keeping it on the fixed env_kwargs keeps this change minimal and low-risk.
     prefill_steps = cfg.get('prefill_steps', 2000)
     print(f'[drl] Pre-filling buffer with {prefill_steps} random transitions...')
     # Build per-component ranges for random continuous actions
@@ -507,7 +549,15 @@ def run_drl_training(
     step = start_step
     while step < train_steps:
         idx = _sample_idx()
-        env = _make_env(train_caches, idx, env_kwargs, env_cls=env_cls)
+        # Curriculum override: a per-episode max_steps copy of env_kwargs for
+        # this training rollout only. env_kwargs itself is never mutated, so
+        # evaluate_agent(val_caches, env_kwargs, ...) below always sees the
+        # single fixed max_steps — eval/deploy behaviour is unaffected.
+        if _sample_max_steps is not None:
+            ep_env_kwargs = dict(env_kwargs, max_steps=int(_sample_max_steps[idx]))
+        else:
+            ep_env_kwargs = env_kwargs
+        env = _make_env(train_caches, idx, ep_env_kwargs, env_cls=env_cls)
         state = env.reset()
 
         if action_type == 'continuous':

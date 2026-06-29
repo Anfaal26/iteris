@@ -175,7 +175,7 @@ agents:
     smooth_lambda:       0.5
     reward_mode:          dice_hd_pbrs
     reward_potential_scale: 10.0
-    reward_step_penalty:  0.02         # optimal-stopping cost: STOP is the only penalty-free action (_terminal_step adds no penalty), so once a move's marginal Dice gain falls below ~0.002 (=penalty/[K*gamma], K=10), Q(STOP)=0 beats Q(move)<0 and the agent stops at the peak instead of overshooting to max_steps. Fixes the 0%-STOP / sub-baseline-final pathology. A positive penalty can only make the agent stop EARLIER, so the deploy mask moves toward (never past) the peak — bounded no-worse than the old overshoot.
+    reward_step_penalty:  0.05         # raised from 0.02 (2026-06-29 c3 run): 0.02 ran the full 50k steps and STOP-action rate was STILL 0% (verified in the post-run diagnostic) -- the buffer was likely starved of near-peak terminal transitions (hard_mining biases training away from states that ever reach convergence within the episode), not under-penalised. 0.05 is the same lever with a stronger push; paired with curriculum_max_steps below, which attacks the starvation directly by forcing short episodes on easy/near-peak samples.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
     uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
     gate_lo:             0.35
@@ -199,6 +199,18 @@ agents:
     train_steps:         50000
     eval_every:           5000
     checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
+    # ── Curriculum max_steps (TRAINING ONLY; see drl_training.py) ────────────
+    # GT-based difficulty (init Dice) sets a PER-SAMPLE episode length during
+    # training only -- eval/test always use the fixed max_steps above (10),
+    # since GT-based difficulty isn't available at deployment. Easy/near-peak
+    # samples get a SHORT episode (fewer chances to drift past the peak before
+    # being cut off, and many more near-converged terminal transitions land in
+    # the buffer); hard samples get a LONGER episode (more room to travel).
+    curriculum_max_steps:  true
+    curriculum_easy_dice:  0.90    # init_dice >= this -> short episode
+    curriculum_easy_steps: 4
+    curriculum_hard_dice:  0.80    # init_dice <  this -> long episode
+    curriculum_hard_steps: 15
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
