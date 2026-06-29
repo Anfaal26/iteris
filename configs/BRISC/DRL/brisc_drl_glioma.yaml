@@ -79,7 +79,11 @@ agents:
     reward_potential_scale: 15.0
     reward_step_penalty:  0.0
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
+    uncertainty_gate:    false         # DISABLED 2026-06-30: BRISC tumour prob_map is INERT (Pillar4 2026-06-25 band_frac=0.0007 -- the most binary of all diagnosed classes, well under the
+                                        # 0.01 USABLE threshold). With this little graded signal the gate clamps edit magnitude to ~0 at ~99% of
+                                        # contour points -- net harmful (collapses actor/BC demos toward identity), not neutral. Same model/
+                                        # checkpoint (brisc_lite_unet_best.pt) backs all 4 BRISC configs, so this applies uniformly across
+                                        # tumor/glioma/meningioma/pituitary, both TD3 and DuelingDDQN.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10
@@ -171,7 +175,11 @@ agents:
     reward_potential_scale: 15.0
     reward_step_penalty:  0.05         # optimal-stopping cost (2026-06-29, ported from CAMUS c1/c2/c3 + BRISC tumour). NOTE: headroom not individually diagnosed for this subtype (only the pooled 'tumor' class was tested -- realistic headroom -0.0501, NO HEADROOM -- see brisc_drl_tumor.yaml). Outcome here is unknown; this is the 'optional if time permits' tier per PLAN.md, not yet headroom-confirmed either way.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
+    uncertainty_gate:    false         # DISABLED 2026-06-30: BRISC tumour prob_map is INERT (Pillar4 2026-06-25 band_frac=0.0007 -- the most binary of all diagnosed classes, well under the
+                                        # 0.01 USABLE threshold). With this little graded signal the gate clamps edit magnitude to ~0 at ~99% of
+                                        # contour points -- net harmful (collapses actor/BC demos toward identity), not neutral. Same model/
+                                        # checkpoint (brisc_lite_unet_best.pt) backs all 4 BRISC configs, so this applies uniformly across
+                                        # tumor/glioma/meningioma/pituitary, both TD3 and DuelingDDQN.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10

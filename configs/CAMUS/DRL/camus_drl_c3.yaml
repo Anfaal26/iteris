@@ -88,12 +88,14 @@ agents:
                                         # (the opposite of the goal). TD3 stopping = disable_auto_stop
                                         # (GT-converge) + fail_thresh safety net, not a step penalty.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    true          # RE-ENABLED 2026-06-30: lite U-Net retrained with label smoothing
-                                        # (loss_label_smoothing 0.1), new checkpoint live on Kaggle, so the prob_map
-                                        # is now expected graded/USABLE (was the most binary class: Pillar4 2026-06-25
-                                        # band_frac=0.0063). PRECONDITION: assumes 00_free_diagnostics confirms USABLE
-                                        # for LA on the NEW checkpoint -- if still INERT the gate collapses both the BC
-                                        # oracle demos and the actor to identity, so re-confirm before training.
+    uncertainty_gate:    false         # RE-DISABLED 2026-06-30: precondition failed. Two retrains checked
+                                        # (loss_label_smoothing 0.1 then 0.25, see configs/CAMUS/camus_lite.yaml) --
+                                        # LA band_frac 0.0063->0.0100->0.0077, NON-monotonic and still under the 0.01
+                                        # USABLE threshold at 0.25. More CE smoothing isn't a reliable lever here
+                                        # (lambda_dice=0.5 is unsmoothed and likely cancels the effect). With band_frac
+                                        # this low the gate clamps edit magnitude to ~0 at ~99% of contour points,
+                                        # collapsing both the actor and the BC oracle demos toward identity -- net
+                                        # harmful, not neutral. Re-enable only if a future fix gets band_frac >=0.01.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10
