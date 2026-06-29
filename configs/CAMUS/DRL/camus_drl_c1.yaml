@@ -102,7 +102,14 @@ agents:
                                         # (the opposite of the goal). TD3 stopping = disable_auto_stop
                                         # (GT-converge) + fail_thresh safety net, not a step penalty.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    false         # OFF for LV_endo (TD3) — same INERT prob_map as the DuelingDDQN block (Pillar4 2026-06-25: band_frac=0.0073, ~binary). On TD3 this is worse than wasteful: `_apply_continuous` multiplies the actor's displacement by the gate (env_contour_refine.py:498), so an INERT gate zeroes the actor's moves AND zeroes the BC oracle's trial moves (bc_demo.py inherits env_kwargs+prob_map) — the actor is BC-pretrained toward identity and then can't move at all. Re-enable (together with the DuelingDDQN block) only after the label-smoothing lite retrain is confirmed USABLE.
+    uncertainty_gate:    true          # RE-ENABLED 2026-06-30: lite U-Net retrained with label smoothing
+                                        # (loss_label_smoothing 0.1), new checkpoint live on Kaggle, so the prob_map
+                                        # is now expected graded/USABLE (was INERT: Pillar4 2026-06-25 band_frac=0.0073).
+                                        # The gate again bounds worst-case per-step Dice drop and focuses edits on
+                                        # genuinely-uncertain boundary points. PRECONDITION: assumes 00_free_diagnostics
+                                        # confirms USABLE for LV_endo on the NEW checkpoint -- if it is still INERT, the
+                                        # gate collapses BOTH the BC oracle demos and the actor to identity
+                                        # (env_contour_refine.py:498). Re-confirm before spending GPU time.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10

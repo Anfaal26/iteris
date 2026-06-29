@@ -88,7 +88,12 @@ agents:
                                         # (the opposite of the goal). TD3 stopping = disable_auto_stop
                                         # (GT-converge) + fail_thresh safety net, not a step penalty.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
-    uncertainty_gate:    false         # OFF for LA (TD3) — same INERT prob_map as the DuelingDDQN block (Pillar4 2026-06-25: band_frac=0.0063, the most binary of the 3 CAMUS classes). On TD3 this also poisons the BC warm-start: `_apply_continuous` multiplies the actor's displacement by the gate (env_contour_refine.py:498) and bc_demo.py inherits the same env_kwargs+prob_map, so both the oracle demos and the actor collapse to identity. Re-enable (with the DuelingDDQN block) only after the label-smoothing lite retrain is confirmed USABLE.
+    uncertainty_gate:    true          # RE-ENABLED 2026-06-30: lite U-Net retrained with label smoothing
+                                        # (loss_label_smoothing 0.1), new checkpoint live on Kaggle, so the prob_map
+                                        # is now expected graded/USABLE (was the most binary class: Pillar4 2026-06-25
+                                        # band_frac=0.0063). PRECONDITION: assumes 00_free_diagnostics confirms USABLE
+                                        # for LA on the NEW checkpoint -- if still INERT the gate collapses both the BC
+                                        # oracle demos and the actor to identity, so re-confirm before training.
     gate_lo:             0.35
     gate_hi:             0.65
     gate_margin:         0.10
