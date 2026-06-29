@@ -163,7 +163,7 @@ agents:
     smooth_lambda:       0.5
     reward_mode:          dice_pbrs
     reward_potential_scale: 15.0
-    reward_step_penalty:  0.0
+    reward_step_penalty:  0.05         # optimal-stopping cost (2026-06-29, ported from CAMUS c1/c2/c3 + BRISC tumour). NOTE: headroom not individually diagnosed for this subtype (only the pooled 'tumor' class was tested -- realistic headroom -0.0501, NO HEADROOM -- see brisc_drl_tumor.yaml). Outcome here is unknown; this is the 'optional if time permits' tier per PLAN.md, not yet headroom-confirmed either way.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
     uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
     gate_lo:             0.35
@@ -184,8 +184,19 @@ agents:
                                        # downside risk, push more of the training budget into
                                        # exploitation so STOP/minimal-edit-when-already-good is
                                        # reliably learned
-    train_steps:         60000
-    eval_every:          2000
+    train_steps:         50000
+    eval_every:           5000
+    checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
+    # ── Curriculum max_steps (TRAINING ONLY; see drl_training.py) ────────────
+    # Same mechanism as CAMUS c1/c2/c3 + BRISC tumour DuelingDDQN -- GT-based
+    # difficulty sets a per-sample episode length during training only;
+    # eval/test always use the fixed max_steps above. hard_mining_scale is
+    # this class's own top-level value (not overridden here) -- unchanged.
+    curriculum_max_steps:  true
+    curriculum_easy_dice:  0.90    # init_dice >= this -> short episode
+    curriculum_easy_steps: 4
+    curriculum_hard_dice:  0.80    # init_dice <  this -> long episode
+    curriculum_hard_steps: 15
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
