@@ -80,7 +80,13 @@ agents:
     env_class:           contour
     reward_mode:          dice_hd_pbrs
     reward_potential_scale: 10.0
-    reward_step_penalty:  0.0
+    reward_step_penalty:  0.0           # KEPT 0 for TD3 (do NOT copy DuelingDDQN's 0.05): TD3 is
+                                        # continuous and has NO discrete STOP action, so every step goes
+                                        # through _apply_continuous which subtracts this penalty with no
+                                        # penalty-free escape. A nonzero value would uniformly shift all
+                                        # rewards down and push the BC-warm-started actor toward identity
+                                        # (the opposite of the goal). TD3 stopping = disable_auto_stop
+                                        # (GT-converge) + fail_thresh safety net, not a step penalty.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
     uncertainty_gate:    false         # OFF for LA (TD3) — same INERT prob_map as the DuelingDDQN block (Pillar4 2026-06-25: band_frac=0.0063, the most binary of the 3 CAMUS classes). On TD3 this also poisons the BC warm-start: `_apply_continuous` multiplies the actor's displacement by the gate (env_contour_refine.py:498) and bc_demo.py inherits the same env_kwargs+prob_map, so both the oracle demos and the actor collapse to identity. Re-enable (with the DuelingDDQN block) only after the label-smoothing lite retrain is confirmed USABLE.
     gate_lo:             0.35
@@ -109,6 +115,20 @@ agents:
     train_steps:         50000
     eval_every:           5000
     checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
+    # ── Curriculum max_steps (TRAINING ONLY; see drl_training.py) ────────────
+    # TD3-specific: TD3 auto-stops on GT-dice convergence (disable_auto_stop=
+    # false), so unlike discrete DuelingDDQN this mainly helps HARD samples --
+    # raising their cap lets the continuous actor travel further toward a distant
+    # boundary before being cut off (the fail_thresh net still bounds the
+    # downside, so a longer cap can't lock in a worse mask). Easy-sample
+    # tightening is a backstop (auto-stop usually fires first). Train-only; eval/
+    # test always use the fixed max_steps above; BC demo collection (separate
+    # bc_demo_max_steps) is untouched.
+    curriculum_max_steps:  true
+    curriculum_easy_dice:  0.90    # init_dice >= this -> short episode
+    curriculum_easy_steps: 4
+    curriculum_hard_dice:  0.80    # init_dice <  this -> long episode
+    curriculum_hard_steps: 12      # LA: ballooning-prone + continuous actor has no STOP -> conservative excursion cap (cf. spline_smooth 2.5)
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
