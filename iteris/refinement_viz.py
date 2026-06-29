@@ -139,12 +139,21 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
     # to plot_behaviour so it renders a per-sector magnitude bar instead.
     action_names = list(env_cls.DISCRETE_NAMES) if is_discrete else None
 
-    # Extra literature-standard segmentation metrics (final mask vs GT only —
-    # computed once per finished rollout, not per step; see geometry.py).
+    # Extra literature-standard segmentation metrics — both on the FINAL mask
+    # and on masks[0] (the env's own rasterised init contour, i.e. the same
+    # mask init_dice is computed from — not the raw sample['init_mask'], to
+    # avoid any rasterisation mismatch between the two). Computed once per
+    # finished rollout, not per step; see geometry.py. The init_* versions are
+    # what makes "does the agent beat baseline on IoU/BIoU/etc" answerable —
+    # previously only Dice had a baseline figure to diff against.
     final_iou       = iou_score(env.mask, sample['gt_mask'])
     final_precision, final_sensitivity = precision_recall(env.mask, sample['gt_mask'])
     final_biou      = boundary_iou(env.mask, sample['gt_mask'])
     final_msd       = mean_surface_distance_px(env.mask, sample['gt_mask'])
+    init_iou        = iou_score(masks[0], sample['gt_mask'])
+    init_precision, init_sensitivity = precision_recall(masks[0], sample['gt_mask'])
+    init_biou       = boundary_iou(masks[0], sample['gt_mask'])
+    init_msd        = mean_surface_distance_px(masks[0], sample['gt_mask'])
 
     return dict(
         sample     = sample,
@@ -161,12 +170,18 @@ def replay_one(agent, sample: dict, env_kwargs: dict, env_cls=None) -> Dict:
         best_dice  = env.best_dice,
         value_floored_dice = vf_dice,
         final_hd95 = hd95_px(env.mask, sample['gt_mask']),
+        init_hd95  = hd95_px(masks[0], sample['gt_mask']),
         value_floored_hd95 = vf_hd95,
         final_iou         = final_iou,
         final_precision   = final_precision,
         final_sensitivity = final_sensitivity,
         final_biou        = final_biou,
         final_msd         = final_msd,
+        init_iou          = init_iou,
+        init_precision    = init_precision,
+        init_sensitivity  = init_sensitivity,
+        init_biou         = init_biou,
+        init_msd          = init_msd,
         gain       = final_d - init_d,
         value_floored_gain = vf_dice - init_d,
         n_steps    = len(acts),
@@ -310,6 +325,8 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
     ``env_cls`` auto-detects from the agent's action-head size if not given."""
     init_d, final_d, best_d, final_h, vf_d = [], [], [], [], []
     final_iou, final_prec, final_sen, final_biou, final_msd = [], [], [], [], []
+    init_h = []
+    init_iou, init_prec, init_sen, init_biou, init_msd = [], [], [], [], []
     for s in test_samples:
         r = replay_one(agent, s, env_kwargs, env_cls=env_cls)
         init_d.append(r['init_dice']); final_d.append(r['final_dice'])
@@ -318,10 +335,18 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
         final_iou.append(r['final_iou']); final_prec.append(r['final_precision'])
         final_sen.append(r['final_sensitivity']); final_biou.append(r['final_biou'])
         final_msd.append(r['final_msd'])
+        init_h.append(r['init_hd95'])
+        init_iou.append(r['init_iou']); init_prec.append(r['init_precision'])
+        init_sen.append(r['init_sensitivity']); init_biou.append(r['init_biou'])
+        init_msd.append(r['init_msd'])
     fh = np.asarray(final_h, dtype=float)
     fh = fh[~np.isnan(fh)]
     msd_arr = np.asarray(final_msd, dtype=float)
     msd_arr = msd_arr[~np.isnan(msd_arr)]
+    ih = np.asarray(init_h, dtype=float)
+    ih = ih[~np.isnan(ih)]
+    init_msd_arr = np.asarray(init_msd, dtype=float)
+    init_msd_arr = init_msd_arr[~np.isnan(init_msd_arr)]
     out = dict(
         init_dice_mean  = float(np.mean(init_d)),
         final_dice_mean = float(np.mean(final_d)),       # raw last-state deploy (can go < init)
@@ -338,5 +363,15 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
         final_sensitivity_mean = float(np.mean(final_sen)),
         final_biou_mean        = float(np.mean(final_biou)),
         final_msd_mean         = float(msd_arr.mean()) if msd_arr.size else float('nan'),
+        # Same metrics on the U-Net baseline mask (init), so every extra metric
+        # now has a baseline to diff against, the same way Dice already did.
+        init_hd95_mean         = float(ih.mean()) if ih.size else float('nan'),
+        init_iou_mean          = float(np.mean(init_iou)),
+        init_precision_mean    = float(np.mean(init_prec)),
+        init_sensitivity_mean  = float(np.mean(init_sen)),
+        init_biou_mean         = float(np.mean(init_biou)),
+        init_msd_mean          = float(init_msd_arr.mean()) if init_msd_arr.size else float('nan'),
+        delta_iou_mean         = float(np.mean(final_iou) - np.mean(init_iou)),
+        delta_biou_mean        = float(np.mean(final_biou) - np.mean(init_biou)),
     )
     return out

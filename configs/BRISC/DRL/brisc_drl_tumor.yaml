@@ -205,7 +205,15 @@ agents:
     smooth_lambda:       0.5
     # ── reward shaping ──
     reward_mode:          dice_pbrs
-    reward_step_penalty:  0.0
+    reward_step_penalty:  0.05         # optimal-stopping cost (2026-06-29, ported from CAMUS c1/c2/c3): STOP is the
+                                        # only penalty-free action (_terminal_step adds no penalty), so once a move's
+                                        # marginal Dice gain falls below the penalty's effective threshold, Q(STOP)=0
+                                        # beats Q(move)<0. NOTE: unlike CAMUS, BRISC tumour has NO confirmed headroom
+                                        # (Pillar4 2026-06-25 diagnostic: realistic headroom -0.0501 -- the contour
+                                        # ceiling is BELOW baseline for this class). This fix can only be expected to
+                                        # help the agent converge to near-zero regression (STOP near the start instead
+                                        # of drifting through 10 steps of no-gain edits) -- not to close any gap, since
+                                        # there is no gap to close. Treat a near-parity result as success here.
     reward_clip:         4.0           # raised from 1.0 — a normal step's raw reward exceeds 1.0 once HD/Dice terms combine; the old clip floored both "slightly bad" and "catastrophic" edits to the same -1.0, erasing the gradient between them.
     uncertainty_gate:    true          # gate edit magnitude by U-Net confidence (prob_map) — bounds worst-case per-step Dice drop, focuses learning on the U-Net's genuinely correctable errors
     gate_lo:             0.35
@@ -226,8 +234,19 @@ agents:
                                        # downside risk, push more of the training budget into
                                        # exploitation so STOP/minimal-edit-when-already-good is
                                        # reliably learned
-    train_steps:         60000
-    eval_every:          2000
+    train_steps:         50000
+    eval_every:           5000
+    checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
+    # ── Curriculum max_steps (TRAINING ONLY; see drl_training.py) ────────────
+    # Same mechanism as CAMUS c1/c2/c3 DuelingDDQN -- GT-based difficulty sets
+    # a per-sample episode length during training only; eval/test always use
+    # the fixed max_steps above (10). hard_mining_scale below is BRISC's own
+    # pre-existing value (4.0, not CAMUS's 3.0) -- unchanged.
+    curriculum_max_steps:  true
+    curriculum_easy_dice:  0.90    # init_dice >= this -> short episode
+    curriculum_easy_steps: 4
+    curriculum_hard_dice:  0.80    # init_dice <  this -> long episode
+    curriculum_hard_steps: 15
     hard_mining_scale:   4.0
     cache_sdt:           true
     seed:                42

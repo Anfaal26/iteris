@@ -162,12 +162,17 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
     # Extra literature-standard segmentation metrics (Dice/IoU/PPV/SEN/BIoU/HD95
     # is the table shape used by most DRL-segmentation papers — see project
     # research notes). Computed ONCE per finished rollout (final mask vs GT),
-    # never per env.step(), so this adds no hot-loop cost.
+    # never per env.step(), so this adds no hot-loop cost. init_* versions use
+    # the env's own rasterised init contour (right after reset(), before any
+    # step) so every extra metric has a baseline to diff against, same as Dice.
     final_iou, final_prec, final_sen, final_biou, final_msd = [], [], [], [], []
+    init_h = []
+    init_iou, init_prec, init_sen, init_biou, init_msd = [], [], [], [], []
     for i in range(n):
         env = _make_env(caches, i, env_kwargs, env_cls=env_cls)
         state = env.reset()
         init_d.append(env.dice_history[0])
+        init_mask0 = env.mask.copy()
         while True:
             if agent.action_type == 'discrete':
                 a = agent.select_action(state, epsilon=0.0)
@@ -189,10 +194,21 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         final_biou.append(boundary_iou(env.mask, gt))
         final_msd.append(mean_surface_distance_px(env.mask, gt))
 
+        init_h.append(hd95_px(init_mask0, gt))
+        init_iou.append(iou_score(init_mask0, gt))
+        ip, isen = precision_recall(init_mask0, gt)
+        init_prec.append(ip); init_sen.append(isen)
+        init_biou.append(boundary_iou(init_mask0, gt))
+        init_msd.append(mean_surface_distance_px(init_mask0, gt))
+
     final_h_arr = np.asarray(final_h, dtype=float)
     valid_h = final_h_arr[~np.isnan(final_h_arr)]
     msd_arr = np.asarray(final_msd, dtype=float)
     valid_msd = msd_arr[~np.isnan(msd_arr)]
+    init_h_arr = np.asarray(init_h, dtype=float)
+    valid_init_h = init_h_arr[~np.isnan(init_h_arr)]
+    init_msd_arr = np.asarray(init_msd, dtype=float)
+    valid_init_msd = init_msd_arr[~np.isnan(init_msd_arr)]
     return dict(
         init_dice_mean  = float(np.mean(init_d)),
         final_dice_mean = float(np.mean(final_d)),
@@ -203,6 +219,12 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         final_precision_mean   = float(np.mean(final_prec)),
         final_sensitivity_mean = float(np.mean(final_sen)),
         final_biou_mean        = float(np.mean(final_biou)),
+        init_hd95_mean         = float(valid_init_h.mean()) if valid_init_h.size else float('nan'),
+        init_iou_mean          = float(np.mean(init_iou)),
+        init_precision_mean    = float(np.mean(init_prec)),
+        init_sensitivity_mean  = float(np.mean(init_sen)),
+        init_biou_mean         = float(np.mean(init_biou)),
+        init_msd_mean          = float(valid_init_msd.mean()) if valid_init_msd.size else float('nan'),
         final_msd_mean         = float(valid_msd.mean()) if valid_msd.size else float('nan'),
     )
 
