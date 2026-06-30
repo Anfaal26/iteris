@@ -88,7 +88,17 @@ agents:
                                         # baseline for fail_n steps so a drifting actor can't lock in a sub-baseline
                                         # final mask. Same value as CAMUS c1/c2/c3 TD3 -- this is also the precondition
                                         # that makes curriculum_max_steps' longer hard-sample episodes safe below.
-    fail_n:              2
+    fail_n:              1             # TIGHTENED 2026-06-30 from 2: BRISC's tumour-scale fail_thresh
+                                        # detection is delayed (needs fail_n CONSECUTIVE breaches before
+                                        # terminating), and a single bad edit on a ~1.7%-area target can
+                                        # already blow well past the 0.02 threshold in one step (confirmed:
+                                        # real run showed final Dice landing -0.06 to -0.07 below baseline
+                                        # despite fail_thresh=0.02, fail_n=2 -- by the 2nd confirming step the
+                                        # damage was already 3x the nominal floor). fail_n=1 terminates on the
+                                        # FIRST breach instead of waiting for confirmation -- appropriate here
+                                        # because tiny-target volatility makes a single breach meaningful
+                                        # signal, not transient noise (unlike CAMUS's larger structures,
+                                        # where fail_n=2 stays a deliberate noise filter -- left unchanged).
     n_points          : 32          # match headroom diagnostic; preserve tumour shape
     cont_sectors:        12
     disp_px           : 2.0           # bigger push so per-step Dice change clears Q-noise

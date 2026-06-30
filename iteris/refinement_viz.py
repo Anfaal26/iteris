@@ -70,6 +70,18 @@ def refinement_env_kwargs(cfg: dict) -> dict:
     """
     kwargs = {k: cfg[k] for k in _ENV_KEYS if k in cfg}
     kwargs['pbrs_gamma'] = cfg.get('gamma', 0.99)
+    # action_type is NEVER present in the resolved YAML cfg -- run_drl_training
+    # only ever computes it as a local variable from AGENT_REGISTRY, never
+    # writes it back into cfg. The dict comprehension above silently drops the
+    # 'action_type' key (it's listed in _ENV_KEYS but 'action_type' not in cfg),
+    # so the env falls back to its constructor default ('discrete'). Harmless
+    # for DQN/DuelingDDQN (matches the default by coincidence), but fatal for
+    # TD3/DDPG: a continuous action (np.ndarray) hits the discrete branch's
+    # `int(action)` in env_contour_refine.py's step() -> TypeError. Derive it
+    # explicitly from agent_type instead of trusting cfg to carry it.
+    if 'agent_type' in cfg:
+        from .drl_training import AGENT_REGISTRY
+        _, kwargs['action_type'] = AGENT_REGISTRY[cfg['agent_type'].upper()]
     return kwargs
 
 
