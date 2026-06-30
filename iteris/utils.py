@@ -24,11 +24,24 @@ def count_parameters(model: torch.nn.Module) -> int:
 
 
 def model_suffix(cfg: dict) -> str:
-    """Filename suffix that disambiguates architectures sharing a dataset.
+    """Filename suffix that disambiguates artifacts sharing a dataset.
 
-    '' for the default attention Res-UNet (back-compat: camus_best.pt,
-    camus_summary.json, camus_pred_masks/ …); '_lite_unet' for the lite baseline,
-    so the two never overwrite each other's checkpoints / scores / masks / summary.
+    Two independent, back-compatible components (both empty by default):
+
+    1. Architecture: '' for the default attention Res-UNet (back-compat:
+       camus_best.pt, camus_summary.json, camus_pred_masks/ …); '_lite_unet'
+       for the lite baseline — so the two never overwrite each other.
+    2. Data regime (Phase B/C low-data ablations): '' when label_frac >= 1.0
+       (full data — Phase A, names unchanged), else '_lf<pct>' (e.g. '_lf10'
+       for label_frac=0.10). Namespaces low-data checkpoints/summaries/masks so
+       a Phase-B/C run never overwrites the Phase-A artifacts. Both
+       training.py's checkpoint writer AND every DRL notebook's baseline-ckpt
+       auto-detect derive the name through THIS function, so setting label_frac
+       in the baseline config is the ONLY change needed to run a phase — the
+       tag then propagates to every artifact name automatically.
     """
     model = cfg.get('model', 'attn_resunet')
-    return '' if model == 'attn_resunet' else f'_{model}'
+    arch = '' if model == 'attn_resunet' else f'_{model}'
+    lf = float(cfg.get('label_frac', 1.0))
+    regime = '' if lf >= 1.0 else f'_lf{int(round(lf * 100)):02d}'
+    return arch + regime

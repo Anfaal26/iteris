@@ -34,6 +34,8 @@ Angular (not index-based) sectoring keeps each action tied to a fixed spatial di
 
 The research design runs the **same U-Net-vs-DRL comparison three times**, at decreasing data scale and increasing agent sophistication, so the paper can answer not just "does DRL refinement help" but "when does it help most."
 
+> **Concrete data sizes, methodology, and the literature behind them live in [EXPERIMENTS.md](EXPERIMENTS.md).** Short version: Phase B/C use the existing patient-level `label_frac` knob (train-only shrink; val/test stay full) at CAMUS `0.10`/`0.05` and BRISC `0.05`/`0.03` (≈150 / ≈75–95 training images). Both the lite U-Net warm-start **and** the attention U-Net competitor are retrained on the same subset (leak-free by construction — identical `seed`+`label_frac`); the agent still never refines the attention net. A `label_frac < 1.0` auto-namespaces every artifact via `utils.model_suffix` (`_lf10` etc.), so running a phase is a config flip, not new code.
+
 | Phase | Dataset scope | Models compared | Question | Status |
 |---|---|---|---|---|
 | **A — Full data** | Whole dataset (CAMUS: all 500 patients / 2000 images; BRISC: full pooled set). `label_frac: 1.0`. | Lite U-Net · Attention U-Net · DRL-refined lite U-Net (DuelingDDQN + TD3) | Baseline comparison: how much of the lite→attention gap does contour-refinement DRL close when data is not a constraint? | ⏳ in progress (this is the current/default track — all DRL configs as of 2026-06-30) |

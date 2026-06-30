@@ -1,6 +1,6 @@
 # Iteris — Project Skill
 
-> The operational playbook for working on this codebase: how it's wired, where the landmines are, and what's currently open. Complements [CONTEXT.md](CONTEXT.md) (what/why, incl. the Phase A/B/C experimental design) and [PLAN.md](PLAN.md) (roadmap) — this file is "how to not break it" + "what I already learned the hard way."
+> The operational playbook for working on this codebase: how it's wired, where the landmines are, and what's currently open. Complements [CONTEXT.md](CONTEXT.md) (what/why, incl. the Phase A/B/C experimental design), [EXPERIMENTS.md](EXPERIMENTS.md) (Phase A/B/C data sizes + methodology), and [PLAN.md](PLAN.md) (roadmap) — this file is "how to not break it" + "what I already learned the hard way." All design docs now live in `docs/`; the front-door `README.md` stays at repo root.
 >
 > **Maintenance rule (this is the main skill of this file — apply it every time):** whenever a new architectural decision, fix, gotcha, or piece of standing knowledge is produced, update the relevant section below *in the same turn*, and add a matching dated entry to [TRANSCRIPT.md](TRANSCRIPT.md). TRANSCRIPT.md is the chronological "what happened, when" log; this file is the always-current "what you need to know" summary — the same fact often belongs in both, phrased differently (transcript = past tense event, skill = standing rule). Never let this file silently drift out of date relative to the transcript.
 >

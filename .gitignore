@@ -26,3 +26,22 @@ Thumbs.db
 # DRL validation artifacts (local only)
 scripts/_ckpt/
 scripts/_*.txt
+
+# Stray local temp / scratch
+_tmp*/
+*.tmp
+scratch_*/
+
+# Kaggle / nbconvert run logs + HTML exports
+*.log
+__results__*.html
+__notebook__*.ipynb
+
+# Node (demo UI)
+node_modules/
+dist/
+build/
+
+# Packaging
+*.egg-info/
+.eggs/
