@@ -106,6 +106,13 @@ agents:
     gate_hi:             0.65
     gate_margin:         0.10
     disable_auto_stop:    false
+    fail_thresh:         0.02          # ADDED 2026-06-30 (was missing -- BRISC TD3 had no downside floor at all).
+                                        # TD3 has no learned STOP and dice_converged commits whatever the contour
+                                        # converged to, even below baseline. Terminate early if Dice sits >0.02 below
+                                        # baseline for fail_n steps so a drifting actor can't lock in a sub-baseline
+                                        # final mask. Same value as CAMUS c1/c2/c3 TD3 -- this is also the precondition
+                                        # that makes curriculum_max_steps' longer hard-sample episodes safe below.
+    fail_n:              2
     n_points          : 32          # match headroom diagnostic; preserve tumour shape
     cont_sectors:        12
     disp_px           : 2.0           # bigger push so per-step Dice change clears Q-noise
@@ -123,8 +130,19 @@ agents:
     buffer_size:         50000
     prefill_steps:       2000
     max_steps         : 10            # cap excursion past peak
-    train_steps:         60000
-    eval_every:          2000
+    train_steps:         50000
+    eval_every:           5000
+    checkpoint_every:     12500        # milestone snapshot every quarter of the 50k run, distinct from best/last
+    # ── Curriculum max_steps (TRAINING ONLY; see drl_training.py) ────────────
+    # Same mechanism as CAMUS TD3 -- TD3 auto-stops on GT-dice convergence, so
+    # this mainly helps HARD samples (more room to travel before cutoff); the
+    # fail_thresh net above bounds the downside so a longer cap can't lock in a
+    # worse mask. Train-only; eval/test always use the fixed max_steps above.
+    curriculum_max_steps:  true
+    curriculum_easy_dice:  0.90    # init_dice >= this -> short episode
+    curriculum_easy_steps: 4
+    curriculum_hard_dice:  0.80    # init_dice <  this -> long episode
+    curriculum_hard_steps: 15      # tumour: NO confirmed headroom (Pillar4 -0.0501) -- success = near-zero regression, not improvement
     cache_sdt:           true
     seed:                42
     checkpoint_dir:      /kaggle/working
