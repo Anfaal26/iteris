@@ -206,50 +206,56 @@ def prob_map_informativeness(samples, gate_lo=0.35, gate_hi=0.65,
     return out
 
 
+def sample_error_decomp(init_mask, gt_mask, band_px=4):
+    """Per-sample init-vs-GT error decomposition → (boundary, topology, interior)
+    fractions that sum to 1.0 (or (1,0,0) when there is no error).
+
+    Single source of truth for the boundary/topology/interior split — used both
+    by `error_type_audit` (aggregate diagnostic) and by drl_training's optional
+    topology-based training-sample reweighting. Definitions:
+      boundary : error within `band_px` of the init-mask boundary — the ONLY
+                 error a contour-nudging agent can address.
+      topology : whole connected components in GT with no counterpart in init
+                 (missed objects), or in init with none in GT (false blobs) —
+                 UNreachable by boundary nudging.
+      interior : the remainder (interior holes / far-from-boundary error).
+    """
+    init = np.asarray(init_mask).astype(bool)
+    gt   = np.asarray(gt_mask).astype(bool)
+    err  = init ^ gt
+    tot  = int(err.sum())
+    if tot == 0:
+        return 1.0, 0.0, 0.0
+    bnd  = init ^ ndi.binary_erosion(init, STRUCT)
+    band = ndi.binary_dilation(bnd, STRUCT, iterations=int(band_px))
+    topo = np.zeros_like(err)
+    for src, other in ((gt, init), (init, gt)):
+        lab, ncc = ndi.label(src)
+        for c in range(1, ncc + 1):
+            comp = lab == c
+            if not (comp & other).any():     # this whole object has no counterpart
+                topo |= comp
+    topo_err  = int((err & topo).sum())
+    band_only = int((err & band & ~topo).sum())   # don't double-count topo∩band
+    inter_err = max(tot - band_only - topo_err, 0)
+    return band_only / tot, topo_err / tot, inter_err / tot
+
+
 def error_type_audit(samples, band_px=4, n_samples=80, label=''):
     """What fraction of the lite-mask error is contour-fixable vs structural?
 
-    Decomposes init-vs-GT disagreement into:
-      boundary_frac : error within band_px of the init-mask boundary -- the ONLY
-                      error a contour-nudging agent can address
-      topology_frac : whole connected components present in GT but missing from
-                      init (missed objects) or present in init but absent from GT
-                      (false blobs) -- UNreachable by boundary nudging
-      interior_frac : the remainder (interior holes / far-from-boundary error)
-
-    A high topology_frac/interior_frac means the action space caps achievable
-    Dice no matter how good the RL is -- the case for Pillar 5 (richer actions).
+    Aggregate wrapper over `sample_error_decomp` (see it for the per-category
+    definitions). A high topology_frac/interior_frac means the action space caps
+    achievable Dice no matter how good the RL is — the case for Pillar 5
+    (richer actions).
     """
     rng = np.random.RandomState(0)
     idx = rng.choice(len(samples), size=min(n_samples, len(samples)), replace=False)
     b_frac, t_frac, i_frac = [], [], []
     for i in idx:
         s = samples[int(i)]
-        init = np.asarray(s['init_mask']).astype(bool)
-        gt = np.asarray(s['gt_mask']).astype(bool)
-        err = init ^ gt
-        tot = int(err.sum())
-        if tot == 0:
-            b_frac.append(1.0); t_frac.append(0.0); i_frac.append(0.0)
-            continue
-        # boundary band of the init mask
-        bnd = init ^ ndi.binary_erosion(init, STRUCT)
-        band = ndi.binary_dilation(bnd, STRUCT, iterations=int(band_px))
-        band_err = int((err & band).sum())
-        # topology: GT components not touching init, + init components not touching GT
-        topo = np.zeros_like(err)
-        for src, other in ((gt, init), (init, gt)):
-            lab, ncc = ndi.label(src)
-            for c in range(1, ncc + 1):
-                comp = lab == c
-                if not (comp & other).any():     # this whole object has no counterpart
-                    topo |= comp
-        topo_err = int((err & topo).sum())
-        # avoid double-counting topo pixels that also fall in the boundary band
-        band_only = int((err & band & ~topo).sum())
-        inter_err = tot - band_only - topo_err
-        b_frac.append(band_only / tot); t_frac.append(topo_err / tot)
-        i_frac.append(max(inter_err, 0) / tot)
+        b, t, it = sample_error_decomp(s['init_mask'], s['gt_mask'], band_px=band_px)
+        b_frac.append(b); t_frac.append(t); i_frac.append(it)
     out = dict(label=label, n=len(b_frac),
                boundary_frac=float(np.mean(b_frac)),
                topology_frac=float(np.mean(t_frac)),

@@ -42,6 +42,22 @@ stop_n:            3
 hard_mining_scale: 3.0
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
+# ── Ablation knobs (OFF by default — see docs/EXPERIMENTS.md + SKILLS.md) ──────
+# directional_state: append 2 DeepSnake-style SDT-gradient 'direction' channels
+#   to the agent state (5->7) — tells each location WHICH WAY the boundary is,
+#   not just how far. Flip to true to run the ablation. WARNING: changes the
+#   network input shape -> invalidates existing 5-channel DRL checkpoints (no
+#   resume across the flip) and makes results incomparable to 5-channel runs;
+#   treat as a separate arm and coordinate before enabling on a shared iteris-pkg.
+directional_state:    false
+# topology_filter: down-weight (or drop) TRAINING samples whose init mask has a
+#   high (topology+interior) error fraction — structural error contour nudging
+#   cannot fix. Training-time only; val/test are NEVER filtered. See drl_training.
+topology_filter:      false
+topology_max_frac:    0.5          # samples with topo+interior error > this are affected
+topology_filter_mode: downweight   # 'downweight' (keep, scaled) or 'drop' (exclude)
+topology_downweight:  0.1          # weight for over-threshold samples in downweight mode
+
 agents:
 
   DDPG:

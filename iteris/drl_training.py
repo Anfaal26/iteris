@@ -24,7 +24,9 @@ import torch
 from tqdm.auto import trange
 
 from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
-from .geometry import iou_score, precision_recall, boundary_iou, mean_surface_distance_px
+from .geometry import (iou_score, precision_recall, boundary_iou,
+                       mean_surface_distance_px, sdt_direction_field)
+from .diagnostics import sample_error_decomp
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent, TD3Agent
 from .env_contour_refine import ContourRefineEnv
@@ -69,15 +71,20 @@ def _build_state_caches(samples: List[dict], image_size: int) -> dict:
     return caches
 
 
-def _make_state_builder(caches: dict, sdt_clip: float):
+def _make_state_builder(caches: dict, sdt_clip: float, directional: bool = False):
     """
-    Return a builder (idx, current_mask, cached_sdt=None) → torch (4, H, W).
+    Return a builder (idx, current_mask, cached_sdt=None) → torch (C, H, W).
 
     If `cached_sdt` is provided (e.g. from ReplayBuffer with cache_sdt=True),
     skip the expensive scipy.ndimage SDT recomputation. This is the single
     biggest training-speed optimisation — without it, agent.update() spends
     ~80% of its time recomputing SDTs that were already computed during
     env.step().
+
+    `directional`: when True, append the 2 DeepSnake-style SDT-gradient
+    direction channels (5→7 total), derived from the SAME sdt via the shared
+    geometry.sdt_direction_field — so this MUST stay identical to the append in
+    ContourRefineEnv._state(). Off by default (5 channels, unchanged).
     """
     def build(idx, current_mask, cached_sdt=None):
         image = caches['image'][idx]
@@ -89,12 +96,16 @@ def _make_state_builder(caches: dict, sdt_clip: float):
             sdt = signed_dt(current_mask, sdt_clip)
         # 5th channel: U-Net probability map (static per sample). Falls back to
         # the binary init mask when warm_start produced no prob_map. MUST match
-        # the channel order in SegmentationEnv._state().
+        # the channel order in ContourRefineEnv._state().
         if 'prob_map' in caches:
             prob = caches['prob_map'][idx].astype(np.float32)
         else:
             prob = init
-        return torch.from_numpy(np.stack([image, cur, sdt, init, prob], axis=0))
+        chans = [image, cur, sdt, init, prob]
+        if directional:
+            field = sdt_direction_field(sdt)     # (2, H, W): dy, dx — appended at end
+            chans.extend([field[0], field[1]])
+        return torch.from_numpy(np.stack(chans, axis=0))
     return build
 
 
@@ -291,17 +302,55 @@ def run_drl_training(
             for i in range(len(train_samples))
         ])
 
+    # ── Topology/interior training-sample reweighting (opt-in, off by default) ──
+    # At low-data scale the lite net makes structural errors (whole missing/false
+    # components) that contour nudging CANNOT fix — training on them is gradient
+    # noise. When `topology_filter` is on, samples whose (topology+interior)
+    # error fraction exceeds `topology_max_frac` are down-weighted (mode
+    # 'downweight', factor `topology_downweight`) or excluded (mode 'drop').
+    # Uses GT — legitimate at TRAINING time only, exactly like hard_mining above;
+    # the val/test sets are never filtered (no cherry-picking the eval). Default
+    # 'downweight' (not 'drop') so the agent still sees enough broken cases to
+    # learn to STOP/abstain on them at deployment.
+    _topology_filter = bool(cfg.get('topology_filter', False))
+    _topo_weights = None
+    if _topology_filter:
+        _cap = np.array([
+            sum(sample_error_decomp(train_caches['init_mask'][i],
+                                    train_caches['gt_mask'][i])[1:])   # topology+interior
+            for i in range(len(train_samples))
+        ])
+        _thr  = float(cfg.get('topology_max_frac', 0.5))
+        _mode = cfg.get('topology_filter_mode', 'downweight')
+        _dw   = float(cfg.get('topology_downweight', 0.1))
+        over  = _cap > _thr
+        _topo_weights = np.ones(len(train_samples))
+        _topo_weights[over] = 0.0 if _mode == 'drop' else _dw
+        n_over = int(over.sum())
+        print(f"[drl] Topology filter ON: mode={_mode} thresh={_thr} | "
+              f"{n_over}/{len(train_samples)} samples over threshold "
+              f"(topo+interior>{_thr}) -> weight {'0 (dropped)' if _mode=='drop' else _dw}")
+        if _topo_weights.sum() == 0:
+            raise ValueError("topology_filter dropped ALL training samples — "
+                             "lower topology_max_frac or use mode='downweight'.")
+
+    # ── Combined sampling weights (hard-mining × topology filter) ───────────────
+    _weights = None
     if _hard_mining_scale > 0:
         _raw = (1.0 - _init_dices) * _hard_mining_scale
         _raw -= _raw.max()   # numerical stability before exp
-        _sample_weights = np.exp(_raw)
-        _sample_weights /= _sample_weights.sum()
+        _weights = np.exp(_raw)
         hard_pct = (_init_dices < 0.90).mean() * 100
         print(f'[drl] Hard sample mining ON: scale={_hard_mining_scale:.1f} | '
               f'init_dice mean={_init_dices.mean():.4f} | '
               f'hard (<0.90): {hard_pct:.1f}% of train')
+    if _topo_weights is not None:
+        _weights = _topo_weights if _weights is None else (_weights * _topo_weights)
+
+    if _weights is not None:
+        _weights = _weights / _weights.sum()
         def _sample_idx():
-            return int(np.random.choice(len(train_samples), p=_sample_weights))
+            return int(np.random.choice(len(train_samples), p=_weights))
     else:
         def _sample_idx():
             return np.random.randint(len(train_samples))
@@ -325,6 +374,7 @@ def run_drl_training(
         'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
         'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',  # contour env
         'uncertainty_gate', 'gate_lo', 'gate_hi', 'gate_margin',  # U-Net confidence gate
+        'directional_state',                           # +2 SDT-gradient direction channels
     )
     for _k in _env_optional_keys:
         if _k in cfg:
@@ -369,8 +419,16 @@ def run_drl_training(
               f'medium→{_base_max_steps} steps [{n_med} samples]  |  '
               f'hard(d<{_hard_dice})→{_hard_steps} steps [{n_hard} samples]')
 
+    # Directional-state ablation: +2 SDT-gradient channels (5→7). Read once here
+    # so the state builder, the env (via env_kwargs above), and in_channels below
+    # all agree. Off by default → 5 channels, backward-compatible with all
+    # existing checkpoints. Turning it ON invalidates 5-channel checkpoints
+    # (first conv shape changes) — it's an ablation arm, not a drop-in resume.
+    _directional = bool(cfg.get('directional_state', False))
+    _n_state_ch = 7 if _directional else 5
     # state_builder needs sdt_clip even if not in cfg (env class default applies).
-    state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0))
+    state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0),
+                                        directional=_directional)
 
     # ── Continuous action dim (env-dependent) ─────────────────────────────────
     #   contour env → cont_sectors angular wedges (TD3, action in [-1,1]^K)
@@ -382,7 +440,7 @@ def run_drl_training(
                            else CONTINUOUS_ACTION_DIM)
 
     # ── Agent ─────────────────────────────────────────────────────────────────
-    common = dict(in_channels=5, gamma=cfg.get('gamma', 0.99),
+    common = dict(in_channels=_n_state_ch, gamma=cfg.get('gamma', 0.99),
                   tau=cfg.get('tau', 0.005),
                   embed_dim=cfg.get('embed_dim', 256), device=device)
     if action_type == 'discrete':

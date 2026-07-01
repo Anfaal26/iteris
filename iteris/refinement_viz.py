@@ -58,6 +58,7 @@ _ENV_KEYS = (
     'reward_step_penalty', 'disable_auto_stop', 'terminal_bonus_scale',
     'reward_potential_scale',   # PBRS Φ scale (dice_pbrs / dice_hd_pbrs)
     'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',
+    'directional_state',        # +2 SDT-gradient channels — MUST match training in_channels
 )
 
 

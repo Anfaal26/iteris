@@ -81,6 +81,29 @@ def signed_dt(mask: np.ndarray, clip: float = 20.0) -> np.ndarray:
     return (np.clip(sdt, -clip, clip) / clip).astype(np.float32)
 
 
+def sdt_direction_field(sdt: np.ndarray) -> np.ndarray:
+    """Two-channel unit direction field from a signed distance transform.
+
+    Returns (2, H, W): the per-pixel (dy, dx) gradient of `sdt`, normalised to
+    unit length (0 where the gradient is ~flat). This is the "direction field"
+    input DeepSnake uses — it tells each location *which way* the nearest
+    boundary lies, not just how far (the scalar SDT already gives distance).
+    Derived purely from the mask's own SDT — no ground truth — so it is valid
+    as a state channel at deployment.
+
+    MUST be the single source of truth for this signal: both the training-time
+    state builder (drl_training._make_state_builder) and the eval/rollout-time
+    state builder (env_contour_refine._state) call THIS, so the extra channels
+    can never silently diverge between the two.
+    """
+    gy, gx = np.gradient(sdt.astype(np.float32))
+    mag = np.sqrt(gy * gy + gx * gx)
+    safe = mag > 1e-6
+    dy = np.where(safe, gy / (mag + 1e-12), 0.0).astype(np.float32)
+    dx = np.where(safe, gx / (mag + 1e-12), 0.0).astype(np.float32)
+    return np.stack([dy, dx], axis=0)
+
+
 def shifted(mask: np.ndarray, dy: int, dx: int) -> np.ndarray:
     """Translate by (dy, dx) px with zero-fill, no wraparound."""
     out = np.zeros_like(mask)

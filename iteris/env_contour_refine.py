@@ -69,7 +69,7 @@ from typing import Tuple, Dict, List
 import numpy as np
 import scipy.ndimage as ndi
 
-from .geometry import dice_score, signed_dt, _largest_cc, STRUCT
+from .geometry import dice_score, signed_dt, sdt_direction_field, _largest_cc, STRUCT
 
 
 # ── geometry helpers ─────────────────────────────────────────────────────────
@@ -174,6 +174,7 @@ class ContourRefineEnv:
         gate_lo: float = 0.35,            # below this prob, U-Net is confident background
         gate_hi: float = 0.65,            # above this prob, U-Net is confident foreground
         gate_margin: float = 0.10,        # linear ramp width outside [gate_lo, gate_hi]
+        directional_state: bool = False,  # append 2 DeepSnake-style SDT-gradient direction channels (5->7)
         **_ignored,                   # forward-compat: ignore unknown cfg keys
     ):
         assert action_type in ('discrete', 'continuous')
@@ -190,6 +191,7 @@ class ContourRefineEnv:
         self.gate_lo    = float(gate_lo)
         self.gate_hi    = float(gate_hi)
         self.gate_margin = float(gate_margin)
+        self.directional_state = bool(directional_state)
         # Only gate when a REAL prob_map was supplied: the fallback prob_map
         # (= init_mask, a binary {0,1} array) would never fall inside the
         # uncertain band, so gating against it would freeze every point.
@@ -583,10 +585,18 @@ class ContourRefineEnv:
 
     def _state(self) -> np.ndarray:
         sdt = signed_dt(self.mask, self.sdt_clip)
-        return np.stack([
+        chans = [
             self.image,
             self.mask.astype(np.float32),
             sdt,
             self.init_mask.astype(np.float32),
             self.prob_map,                      # U-Net confidence — where to refine
-        ], axis=0)
+        ]
+        # Optional directional (DeepSnake-style) channels, appended AT THE END
+        # so the sdt stays at index 2 (the ReplayBuffer caches next_state[2] as
+        # the SDT). Off by default → 5 channels, unchanged. MUST use the shared
+        # geometry.sdt_direction_field so training/eval state builders match.
+        if self.directional_state:
+            field = sdt_direction_field(sdt)     # (2, H, W): dy, dx
+            chans.extend([field[0], field[1]])
+        return np.stack(chans, axis=0)
