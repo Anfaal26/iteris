@@ -26,7 +26,7 @@ from tqdm.auto import trange
 from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
 from .geometry import (iou_score, precision_recall, boundary_iou,
                        mean_surface_distance_px, sdt_direction_field)
-from .diagnostics import sample_error_decomp
+from .diagnostics import sample_error_decomp, init_mask_refinable
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent, TD3Agent
 from .env_contour_refine import ContourRefineEnv
@@ -107,6 +107,13 @@ def _make_state_builder(caches: dict, sdt_clip: float, directional: bool = False
             chans.extend([field[0], field[1]])
         return torch.from_numpy(np.stack(chans, axis=0))
     return build
+
+
+def _subset_caches(caches: dict, idx: np.ndarray) -> dict:
+    """Return a new caches dict keeping only rows in `idx` (int index array).
+    All cache arrays share the sample axis (axis 0), so a single fancy-index
+    keeps image/gt/init/prob aligned."""
+    return {k: v[idx] for k, v in caches.items()}
 
 
 def _make_env(caches: dict, idx: int, env_kwargs: dict,
@@ -376,6 +383,50 @@ def run_drl_training(
               f'hard (<0.90): {hard_pct:.1f}% of train')
     if _topo_weights is not None:
         _weights = _topo_weights if _weights is None else (_weights * _topo_weights)
+
+    # ── Refinable gate (GT-FREE, opt-in) ────────────────────────────────────────
+    # Train ONLY on cases whose init mask is in the contour-refinable regime — a
+    # single dominant CC of plausible size (the U-Net actually localised the
+    # structure). Uses ONLY the init mask, never GT, so it is a deployable routing
+    # gate, not test cherry-picking: at inference you refine when the gate passes
+    # and keep the raw U-Net mask when it doesn't. This is the regime published
+    # contour-refinement methods assume (a competent initialisation); feeding the
+    # agent structurally-broken inits (missed/fragmented objects) is pure gradient
+    # noise it cannot act on. Val/test are gated the SAME way below (subset report
+    # + routed fallback), so the comparison stays honest.
+    _refinable_gate = bool(cfg.get('refinable_gate', False))
+    _rf_min_area = float(cfg.get('refinable_min_cc_frac', 0.004))
+    _rf_min_dom  = float(cfg.get('refinable_min_dominance', 0.5))
+    if _refinable_gate:
+        _rf_train = np.array([
+            init_mask_refinable(train_caches['init_mask'][i], _rf_min_area, _rf_min_dom)
+            for i in range(len(train_samples))], dtype=bool)
+        n_ref = int(_rf_train.sum())
+        print(f"[drl] Refinable gate ON (GT-FREE): {n_ref}/{len(train_samples)} train init masks "
+              f"refinable (min_cc_frac={_rf_min_area}, min_dominance={_rf_min_dom}) "
+              f"-> training only on these")
+        if n_ref == 0:
+            raise ValueError("refinable_gate excluded ALL training samples — loosen "
+                             "refinable_min_cc_frac / refinable_min_dominance.")
+        _rf_w = _rf_train.astype(float)
+        _weights = _rf_w if _weights is None else (_weights * _rf_w)
+
+    # Gate the VALIDATION set the same way (GT-free) so the training curve,
+    # checkpoint selection, and reported val metrics all reflect the refinable
+    # regime the agent is actually being asked to handle. Non-refinable val cases
+    # would be routed to the U-Net mask at deployment (identity), so including
+    # them here would just add a constant band of init==final noise.
+    _eval_caches = val_caches
+    if _refinable_gate:
+        _rf_val = np.array([
+            init_mask_refinable(val_caches['init_mask'][i], _rf_min_area, _rf_min_dom)
+            for i in range(len(val_caches['image']))], dtype=bool)
+        n_val_ref = int(_rf_val.sum())
+        print(f"[drl] Refinable gate: val {n_val_ref}/{len(_rf_val)} refinable "
+              f"-> eval + checkpoint selection on this subset")
+        if n_val_ref == 0:
+            raise ValueError("refinable_gate excluded ALL validation samples — loosen thresholds.")
+        _eval_caches = _subset_caches(val_caches, np.nonzero(_rf_val)[0])
 
     if _weights is not None:
         _weights = _weights / _weights.sum()
@@ -716,7 +767,7 @@ def run_drl_training(
             # Periodic eval — also the cadence at which the resume/best
             # checkpoints refresh (eval_every controls both).
             if step % eval_every == 0:
-                metrics = evaluate_agent(agent, val_caches, env_kwargs, env_cls=env_cls)
+                metrics = evaluate_agent(agent, _eval_caches, env_kwargs, env_cls=env_cls)
                 metrics['step']    = step
                 metrics['epsilon'] = epsilon if epsilon is not None else None
                 # RL training diagnostics for this window (since the last eval),

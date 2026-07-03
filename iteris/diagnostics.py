@@ -241,6 +241,46 @@ def sample_error_decomp(init_mask, gt_mask, band_px=4):
     return band_only / tot, topo_err / tot, inter_err / tot
 
 
+def init_mask_refinable(init_mask, min_cc_area_frac=0.004, min_dominance=0.5):
+    """GT-FREE deployable gate: is this U-Net init mask in the regime a
+    contour-deformation agent can actually improve?
+
+    True iff the init mask has a single DOMINANT connected component of plausible
+    size — i.e. the U-Net genuinely localised the structure, so local boundary
+    nudging has something coherent to refine. Uses ONLY the init mask (never GT),
+    so it is a DEPLOYABLE routing gate: at inference you refine when this is True
+    and fall back to the raw U-Net mask when False.
+
+    This is the honest way to scope refinement to fixable cases — exactly the
+    regime published contour-refinement methods (DeepSnake, MARL-MambaContour)
+    operate in, since their initialisation always comes from a competent detector.
+    It is NOT cherry-picking the test set: because the gate never sees GT, the
+    same decision is available at deployment, so excluded cases are ROUTED
+    (kept as the U-Net mask), not silently deleted.
+
+    Params:
+      min_cc_area_frac : largest CC must cover at least this fraction of the image
+                         (rejects near-total misses / tiny specks).
+      min_dominance    : largest CC must be at least this fraction of the total
+                         init foreground (rejects fragmented multi-blob masks).
+    """
+    m = np.asarray(init_mask).astype(bool)
+    tot = int(m.sum())
+    if tot == 0:
+        return False                                  # U-Net found nothing
+    lab, ncc = ndi.label(m)
+    if ncc == 0:
+        return False
+    sizes = np.bincount(lab.ravel())
+    sizes[0] = 0
+    largest = int(sizes.max())
+    if largest < min_cc_area_frac * m.size:
+        return False                                  # only a tiny speck localised
+    if largest / tot < min_dominance:
+        return False                                  # too fragmented, no dominant CC
+    return True
+
+
 def error_type_audit(samples, band_px=4, n_samples=80, label=''):
     """What fraction of the lite-mask error is contour-fixable vs structural?
 

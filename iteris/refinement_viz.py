@@ -333,14 +333,32 @@ def plot_behaviour(replays, cfg, class_name='', out_path=None):
 
 
 def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
-                     env_cls=None) -> Dict:
+                     env_cls=None, refinable_gate: bool = False,
+                     refinable_min_cc_frac: float = 0.004,
+                     refinable_min_dominance: float = 0.5) -> Dict:
     """§10: greedy rollout over the test set → aggregate metrics.
-    ``env_cls`` auto-detects from the agent's action-head size if not given."""
+    ``env_cls`` auto-detects from the agent's action-head size if not given.
+
+    When ``refinable_gate=True`` the SAME GT-free init-quality gate used at
+    training time (diagnostics.init_mask_refinable) is applied here, and the
+    result additionally reports:
+      * ``*_refinable_*`` — metrics on the in-regime subset only (the scientific
+        claim: does refinement help where it is applicable?);
+      * ``routed_*`` — the honest END-TO-END number over the FULL test set with a
+        deployable fallback: refine when the gate passes, keep the U-Net (init)
+        mask when it doesn't. No GT is used to decide routing, so nothing is
+        cherry-picked — excluded cases are scored at their init Dice, not dropped.
+    """
+    from .diagnostics import init_mask_refinable
     init_d, final_d, best_d, final_h, vf_d = [], [], [], [], []
     final_iou, final_prec, final_sen, final_biou, final_msd = [], [], [], [], []
     init_h = []
     init_iou, init_prec, init_sen, init_biou, init_msd = [], [], [], [], []
+    refinable_flags = []
     for s in test_samples:
+        refinable_flags.append(bool(init_mask_refinable(
+            s['init_mask'], refinable_min_cc_frac, refinable_min_dominance))
+            if refinable_gate else True)
         r = replay_one(agent, s, env_kwargs, env_cls=env_cls)
         init_d.append(r['init_dice']); final_d.append(r['final_dice'])
         best_d.append(r['best_dice']); final_h.append(r['final_hd95'])
@@ -387,4 +405,30 @@ def evaluate_testset(agent, test_samples: List[dict], env_kwargs: dict,
         delta_iou_mean         = float(np.mean(final_iou) - np.mean(init_iou)),
         delta_biou_mean        = float(np.mean(final_biou) - np.mean(init_biou)),
     )
+
+    # ── Refinable-gate reporting (GT-free routing) ──────────────────────────────
+    if refinable_gate:
+        flags = np.asarray(refinable_flags, dtype=bool)
+        init_a = np.asarray(init_d, dtype=float)
+        fin_a  = np.asarray(final_d, dtype=float)
+        vf_a   = np.asarray(vf_d, dtype=float)
+        n_ref  = int(flags.sum())
+        # (a) subset means — refinement performance where it is APPLICABLE.
+        if n_ref > 0:
+            out.update(
+                n_refinable                     = n_ref,
+                n_total                         = int(flags.size),
+                refinable_frac                  = float(flags.mean()),
+                init_dice_refinable_mean        = float(init_a[flags].mean()),
+                final_dice_refinable_mean       = float(fin_a[flags].mean()),
+                value_floored_dice_refinable_mean = float(vf_a[flags].mean()),
+                value_floored_delta_refinable_mean = float((vf_a[flags] - init_a[flags]).mean()),
+            )
+        # (b) routed full-set — deployable end-to-end: refine if gate passes,
+        # else keep the U-Net (init) mask. GT never decides routing.
+        routed = np.where(flags, vf_a, init_a)
+        out.update(
+            routed_dice_mean       = float(routed.mean()),
+            routed_delta_mean      = float((routed - init_a).mean()),
+        )
     return out
