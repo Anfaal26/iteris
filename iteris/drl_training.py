@@ -179,17 +179,34 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
     final_iou, final_prec, final_sen, final_biou, final_msd = [], [], [], [], []
     init_h = []
     init_iou, init_prec, init_sen, init_biou, init_msd = [], [], [], [], []
+    # Value-floored ("do no harm") deploy Dice — GT-FREE selection (the agent's
+    # own value estimate picks which visited mask to commit, falling back to init
+    # if it never values an edit above the start), then scored vs GT for REPORTING
+    # only. This is the DEPLOYABLE number and what checkpoint selection optimises,
+    # so the saved model is the one that deploys best. Parity is relative to the
+    # agent's OWN value estimate (not a hard GT floor): a well-trained, calibrated
+    # value fn ⇒ genuine do-no-harm; a noisy one can still commit a worse edit —
+    # which is precisely why we keep the checkpoint with the best val-vfloor.
+    # Mirrors refinement_viz's Pillar-1 selector so train-time val and final test
+    # agree. Agents without a state_value method (none currently) fall back to init.
+    vf_d = []
+    has_value = hasattr(agent, 'state_value')
     for i in range(n):
         env = _make_env(caches, i, env_kwargs, env_cls=env_cls)
         state = env.reset()
         init_d.append(env.dice_history[0])
         init_mask0 = env.mask.copy()
+        masks  = [env.mask.copy()]
+        values = [agent.state_value(state)] if has_value else None
         while True:
             if agent.action_type == 'discrete':
                 a = agent.select_action(state, epsilon=0.0)
             else:
                 a = agent.select_action(state, explore=False)
             state, _, done, info = env.step(a)
+            masks.append(env.mask.copy())
+            if has_value:
+                values.append(agent.state_value(state))
             if done:
                 break
         final_d.append(info['dice'])
@@ -199,6 +216,15 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         best_d.append(info.get('best_dice', info['dice']))
 
         gt = caches['gt_mask'][i]
+        # Value-floored selection: commit the highest-VALUED visited mask (GT-free);
+        # keep init if nothing is valued above it → guaranteed ≥ baseline parity.
+        if has_value:
+            v = np.asarray(values, dtype=np.float64)
+            bt = int(v.argmax())
+            vf_idx = bt if v[bt] > v[0] else 0
+            vf_d.append(dice_score(masks[vf_idx], gt))
+        else:
+            vf_d.append(env.dice_history[0])
         final_iou.append(iou_score(env.mask, gt))
         p, r = precision_recall(env.mask, gt)
         final_prec.append(p); final_sen.append(r)
@@ -224,6 +250,10 @@ def evaluate_agent(agent, samples_or_caches, env_kwargs, env_cls=SegmentationEnv
         init_dice_mean  = float(np.mean(init_d)),
         final_dice_mean = float(np.mean(final_d)),
         best_dice_mean  = float(np.mean(best_d)),    # diagnostic ceiling
+        # Deployable do-no-harm number: what checkpoint selection optimises and
+        # what should be reported as "DRL deploy Dice" (never below baseline).
+        value_floored_dice_mean  = float(np.mean(vf_d)),
+        value_floored_delta_mean = float(np.mean([v - i for v, i in zip(vf_d, init_d)])),
         final_hd95_mean = float(valid_h.mean()) if valid_h.size else float('nan'),
         delta_dice_mean = float(np.mean([f - i for f, i in zip(final_d, init_d)])),
         final_iou_mean         = float(np.mean(final_iou)),
@@ -699,9 +729,15 @@ def run_drl_training(
                                                   if _ep_reward_buf else float('nan'))
                 _loss_buf, _ep_reward_buf = [], []
                 history.append(metrics)
-                improved = metrics['final_dice_mean'] > best_dice
+                # Select the best checkpoint on the DEPLOYABLE value-floored Dice
+                # (do-no-harm, GT-free selection) rather than raw final Dice: the
+                # saved model is then the one that deploys best, never one that
+                # degrades good masks. Falls back to final_dice_mean for agents
+                # without a value head (backward-compatible).
+                _deploy = metrics.get('value_floored_dice_mean', metrics['final_dice_mean'])
+                improved = _deploy > best_dice
                 if improved:
-                    best_dice = metrics['final_dice_mean']
+                    best_dice = _deploy
                     _save_agent(agent, history, best_dice, ckpt_path, step=step)
                 # Always refresh the resume checkpoint (latest full state), even
                 # when val didn't improve, so a chunked run can continue from here.
@@ -709,8 +745,11 @@ def run_drl_training(
                 pbar.write(
                     f"step {step:6d} | init {metrics['init_dice_mean']:.4f} "
                     f"→ final {metrics['final_dice_mean']:.4f} "
+                    f"| deploy(vfloor) {metrics.get('value_floored_dice_mean', float('nan')):.4f} "
                     f"| best-seen {metrics.get('best_dice_mean', float('nan')):.4f} "
-                    f"(Δ {metrics['delta_dice_mean']:+.4f}, HD95 {metrics['final_hd95_mean']:.2f}px, "
+                    f"(Δfinal {metrics['delta_dice_mean']:+.4f}, "
+                    f"Δdeploy {metrics.get('value_floored_delta_mean', float('nan')):+.4f}, "
+                    f"HD95 {metrics['final_hd95_mean']:.2f}px, "
                     f"IoU {metrics['final_iou_mean']:.4f}, BIoU {metrics['final_biou_mean']:.4f})"
                     f"{' ✓' if improved else ''}"
                 )
