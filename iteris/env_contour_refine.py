@@ -179,7 +179,7 @@ class ContourRefineEnv:
     ):
         assert action_type in ('discrete', 'continuous')
         assert reward_mode in ('dice_delta', 'dice_hd_composite', 'iou_delta',
-                               'dice_pbrs', 'dice_hd_pbrs')
+                               'dice_pbrs', 'dice_hd_pbrs', 'contour_boundary')
         assert image.shape == gt_mask.shape == init_mask.shape
         self.image     = image.astype(np.float32)
         self.gt        = gt_mask.astype(np.uint8)
@@ -199,6 +199,15 @@ class ContourRefineEnv:
         self.pbrs_gamma = float(pbrs_gamma)
         self._is_pbrs  = reward_mode in ('dice_pbrs', 'dice_hd_pbrs')
         self._needs_hd = reward_mode in ('dice_hd_composite', 'dice_hd_pbrs')
+        # Dense per-control-point boundary reward: reward = reduction in the mean
+        # distance from the N control points to the GT boundary (uses the already
+        # precomputed self._gt_edt). High-SNR (one signal per point, not a single
+        # global Dice scalar), self-regularising (moving a point already ON the
+        # boundary *increases* its distance -> negative reward, so correct points
+        # are left alone and the agent parks itself at the peak instead of
+        # drifting). GT is used at TRAINING time only, exactly like every other
+        # reward mode. See the module docstring / SKILLS.md.
+        self._is_contour_boundary = (reward_mode == 'contour_boundary')
 
         self.action_type   = action_type
         self.max_steps     = int(max_steps)
@@ -240,6 +249,9 @@ class ContourRefineEnv:
         self._prev_mask = self.mask.copy()
 
         self._precompute_gt_quantities()
+        # Dense-boundary-reward tracker: mean distance of the current control
+        # points to the GT boundary at episode start (needs _gt_edt, just built).
+        self._prev_point_dist = self._point_boundary_dist(self.points)
         d0 = dice_score(self.mask, self.gt)
         self.dice_history = [d0]
         self.best_dice = d0
@@ -326,7 +338,20 @@ class ContourRefineEnv:
 
         done = self._check_termination()
 
-        if self._is_pbrs:
+        if self._is_contour_boundary:
+            # Dense reward: how much closer (px) did the control points get to the
+            # GT boundary this step. Positive when the contour moves toward truth;
+            # NEGATIVE when a boundary-correct point is pushed off — this is the
+            # built-in trust region that makes "leave correct points alone" and
+            # "stop when converged" the reward-optimal behaviour.
+            new_point_dist = self._point_boundary_dist(self.points)
+            raw_reward = (self._prev_point_dist - new_point_dist) - self.reward_step_penalty
+            self._prev_point_dist = new_point_dist
+            clip = self.reward_clip
+            if done and self.terminal_bonus_scale > 0.0:
+                raw_reward += self.terminal_bonus_scale * (new_dice - self.dice_history[0])
+                clip = self.reward_clip + self.terminal_bonus_scale
+        elif self._is_pbrs:
             phi_new = self._potential(new_dice, new_hd95)
             raw_reward = (self.pbrs_gamma * phi_new - phi_prev) - self.reward_step_penalty
             clip = self.reward_clip
@@ -348,8 +373,9 @@ class ContourRefineEnv:
         self.t += 1
         new_dice = dice_score(self.mask, self.gt)
         new_hd95 = self._hd95_vs_gt(self.mask) if self._needs_hd else float('nan')
-        if self._is_pbrs:
-            # STOP commits the current contour; its value was already credited.
+        if self._is_pbrs or self._is_contour_boundary:
+            # STOP commits the current contour; per-step value already credited
+            # (dense boundary reward has no separate terminal term to add here).
             raw_reward = 0.0
             clip = self.reward_clip
         else:
@@ -566,6 +592,17 @@ class ContourRefineEnv:
         self._gt_edge     = gt_edge
         self._gt_edge_any = bool(gt_edge.any())
         self._gt_edt      = ndi.distance_transform_edt(~gt_edge)
+
+    def _point_boundary_dist(self, points: np.ndarray) -> float:
+        """Mean distance (px) from the control points to the GT boundary.
+
+        Reads the precomputed `self._gt_edt` (Euclidean distance-to-GT-edge at
+        every pixel) at each control point's rounded (y, x). This is the signal
+        the dense `contour_boundary` reward differences step-to-step. GT-derived,
+        so TRAINING-time only — same contract as the Dice/HD reward terms."""
+        ys = np.clip(points[:, 0].round().astype(int), 0, self.H - 1)
+        xs = np.clip(points[:, 1].round().astype(int), 0, self.W - 1)
+        return float(self._gt_edt[ys, xs].mean())
 
     def _hd95_vs_gt(self, m1: np.ndarray) -> float:
         m1b = _largest_cc(m1)
