@@ -175,6 +175,14 @@ class ContourRefineEnv:
         gate_hi: float = 0.65,            # above this prob, U-Net is confident foreground
         gate_margin: float = 0.10,        # linear ramp width outside [gate_lo, gate_hi]
         directional_state: bool = False,  # append 2 DeepSnake-style SDT-gradient direction channels (5->7)
+        auto_smooth_lambda: float = 0.0,  # gentle Laplacian smoothing applied to the point cloud
+                                          # after EVERY continuous action (0 = off, back-compat).
+                                          # Continuous TD3/DDPG have no explicit SMOOTH action, so
+                                          # with small disp_px + many steps the independent per-sector
+                                          # pushes accumulate into a wavy contour. A small value
+                                          # (~0.1-0.2) removes that high-frequency waviness each step
+                                          # without erasing legitimate curvature. Analogous to the
+                                          # discrete SMOOTH action (smooth_lambda) but automatic.
         **_ignored,                   # forward-compat: ignore unknown cfg keys
     ):
         assert action_type in ('discrete', 'continuous')
@@ -192,6 +200,7 @@ class ContourRefineEnv:
         self.gate_hi    = float(gate_hi)
         self.gate_margin = float(gate_margin)
         self.directional_state = bool(directional_state)
+        self.auto_smooth_lambda = float(auto_smooth_lambda)
         # Only gate when a REAL prob_map was supplied: the fallback prob_map
         # (= init_mask, a binary {0,1} array) would never fall inside the
         # uncertain band, so gating against it would freeze every point.
@@ -537,6 +546,13 @@ class ContourRefineEnv:
         disp = disp * gate
         normals = self._outward_normals(self.points)
         out = self.points + (disp[:, None] * self.disp_px) * normals
+        # Gentle per-step Laplacian smoothing removes the high-frequency waviness
+        # that independent per-sector pushes accumulate over many small steps
+        # (continuous agents have no explicit SMOOTH action). Off when lambda=0.
+        if self.auto_smooth_lambda > 0.0:
+            nxt = np.roll(out, -1, axis=0)
+            prv = np.roll(out, +1, axis=0)
+            out = out + self.auto_smooth_lambda * (0.5 * (nxt + prv) - out)
         return self._clip_points(out)
 
     def _clip_points(self, points: np.ndarray) -> np.ndarray:

@@ -454,6 +454,7 @@ def run_drl_training(
         'terminal_bonus_scale',                        # path-independent terminal reward
         'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
         'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',  # contour env
+        'auto_smooth_lambda',                          # per-step Laplacian smoothing (continuous)
         'uncertainty_gate', 'gate_lo', 'gate_hi', 'gate_margin',  # U-Net confidence gate
         'directional_state',                           # +2 SDT-gradient direction channels
     )
