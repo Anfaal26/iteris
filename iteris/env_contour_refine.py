@@ -508,20 +508,31 @@ class ContourRefineEnv:
         """Angular-sector normal push (TD3/DDPG action).
 
         action[g] ∈ [-1, 1] is the signed displacement (× disp_px) applied along
-        the outward normal to EVERY control point whose angle about the centroid
-        falls in wedge g. Angular binning (not point index) keeps each action
-        component tied to a FIXED spatial direction across samples — find_contours
-        seeds at an arbitrary point, so an index-keyed offset would map to a
-        different region every episode and be unlearnable. This mirrors the
-        discrete sector design that was validated as learnable.
+        the outward normal to each control point, CIRCULARLY LINEARLY INTERPOLATED
+        between the two nearest sector centres by angular position (not a hard
+        per-sector bin assignment). At each sector's own centre angle, disp==a[g]
+        exactly — same semantics as before — but it now blends smoothly toward the
+        neighbouring sector's value near a wedge boundary instead of jumping
+        discretely. With ~2 control points per wedge (n_points=32, cont_sectors=16
+        in the CAMUS configs), a hard bin edge landing between two adjacent points
+        with very different action values produces a visible geometric kink in the
+        deformed contour — this is what that looked like in practice. Angular
+        binning (now interpolation) is still angle-based, not point-index-based,
+        for the same reason as before: find_contours seeds at an arbitrary point,
+        so an index-keyed offset would map to a different region every episode.
         """
         a = np.asarray(a, dtype=np.float32).ravel()
         nb = a.shape[0]                                  # = self.cont_sectors
         c = self.points.mean(axis=0)
         ang = np.mod(np.arctan2(self.points[:, 0] - c[0],
                                 self.points[:, 1] - c[1]), 2.0 * np.pi)
-        bins = np.clip((ang / (2.0 * np.pi / nb)).astype(int), 0, nb - 1)
-        disp = a[bins]                                   # (N,) per-point coefficient
+        wedge = 2.0 * np.pi / nb
+        pos = ang / wedge - 0.5                          # continuous sector coordinate
+        g0 = np.floor(pos).astype(int)
+        frac = (pos - g0).astype(np.float32)
+        g0m = np.mod(g0, nb)
+        g1m = np.mod(g0 + 1, nb)
+        disp = (1.0 - frac) * a[g0m] + frac * a[g1m]      # (N,) circularly interpolated
         gate = self._gate_weights(self.points)
         disp = disp * gate
         normals = self._outward_normals(self.points)
