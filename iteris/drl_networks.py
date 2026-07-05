@@ -201,37 +201,47 @@ class SectorPool(nn.Module):
         self.feat_h = int(feat_h)
         self.feat_w = int(feat_w)
         self.n_sectors = int(n_sectors)
+        # Alternate-size cache: the mask depends only on the conv feature-map
+        # spatial dims, which are fixed per run (16x16 for the project's 256x256
+        # inputs). Precompute the default; forward() rebuilds+caches for any other
+        # size so the spatial heads are not silently tied to image_size=256.
+        self._alt_cache = {}
+        mask, counts = self._build_mask(self.feat_h, self.feat_w)
+        self.register_buffer('sector_mask', mask)                    # (n_sectors, H*W)
+        self.register_buffer('sector_counts', counts)                # (n_sectors,)
 
+    def _build_mask(self, h: int, w: int):
         rr, cc = torch.meshgrid(
-            torch.arange(self.feat_h, dtype=torch.float32),
-            torch.arange(self.feat_w, dtype=torch.float32),
+            torch.arange(h, dtype=torch.float32),
+            torch.arange(w, dtype=torch.float32),
             indexing='ij',
         )
-        dy = rr - self.feat_h / 2.0
-        dx = cc - self.feat_w / 2.0
-        ang = torch.atan2(dy, dx)                                   # (feat_h, feat_w)
-        ang = torch.remainder(ang, 2.0 * torch.pi)
+        dy = rr - h / 2.0
+        dx = cc - w / 2.0
+        ang = torch.remainder(torch.atan2(dy, dx), 2.0 * torch.pi)   # (h, w)
         wedge = (2.0 * torch.pi) / self.n_sectors
-        bins = torch.floor(ang / wedge).long()
-        bins = torch.clamp(bins, 0, self.n_sectors - 1)
-        bins_flat = bins.reshape(-1)                                 # (feat_h*feat_w,)
-
-        sector_mask = torch.zeros(self.n_sectors, self.feat_h * self.feat_w,
-                                   dtype=torch.float32)
-        sector_mask.scatter_(0, bins_flat.unsqueeze(0), 1.0)
-        # ^ scatter_ along dim 0 writes a 1 at (bins_flat[i], i) for every i —
-        #   equivalent to, for each sector g, sector_mask[g, i] = (bins_flat[i]==g).
-        self.register_buffer('sector_mask', sector_mask)              # (n_sectors, H*W)
-        self.register_buffer('sector_counts',
-                              sector_mask.sum(dim=1).clamp(min=1.0))   # (n_sectors,)
+        bins = torch.clamp(torch.floor(ang / wedge).long(), 0, self.n_sectors - 1)
+        bins_flat = bins.reshape(-1)                                 # (h*w,)
+        mask = torch.zeros(self.n_sectors, h * w, dtype=torch.float32)
+        mask.scatter_(0, bins_flat.unsqueeze(0), 1.0)
+        # ^ for each sector g: mask[g, i] = (bins_flat[i] == g).
+        return mask, mask.sum(dim=1).clamp(min=1.0)
 
     def forward(self, feat_map: torch.Tensor) -> torch.Tensor:
         """(B, C, feat_h, feat_w) -> (B, n_sectors, C) per-sector mean features."""
         b, c, h, w = feat_map.shape
+        if h * w == self.sector_mask.shape[1]:
+            mask, counts = self.sector_mask, self.sector_counts
+        else:
+            key = (h, w)
+            if key not in self._alt_cache:
+                m, cnt = self._build_mask(h, w)
+                self._alt_cache[key] = (m.to(feat_map.device), cnt.to(feat_map.device))
+            mask, counts = self._alt_cache[key]
         flat = feat_map.reshape(b, c, h * w)                         # (B, C, H*W)
         # sum over cells assigned to each sector: (B,C,H*W) x (n_sectors,H*W)^T
-        summed = torch.einsum('bcn,gn->bgc', flat, self.sector_mask)  # (B, n_sectors, C)
-        return summed / self.sector_counts.view(1, -1, 1)
+        summed = torch.einsum('bcn,gn->bgc', flat, mask)             # (B, n_sectors, C)
+        return summed / counts.view(1, -1, 1)
 
 
 def _global_context_branch(embed_dim_out: int = 64):
