@@ -601,7 +601,8 @@ def run_drl_training(
         else:   # discrete DuelingDDQN / DQN
             demos = bc_demo.collect_discrete_oracle_demos(
                 train_samples, env_kwargs,
-                bc_demo_episodes, bc_demo_max_steps, seed=cfg.get('seed', 42))
+                bc_demo_episodes, bc_demo_max_steps, seed=cfg.get('seed', 42),
+                stop_eps=cfg.get('stop_eps_dice', 0.005))
             demo_buffer = bc_demo.DemoBuffer(demos, mask_shape=(H, H))
             bc_loss = agent.pretrain_bc(
                 demo_buffer, state_builder,

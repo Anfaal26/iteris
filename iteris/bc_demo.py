@@ -120,6 +120,7 @@ def collect_discrete_oracle_demos(
     n_episodes: int,
     max_steps: int,
     seed: int = 42,
+    stop_eps: float = 0.005,
 ) -> List[dict]:
     """Greedy discrete oracle over the 18-action contour action space, for
     warm-starting the DuelingDDQN/DQN Q-network (the discrete counterpart of
@@ -128,10 +129,19 @@ def collect_discrete_oracle_demos(
     For each of `n_episodes` seeded-random samples, roll out up to `max_steps`
     steps. At each step, try every non-STOP discrete action on a deep-copied env
     and keep whichever most raises Dice vs GT (same deepcopy-and-discard pattern
-    as `diagnostics.oracle_greedy`). If NO push strictly improves Dice, the
-    oracle records STOP — so the demos teach BOTH "push the right sector" and
-    "stop when converged". A demo is recorded for the state BEFORE the chosen
-    action is applied. The oracle sees GT — valid at TRAIN time only.
+    as `diagnostics.oracle_greedy`). If no push raises Dice by more than
+    `stop_eps`, the oracle records STOP — so the demos teach BOTH "push the
+    right sector" and "stop when converged". A demo is recorded for the state
+    BEFORE the chosen action is applied. The oracle sees GT — valid at TRAIN
+    time only.
+
+    `stop_eps` (default matches the env's own `stop_eps_dice`, ~0.005) guards
+    against floating-point/rasterization jitter: on an already-converged mask,
+    re-rasterizing a barely-nudged spline can shift Dice by a sub-pixel amount
+    in EITHER direction purely from numerical noise, so a strict `>` bar is
+    almost always cleared by at least one of 17 candidates — the oracle then
+    (almost) never emits STOP, teaching BC a noisy, near-arbitrary "best
+    action" instead of a clean stop-when-converged signal.
 
     Returns demo dicts with an INTEGER action:
         {'sample_idx': int, 'mask': uint8 (H,W), 'sdt': float16 (H,W), 'action': int}
@@ -152,7 +162,8 @@ def collect_discrete_oracle_demos(
             init_mask=sample['init_mask'], prob_map=sample.get('prob_map'),
             **base_kwargs)
         for _ in range(max_steps):
-            best_a, best_after = None, env.dice_history[-1]
+            current = env.dice_history[-1]
+            best_a, best_after = None, current
             for a in range(n_act):
                 if a == stop:
                     continue
@@ -160,7 +171,9 @@ def collect_discrete_oracle_demos(
                 _, _, _, info = trial.step(a)
                 if info['dice'] > best_after:
                     best_after, best_a = info['dice'], a
-            action = stop if best_a is None else best_a   # no gain -> teach STOP
+            # STOP unless the best candidate beats the current Dice by more
+            # than stop_eps (not just any strictly-positive jitter).
+            action = stop if (best_a is None or (best_after - current) <= stop_eps) else best_a
             pre_mask = env.mask.copy().astype(np.uint8)
             pre_sdt = signed_dt(pre_mask, sdt_clip).astype(np.float16)
             demos.append({
