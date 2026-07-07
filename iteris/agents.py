@@ -102,7 +102,47 @@ class DQNAgent:
         s = torch.from_numpy(state).unsqueeze(0).float().to(self.device)
         return float(self.q(s).max(dim=1).values.item())
 
-    def update(self, batch: dict, state_builder: Callable) -> dict:
+    def _bc_states(self, batch, state_builder):
+        n = len(batch['sample_idx'])
+        cs = batch.get('current_sdt')
+        return torch.stack([
+            state_builder(batch['sample_idx'][i], batch['current_mask'][i],
+                          cs[i] if cs is not None else None)
+            for i in range(n)
+        ]).to(self.device)
+
+    def pretrain_bc(self, demo_buffer, state_builder: Callable, epochs: int = 30,
+                    batch_size: int = 64, lr: float = None) -> float:
+        """Warm-start the Q-network by IMITATING the discrete oracle (DuelingDDQN
+        cold-starts from a random Q, unlike TD3 which starts near-identity). The
+        Q-values are treated as action-preference logits and trained with
+        cross-entropy so that argmax_a Q(s,a) == oracle action. This sets the
+        RANKING (which action to take), not calibrated Q magnitudes — RL fills
+        those in during fine-tuning. Mirrors TD3Agent.pretrain_actor_bc so the
+        continuous/discrete comparison uses the SAME oracle warm-start. Returns
+        the final epoch's mean loss."""
+        opt = torch.optim.Adam(self.q.parameters(), lr=lr or 1e-4)
+        n_batches = max(1, len(demo_buffer) // batch_size)
+        epoch_loss = 0.0
+        for _ in range(epochs):
+            losses = []
+            for _ in range(n_batches):
+                batch = demo_buffer.sample(batch_size)
+                states = self._bc_states(batch, state_builder)
+                target = torch.from_numpy(batch['action']).long().to(self.device)
+                logits = self.q(states)                    # (B, num_actions) as logits
+                loss = F.cross_entropy(logits, target)
+                opt.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
+                opt.step()
+                losses.append(float(loss.item()))
+            epoch_loss = float(np.mean(losses))
+        self.q_target.load_state_dict(self.q.state_dict())
+        return epoch_loss
+
+    def update(self, batch: dict, state_builder: Callable,
+               bc_batch: dict = None, bc_lambda: float = 0.0) -> dict:
         n = len(batch['sample_idx'])
         cs = batch.get('current_sdt')           # may be None if buffer.cache_sdt=False
         ns = batch.get('next_sdt')
@@ -134,13 +174,23 @@ class DQNAgent:
 
         loss = F.smooth_l1_loss(q_pred, y)
 
+        # Optional TD3+BC-style imitation regulariser (keeps the greedy policy
+        # near the oracle during early RL, decayed via bc_lambda upstream).
+        bc_loss_val = 0.0
+        if bc_batch is not None and bc_lambda > 0:
+            bc_states = self._bc_states(bc_batch, state_builder)
+            bc_target = torch.from_numpy(bc_batch['action']).long().to(self.device)
+            bc_loss = F.cross_entropy(self.q(bc_states), bc_target)
+            loss = loss + bc_lambda * bc_loss
+            bc_loss_val = float(bc_loss.item())
+
         self.opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q.parameters(), 1.0)
         self.opt.step()
 
         _soft_update(self.q_target, self.q, self.tau)
-        return {'loss': float(loss.item())}
+        return {'loss': float(loss.item()), 'bc_loss': bc_loss_val}
 
     def state_dict(self):
         return {'q': self.q.state_dict(), 'q_target': self.q_target.state_dict()}

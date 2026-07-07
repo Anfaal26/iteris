@@ -575,22 +575,37 @@ def run_drl_training(
     # deployment) gives it a competent starting policy instead; `bc_lambda`
     # regularisation during RL fine-tuning (see below) keeps it from drifting
     # back to identity. Only applies to TD3 on the continuous contour env.
+    # Now applies to BOTH the continuous TD3 actor (near-identity init) AND the
+    # discrete DuelingDDQN/DQN Q-net (random init, cold-start) — the SAME
+    # GT-oracle warm-start on each, so a continuous-vs-discrete comparison isn't
+    # confounded by only one side getting a warm start. Discrete imitates the
+    # 18-action greedy oracle via cross-entropy on Q-logits (argmax Q == oracle).
     demo_buffer = None
-    bc_warm_start = (cfg['agent_type'].upper() == 'TD3' and is_contour
-                     and cfg.get('bc_warm_start', False))
+    _agent_up = cfg['agent_type'].upper()
+    bc_warm_start = (is_contour and cfg.get('bc_warm_start', False)
+                     and _agent_up in ('TD3', 'DUELING', 'DQN'))
     if bc_warm_start:
         bc_demo_episodes = cfg.get('bc_demo_episodes', 150)
         bc_demo_max_steps = cfg.get('bc_demo_max_steps', 8)
         bc_pretrain_epochs = cfg.get('bc_pretrain_epochs', 30)
-        print(f'[drl] BC warm-start: collecting {bc_demo_episodes} oracle demo '
-              f'episodes (max_steps={bc_demo_max_steps})...')
-        demos = bc_demo.collect_continuous_oracle_demos(
-            train_samples, env_kwargs, cont_action_dim,
-            bc_demo_episodes, bc_demo_max_steps, seed=cfg.get('seed', 42))
-        demo_buffer = bc_demo.DemoBuffer(demos, mask_shape=(H, H))
-        bc_loss = agent.pretrain_actor_bc(
-            demo_buffer, state_builder,
-            epochs=bc_pretrain_epochs, batch_size=cfg.get('batch_size', 64))
+        print(f'[drl] BC warm-start ({action_type}): collecting {bc_demo_episodes} '
+              f'oracle demo episodes (max_steps={bc_demo_max_steps})...')
+        if action_type == 'continuous':
+            demos = bc_demo.collect_continuous_oracle_demos(
+                train_samples, env_kwargs, cont_action_dim,
+                bc_demo_episodes, bc_demo_max_steps, seed=cfg.get('seed', 42))
+            demo_buffer = bc_demo.DemoBuffer(demos, mask_shape=(H, H))
+            bc_loss = agent.pretrain_actor_bc(
+                demo_buffer, state_builder,
+                epochs=bc_pretrain_epochs, batch_size=cfg.get('batch_size', 64))
+        else:   # discrete DuelingDDQN / DQN
+            demos = bc_demo.collect_discrete_oracle_demos(
+                train_samples, env_kwargs,
+                bc_demo_episodes, bc_demo_max_steps, seed=cfg.get('seed', 42))
+            demo_buffer = bc_demo.DemoBuffer(demos, mask_shape=(H, H))
+            bc_loss = agent.pretrain_bc(
+                demo_buffer, state_builder,
+                epochs=bc_pretrain_epochs, batch_size=cfg.get('batch_size', 64))
         print(f'[drl] BC warm-start: {len(demos)} demo transitions, '
               f'pretrain loss={bc_loss:.4f}')
 

@@ -114,10 +114,74 @@ def collect_continuous_oracle_demos(
     return demos
 
 
+def collect_discrete_oracle_demos(
+    samples: List[dict],
+    env_kwargs: dict,
+    n_episodes: int,
+    max_steps: int,
+    seed: int = 42,
+) -> List[dict]:
+    """Greedy discrete oracle over the 18-action contour action space, for
+    warm-starting the DuelingDDQN/DQN Q-network (the discrete counterpart of
+    `collect_continuous_oracle_demos`).
+
+    For each of `n_episodes` seeded-random samples, roll out up to `max_steps`
+    steps. At each step, try every non-STOP discrete action on a deep-copied env
+    and keep whichever most raises Dice vs GT (same deepcopy-and-discard pattern
+    as `diagnostics.oracle_greedy`). If NO push strictly improves Dice, the
+    oracle records STOP — so the demos teach BOTH "push the right sector" and
+    "stop when converged". A demo is recorded for the state BEFORE the chosen
+    action is applied. The oracle sees GT — valid at TRAIN time only.
+
+    Returns demo dicts with an INTEGER action:
+        {'sample_idx': int, 'mask': uint8 (H,W), 'sdt': float16 (H,W), 'action': int}
+    """
+    rng = np.random.RandomState(seed)
+    episode_idx = rng.randint(0, len(samples), size=n_episodes)
+    sdt_clip = float(env_kwargs.get('sdt_clip', 20.0))
+    base_kwargs = dict(env_kwargs)
+    base_kwargs['action_type'] = 'discrete'
+    n_act = ContourRefineEnv.NUM_DISCRETE_ACTIONS
+    stop = ContourRefineEnv.STOP
+
+    demos: List[dict] = []
+    for idx in episode_idx:
+        sample = samples[int(idx)]
+        env = ContourRefineEnv(
+            image=sample['image'], gt_mask=sample['gt_mask'],
+            init_mask=sample['init_mask'], prob_map=sample.get('prob_map'),
+            **base_kwargs)
+        for _ in range(max_steps):
+            best_a, best_after = None, env.dice_history[-1]
+            for a in range(n_act):
+                if a == stop:
+                    continue
+                trial = deepcopy(env)
+                _, _, _, info = trial.step(a)
+                if info['dice'] > best_after:
+                    best_after, best_a = info['dice'], a
+            action = stop if best_a is None else best_a   # no gain -> teach STOP
+            pre_mask = env.mask.copy().astype(np.uint8)
+            pre_sdt = signed_dt(pre_mask, sdt_clip).astype(np.float16)
+            demos.append({
+                'sample_idx': int(idx),
+                'mask': pre_mask,
+                'sdt': pre_sdt,
+                'action': int(action),
+            })
+            _, _, done, _ = env.step(action)
+            if done:
+                break
+    return demos
+
+
 class DemoBuffer:
     """Array-based storage for oracle demonstrations, mirroring
     `iteris/buffer.py::ReplayBuffer`'s dtype/shape conventions so it can be
-    consumed by `TD3Agent._build_states` unmodified.
+    consumed by `TD3Agent._build_states` / `DQNAgent` unmodified.
+
+    Handles BOTH continuous (per-sector float vector) and discrete (single int)
+    oracle actions, detected from the first demo's action.
     """
 
     def __init__(self, demos: List[dict], mask_shape: tuple):
@@ -126,8 +190,12 @@ class DemoBuffer:
         self.sample_idx = np.zeros(n, dtype=np.int32)
         self.mask = np.zeros((n, *mask_shape), dtype=np.uint8)
         self.sdt = np.zeros((n, *mask_shape), dtype=np.float16)
-        action_dim = demos[0]['action'].shape[0] if n > 0 else 0
-        self.action = np.zeros((n, action_dim), dtype=np.float32)
+        a0 = demos[0]['action'] if n > 0 else 0.0
+        self.discrete = np.isscalar(a0) or (hasattr(a0, 'ndim') and np.ndim(a0) == 0)
+        if self.discrete:
+            self.action = np.zeros(n, dtype=np.int64)
+        else:
+            self.action = np.zeros((n, np.asarray(a0).shape[0]), dtype=np.float32)
 
         for i, d in enumerate(demos):
             self.sample_idx[i] = d['sample_idx']
