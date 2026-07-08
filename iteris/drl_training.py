@@ -50,6 +50,30 @@ ENV_REGISTRY = {
 CONTINUOUS_ACTION_DIM = SegmentationEnv.CONTINUOUS_ACTION_DIM   # 3
 
 
+# Optional env-constructor keys forwarded from a flat cfg into env_kwargs. This
+# is the SINGLE SOURCE OF TRUTH for "which cfg keys shape the env" — the
+# training env (run_drl_training) and the eval/test/replay env
+# (refinement_viz.refinement_env_kwargs, which imports this) MUST forward the
+# exact same set, or the agent is evaluated on a different env than it trained
+# on (a silent train/eval mismatch — e.g. auto_smooth_lambda / uncertainty_gate
+# were previously dropped at eval only). 'action_type' and 'pbrs_gamma' are
+# handled separately in both places (derived, not copied from cfg).
+ENV_OPTIONAL_KEYS = (
+    'max_steps', 'shift_px', 'sdt_clip', 'reward_clip',
+    'cont_morph_scale', 'cont_trans_scale',
+    'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
+    'stop_eps_dice', 'stop_eps_hd', 'stop_n',
+    'fail_thresh', 'fail_n',                       # small-target extras
+    'reward_step_penalty', 'disable_auto_stop',    # STOP-incentive shaping
+    'terminal_bonus_scale',                        # path-independent terminal reward
+    'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
+    'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',  # contour env
+    'auto_smooth_lambda',                          # per-step Laplacian smoothing (continuous)
+    'uncertainty_gate', 'gate_lo', 'gate_hi', 'gate_margin',  # U-Net confidence gate
+    'directional_state',                           # +2 SDT-gradient direction channels
+)
+
+
 AGENT_REGISTRY = {
     'DQN':     (DQNAgent,        'discrete'),   # 14-action local mask refinement
     'DUELING': (DuelingDQNAgent, 'discrete'),   # same, with V+A dueling heads
@@ -83,7 +107,8 @@ def _build_state_caches(samples: List[dict], image_size: int) -> dict:
     return caches
 
 
-def _make_state_builder(caches: dict, sdt_clip: float, directional: bool = False):
+def _make_state_builder(caches: dict, sdt_clip: float, directional: bool = False,
+                        largest_cc: bool = False):
     """
     Return a builder (idx, current_mask, cached_sdt=None) → torch (C, H, W).
 
@@ -97,22 +122,33 @@ def _make_state_builder(caches: dict, sdt_clip: float, directional: bool = False
     direction channels (5→7 total), derived from the SAME sdt via the shared
     geometry.sdt_direction_field — so this MUST stay identical to the append in
     ContourRefineEnv._state(). Off by default (5 channels, unchanged).
+
+    `largest_cc`: when True (contour env), channels 4-5 use the largest-CC
+    representation (init_repr / prob_repr) to match ContourRefineEnv._state()
+    exactly — the single closed contour can only represent one component. When
+    False (default SegmentationEnv, which does GLOBAL morphology and CAN act on
+    multiple blobs) they use the RAW init_mask / prob_map to match that env's
+    _state(). Getting this wrong would desync the rollout state (from env) and
+    the update state (from this builder) — a silent train/eval mismatch.
     """
+    init_key = 'init_repr' if largest_cc else 'init_mask'
+    prob_key = 'prob_repr' if largest_cc else 'prob_map'
+
     def build(idx, current_mask, cached_sdt=None):
         image = caches['image'][idx]
-        # Channel 4: largest-CC init (debris dropped) — matches env._state().
-        init  = caches['init_repr'][idx].astype(np.float32)
+        # Channel 4: init mask — largest-CC (contour) or raw (default env), per
+        # `largest_cc`; MUST match the env's own _state() on the same path.
+        init  = caches[init_key][idx].astype(np.float32)
         cur   = current_mask.astype(np.float32)
         if cached_sdt is not None:
             sdt = cached_sdt.astype(np.float32)
         else:
             sdt = signed_dt(current_mask, sdt_clip)
-        # 5th channel: U-Net probability map masked to that same largest CC
-        # (static per sample). Falls back to the largest-CC init when warm_start
-        # produced no prob_map. MUST match the channel order + CC-masking in
-        # ContourRefineEnv._state().
-        if 'prob_repr' in caches:
-            prob = caches['prob_repr'][idx].astype(np.float32)
+        # Channel 5: U-Net probability map (CC-masked for contour, raw for
+        # default). Falls back to the init channel when warm_start produced no
+        # prob_map. MUST match the channel order + masking in the env's _state().
+        if prob_key in caches:
+            prob = caches[prob_key][idx].astype(np.float32)
         else:
             prob = init
         chans = [image, cur, sdt, init, prob]
@@ -458,21 +494,7 @@ def run_drl_training(
     # apply its own defaults for max_steps / stop_n / stop_eps_dice rather
     # than being clobbered by hardcoded base-env defaults from this dict.
     env_kwargs = {'action_type': action_type}
-    _env_optional_keys = (
-        'max_steps', 'shift_px', 'sdt_clip', 'reward_clip',
-        'cont_morph_scale', 'cont_trans_scale',
-        'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
-        'stop_eps_dice', 'stop_eps_hd', 'stop_n',
-        'fail_thresh', 'fail_n',                       # small-target extras
-        'reward_step_penalty', 'disable_auto_stop',    # STOP-incentive shaping
-        'terminal_bonus_scale',                        # path-independent terminal reward
-        'reward_potential_scale',                      # PBRS potential scale (baseline-centred Φ)
-        'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',  # contour env
-        'auto_smooth_lambda',                          # per-step Laplacian smoothing (continuous)
-        'uncertainty_gate', 'gate_lo', 'gate_hi', 'gate_margin',  # U-Net confidence gate
-        'directional_state',                           # +2 SDT-gradient direction channels
-    )
-    for _k in _env_optional_keys:
+    for _k in ENV_OPTIONAL_KEYS:
         if _k in cfg:
             env_kwargs[_k] = cfg[_k]
     # Potential-based reward shaping (dice_pbrs / dice_hd_pbrs) needs the SAME
@@ -522,14 +544,19 @@ def run_drl_training(
     # (first conv shape changes) — it's an ablation arm, not a drop-in resume.
     _directional = bool(cfg.get('directional_state', False))
     _n_state_ch = 7 if _directional else 5
+    # Contour env represents ONE component, so its state channels 4-5 are the
+    # largest-CC init/prob; the default (global-morph) env keeps the raw mask.
+    # This flag keeps the update-time builder in lock-step with the env's own
+    # _state() — see _make_state_builder(largest_cc=...).
+    is_contour = (env_cls is ContourRefineEnv)
     # state_builder needs sdt_clip even if not in cfg (env class default applies).
     state_builder = _make_state_builder(train_caches, cfg.get('sdt_clip', 20.0),
-                                        directional=_directional)
+                                        directional=_directional,
+                                        largest_cc=is_contour)
 
     # ── Continuous action dim (env-dependent) ─────────────────────────────────
     #   contour env → cont_sectors angular wedges (TD3, action in [-1,1]^K)
     #   default env → 3-D global (morph, dy, dx)  (DDPG)
-    is_contour = (env_cls is ContourRefineEnv)
     cont_action_dim = None
     if action_type == 'continuous':
         cont_action_dim = (int(cfg.get('cont_sectors', 16)) if is_contour

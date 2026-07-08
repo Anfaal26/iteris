@@ -49,37 +49,30 @@ def _resolve_env_cls(agent, explicit=None):
     na = getattr(agent, 'num_actions', None)
     return _NUM_ACTIONS_TO_ENV.get(na, SegmentationEnv)
 
-# Keys SegmentationEnv accepts — used to filter a flat cfg into env kwargs.
-_ENV_KEYS = (
-    'action_type', 'max_steps', 'shift_px', 'sdt_clip', 'reward_clip',
-    'cont_morph_scale', 'cont_trans_scale',
-    'reward_mode', 'reward_alpha', 'reward_beta', 'hd_norm',
-    'stop_eps_dice', 'stop_eps_hd', 'stop_n', 'fail_thresh', 'fail_n',
-    'reward_step_penalty', 'disable_auto_stop', 'terminal_bonus_scale',
-    'reward_potential_scale',   # PBRS Φ scale (dice_pbrs / dice_hd_pbrs)
-    'n_points', 'disp_px', 'spline_smooth', 'smooth_lambda', 'cont_sectors',
-    'directional_state',        # +2 SDT-gradient channels — MUST match training in_channels
-)
-
-
 def refinement_env_kwargs(cfg: dict) -> dict:
-    """Filter a flat resolved cfg down to SegmentationEnv constructor kwargs.
+    """Filter a flat resolved cfg down to the env constructor kwargs.
+
+    Uses drl_training.ENV_OPTIONAL_KEYS — the SAME key set the training env is
+    built from — so the eval/test/replay env is guaranteed identical to the one
+    the agent trained on. Maintaining a second copy here previously let it drift
+    (auto_smooth_lambda / uncertainty_gate were silently dropped at eval only,
+    so TD3 and the gated class were tested on a different env than training).
 
     Also derives ``pbrs_gamma`` from the agent's ``gamma`` (same rule
     drl_training.py uses) so replay/visualisation envs reproduce the exact
     PBRS telescoping the agent was trained under, not the env's own default.
     """
-    kwargs = {k: cfg[k] for k in _ENV_KEYS if k in cfg}
+    from .drl_training import ENV_OPTIONAL_KEYS
+    kwargs = {k: cfg[k] for k in ENV_OPTIONAL_KEYS if k in cfg}
     kwargs['pbrs_gamma'] = cfg.get('gamma', 0.99)
     # action_type is NEVER present in the resolved YAML cfg -- run_drl_training
     # only ever computes it as a local variable from AGENT_REGISTRY, never
-    # writes it back into cfg. The dict comprehension above silently drops the
-    # 'action_type' key (it's listed in _ENV_KEYS but 'action_type' not in cfg),
-    # so the env falls back to its constructor default ('discrete'). Harmless
-    # for DQN/DuelingDDQN (matches the default by coincidence), but fatal for
-    # TD3/DDPG: a continuous action (np.ndarray) hits the discrete branch's
-    # `int(action)` in env_contour_refine.py's step() -> TypeError. Derive it
-    # explicitly from agent_type instead of trusting cfg to carry it.
+    # writes it back into cfg (and it is not in ENV_OPTIONAL_KEYS). Without the
+    # explicit derivation below the env would fall back to its constructor
+    # default ('discrete'): harmless for DQN/DuelingDDQN (matches by coincidence)
+    # but fatal for TD3/DDPG — a continuous action (np.ndarray) hits the discrete
+    # branch's `int(action)` in env_contour_refine.py's step() -> TypeError.
+    # Derive it from agent_type instead of trusting cfg to carry it.
     if 'agent_type' in cfg:
         from .drl_training import AGENT_REGISTRY
         _, kwargs['action_type'] = AGENT_REGISTRY[cfg['agent_type'].upper()]
