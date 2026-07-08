@@ -53,6 +53,13 @@ stop_n:            3
 # tail while keeping the easy majority well represented so STOP-when-good is
 # learned. This train/eval distribution match is essential to beating baseline.
 hard_mining_scale: 3.0
+# Tier 1.5 floor (see iteris/drl_training.py _hard_mining_weights): CAMUS has
+# CONFIRMED real headroom (docs/CONTEXT.md 2026-06-25: LV_endo +0.050 /
+# LV_epi +0.073 / LA +0.052), and scale=3.0 was already chosen conservatively
+# (see comment above -- ~95% of the easy majority's fair uniform sampling
+# share survives even unfloored). A light floor is cheap insurance here, not
+# a fix for a demonstrated problem.
+hard_mining_uniform_mix: 0.9
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # resolve_agent_config() merges the chosen block over the top-level dict.

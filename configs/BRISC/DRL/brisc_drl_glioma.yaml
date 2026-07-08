@@ -39,6 +39,14 @@ stop_eps_hd:       0.5
 stop_n:            3
 
 hard_mining_scale: 5.0             # re-enable — glioma hard cases are tractable
+# Tier 1.5 floor (see iteris/drl_training.py _hard_mining_weights): headroom
+# NOT individually diagnosed for this subtype (only pooled 'tumor' was
+# tested -- confirmed NEGATIVE, see brisc_drl_tumor.yaml). Moderate floor
+# reflects genuine uncertainty: meaningfully protects the easy majority's
+# training density while still allowing real hard-case emphasis in case the
+# "tractable" prior above holds. More protective than CAMUS (confirmed
+# positive headroom) but less severe than tumor (confirmed negative).
+hard_mining_uniform_mix: 0.6
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # ── Ablation knobs (OFF by default — see docs/EXPERIMENTS.md + SKILLS.md) ──────

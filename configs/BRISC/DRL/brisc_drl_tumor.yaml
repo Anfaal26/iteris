@@ -57,6 +57,20 @@ stop_n:            3
 # scale=8.0: Dice=0.80 gets ~7× weight vs Dice=0.93 (~1.7×). Aggressive but
 # necessary — without it the agent sees mostly zero-improvement gradient.
 hard_mining_scale: 8.0
+# Tier 1.5 floor (see iteris/drl_training.py _hard_mining_weights): unlike
+# CAMUS, BRISC tumor (pooled) has CONFIRMED NEGATIVE realistic headroom
+# (docs/CONTEXT.md / SKILLS.md, Pillar4 2026-06-25: -0.0501 -- the lite
+# baseline already exceeds the attention competitor, i.e. there is no
+# established achievable ceiling for the contour agent to reach on this
+# class at all). At scale=8.0 the unfloored formula puts ~5.5x the
+# per-sample training density on the hard tail relative to its population
+# share -- concentrating budget on a class-wide regime already known to
+# lack headroom is the worse failure mode here, not the reverse. Floor
+# strongly toward uniform: success on this class is near-zero regression,
+# not improvement (see reward_step_penalty note in the DuelingDDQN block
+# below), so training density should not be aggressively skewed toward a
+# likely-unfixable tail.
+hard_mining_uniform_mix: 0.35
 
 # ── Per-agent hyperparams ────────────────────────────────────────────────────
 # ── Ablation knobs (OFF by default — see docs/EXPERIMENTS.md + SKILLS.md) ──────

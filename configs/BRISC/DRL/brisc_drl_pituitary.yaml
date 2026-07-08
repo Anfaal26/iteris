@@ -35,6 +35,12 @@ stop_eps_hd:       0.5
 stop_n:            2               # quick convergence detection for small structures
 
 hard_mining_scale: 2.0             # moderate — pituitary hard cases mostly solvable
+# Tier 1.5 floor (see iteris/drl_training.py _hard_mining_weights): headroom
+# NOT individually diagnosed, but this class already has the mildest scale
+# of the 3 BRISC subtypes and the most qualitatively promising prior
+# ("mostly solvable" above) -- light floor, similar treatment to CAMUS's
+# confirmed-headroom classes rather than tumor/glioma's stronger ones.
+hard_mining_uniform_mix: 0.75
 
 # ── Ablation knobs (OFF by default — see docs/EXPERIMENTS.md + SKILLS.md) ──────
 # directional_state: append 2 DeepSnake-style SDT-gradient 'direction' channels

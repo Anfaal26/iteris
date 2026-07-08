@@ -411,10 +411,41 @@ def run_drl_training(
     # eval_every) so a sample the agent has genuinely solved, or genuinely
     # cannot touch, has its weight adjust automatically instead of staying
     # frozen at its step-0 value for the entire run.
+    #
+    # TIER 1.5 (`hard_mining_uniform_mix`, default 1.0 = off/unchanged): Tiers
+    # 1/2 fix the COMPOSITION of the hard tail (is it boundary-fixable, is it
+    # still stuck) but not the ALLOCATION between the hard tail and the easy
+    # majority. The weight above is monotonic in raw Dice with no floor, so a
+    # sample at Dice 0.95 with a small genuinely-correctable residual error
+    # gets systematically LESS training density than one at Dice 0.60 —
+    # regardless of whether the 0.60 sample is fixable at all. Because the
+    # reported metric is a POPULATION MEAN, a large population of small,
+    # low-headroom-but-real gains can matter more to it than a small
+    # population of large ones (e.g. at CAMUS's own logged mix — 94.6% easy /
+    # 5.4% hard — a mere 0.02 mean headroom on the easy majority contributes
+    # ~2.9x the aggregate Dice gain of a 0.12 mean headroom on the hard tail,
+    # despite the tail currently receiving up to ~8x MORE training weight per
+    # sample). `hard_mining_uniform_mix` (0-1) blends the hard-mining
+    # distribution with uniform — directly analogous to the priority exponent
+    # `alpha` in Prioritised Experience Replay (Schaul et al. 2016), which
+    # interpolates between alpha=0 (uniform) and alpha=1 (full priority)
+    # specifically to bound how much a priority scheme can starve
+    # low-priority samples:
+    #   weight = mix * hard_mining_weight + (1-mix) * uniform_weight
+    # mix=1.0 (default) is the exact old behaviour (no floor). Per-class values
+    # are set in the YAML configs, not here — how much to floor depends on
+    # each class's own CONFIRMED headroom (see docs/CONTEXT.md /
+    # docs/SKILLS.md): classes with confirmed real headroom (CAMUS) need only
+    # a light floor since the reallocation is already mild there; a class with
+    # CONFIRMED NEGATIVE headroom (BRISC tumor, pooled) or unknown headroom
+    # (BRISC subtypes) warrants a much stronger floor, since pouring training
+    # density into an aggressively-mined tail that may not be fixable at all
+    # is the worse failure mode.
     _hard_mining_scale = cfg.get('hard_mining_scale', 0.0)
     _hard_mining_adaptive = bool(cfg.get('hard_mining_adaptive', False))
     _hard_mining_refresh_every = int(cfg.get('hard_mining_refresh_every',
                                              cfg.get('eval_every', 2000)))
+    _hard_mining_uniform_mix = float(np.clip(cfg.get('hard_mining_uniform_mix', 1.0), 0.0, 1.0))
     # Curriculum needs per-sample init Dice too — compute it once and share
     # with hard-mining instead of duplicating the pass over train_caches.
     _curriculum_on = bool(cfg.get('curriculum_max_steps', False))
@@ -444,12 +475,17 @@ def run_drl_training(
     _best_seen_dice = _init_dices.copy() if _hard_mining_scale > 0 else None
 
     def _hard_mining_weights() -> np.ndarray:
-        """Tier-1/2 boundary-aware hard-mining term alone (pre topo/gate)."""
+        """Tier-1/2 boundary-aware hard-mining term, Tier-1.5 uniform-floored
+        (pre topo/gate). Returns a normalised probability distribution."""
         progress  = np.maximum(_best_seen_dice - _init_dices, 0.0)
         remaining = (1.0 - _init_dices) - progress
         raw = remaining * _hard_mining_scale * _boundary_frac
         raw -= raw.max()   # numerical stability before exp
-        return np.exp(raw)
+        w = np.exp(raw)
+        w = w / w.sum()
+        if _hard_mining_uniform_mix < 1.0:
+            w = _hard_mining_uniform_mix * w + (1.0 - _hard_mining_uniform_mix) / w.shape[0]
+        return w
 
     # ── Topology/interior training-sample reweighting (opt-in, off by default) ──
     # Independent, blunter (binary-threshold) knob layered ON TOP of the Tier-1
@@ -480,8 +516,10 @@ def run_drl_training(
 
     if _hard_mining_scale > 0:
         hard_pct = (_init_dices < 0.90).mean() * 100
+        _mix_tag = (f", uniform_mix={_hard_mining_uniform_mix:.2f}"
+                   if _hard_mining_uniform_mix < 1.0 else "")
         print(f'[drl] Hard sample mining ON (boundary-aware'
-              f'{", adaptive" if _hard_mining_adaptive else ""}): '
+              f'{", adaptive" if _hard_mining_adaptive else ""}{_mix_tag}): '
               f'scale={_hard_mining_scale:.1f} | init_dice mean={_init_dices.mean():.4f} | '
               f'boundary_frac mean={_boundary_frac.mean():.2f} | '
               f'hard (<0.90): {hard_pct:.1f}% of train')

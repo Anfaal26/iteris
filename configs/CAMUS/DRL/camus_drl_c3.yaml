@@ -46,6 +46,13 @@ stop_n:            3
 # good masks at eval. scale=3 focuses the improvable minority while keeping the
 # easy majority represented (see camus_drl_c1.yaml).
 hard_mining_scale: 3.0
+# Tier 1.5 floor (see iteris/drl_training.py _hard_mining_weights): same
+# rationale as camus_drl_c1.yaml -- CONFIRMED real headroom for LA (+0.052,
+# docs/CONTEXT.md 2026-06-25) and scale=3.0 already conservative (this
+# file's own history: scale=10 gave ~100x the weight to Dice=0.80 vs 0.95
+# and degraded good masks at eval, see comment above). Light floor as cheap
+# insurance on top of an already-tuned scale.
+hard_mining_uniform_mix: 0.9
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # ── Ablation knobs (OFF by default — see docs/EXPERIMENTS.md + SKILLS.md) ──────

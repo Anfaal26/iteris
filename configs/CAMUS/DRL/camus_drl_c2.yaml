@@ -40,6 +40,13 @@ stop_n:            3
 # easy masks → degraded them at eval; scale=3 keeps the easy majority in the mix
 # (see camus_drl_c1.yaml for the full train/eval-mismatch rationale).
 hard_mining_scale: 3.0
+# Tier 1.5 floor (see iteris/drl_training.py _hard_mining_weights): same
+# rationale as camus_drl_c1.yaml -- CONFIRMED real headroom for LV_epi
+# (+0.073, the largest of the 3 CAMUS classes, docs/CONTEXT.md 2026-06-25)
+# and scale=3.0 already conservative (this file's own history: scale=10
+# starved the easy majority and degraded it at eval, see comment above).
+# Light floor as cheap insurance on top of an already-tuned scale.
+hard_mining_uniform_mix: 0.9
 
 # ── Per-agent hyperparams ─────────────────────────────────────────────────────
 # ── Ablation knobs (OFF by default — see docs/EXPERIMENTS.md + SKILLS.md) ──────
