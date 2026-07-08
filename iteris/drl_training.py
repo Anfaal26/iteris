@@ -363,50 +363,107 @@ def run_drl_training(
     train_caches = _build_state_caches(train_samples, image_size)
     val_caches   = _build_state_caches(val_samples,   image_size)
 
-    # ── Hard sample mining ────────────────────────────────────────────────────
+    # ── Hard sample mining (Tier 1: boundary-aware; Tier 2: adaptive) ─────────
     # Problem: most training samples already have high init Dice (e.g. 0.93 for
     # CAMUS LV_endo). On those, every action except no-op degrades performance.
     # The Q-network is overwhelmed by "everything is bad" signal from the easy
     # majority and never properly learns to refine the rare hard samples where
     # improvement is actually achievable.
     #
-    # Fix: exponential weighting that preferentially samples lower-init-Dice
-    # cases. Weight ∝ exp((1-init_dice) * hard_mining_scale).
+    # Base weight ∝ exp((1-init_dice) * hard_mining_scale):
     #   scale=0  → uniform (off)
     #   scale=5  → mild: dice=0.75 gets ~2.5× more training than dice=0.93
     #   scale=10 → strong: dice=0.75 gets ~7× more training than dice=0.93
     #
-    # Keeps easy samples in the mix (they teach "no-op when already good"),
-    # but amplifies learning signal from samples where improvement is possible.
+    # TIER 1 (boundary-aware, always applied when hard_mining_scale>0): the raw
+    # formula above amplifies ANY low-Dice sample, including ones that are low
+    # because of TOPOLOGY error (a whole missed/false component — see
+    # sample_error_decomp) which local contour nudging CANNOT fix. Amplifying
+    # those wastes gradient steps on unlearnable cases AND starves the replay
+    # buffer of "converged, should STOP" transitions the easy majority would
+    # otherwise supply. hard_mining_scale and topology_filter used to be two
+    # independently-configured knobs no shipped config ever combined (every
+    # YAML here runs hard_mining ON, topology_filter OFF) — now boundary_frac
+    # (the fraction of THIS sample's error that is boundary-type, i.e. within
+    # band_px of the init contour — the only error a contour agent can act on)
+    # is baked directly into the exponent:
+    #   weight ∝ exp((1-init_dice) * hard_mining_scale * boundary_frac)
+    # A hard sample that's hard because of boundary error gets the full boost
+    # (unchanged — that's what hard-mining is FOR). A hard sample that's hard
+    # because of topology/interior error has boundary_frac → 0, collapsing its
+    # exponent toward 0 so looking bad alone no longer earns it extra weight.
+    #
+    # TIER 2 (opt-in, `hard_mining_adaptive: true`): the formula above is still
+    # STATIC — computed once from GT before training starts, then frozen for
+    # the whole run, unable to tell "hard but I'm making progress" from "hard
+    # and stuck" (the staleness problem prioritised-replay schemes exist to
+    # solve). `best_seen_dice[idx]` tracks the best Dice ever reached across
+    # ALL past training episodes starting from sample idx (env.best_dice is
+    # already computed every episode — just persisted here instead of
+    # discarded). (1-init_dice) is replaced by the headroom NOT YET captured:
+    #   progress[idx]  = max(best_seen_dice[idx] - init_dice[idx], 0)
+    #   remaining[idx] = (1 - init_dice[idx]) - progress[idx]
+    #   weight[idx]    ∝ exp(remaining[idx] * hard_mining_scale * boundary_frac[idx])
+    # At step 0, best_seen_dice == init_dice (no progress yet), so this is
+    # IDENTICAL to the Tier-1 formula — Tier 2 only diverges as training
+    # proceeds and some "hard" samples show (or fail to show) real progress.
+    # Weights are recomputed every `hard_mining_refresh_every` steps (default:
+    # eval_every) so a sample the agent has genuinely solved, or genuinely
+    # cannot touch, has its weight adjust automatically instead of staying
+    # frozen at its step-0 value for the entire run.
     _hard_mining_scale = cfg.get('hard_mining_scale', 0.0)
+    _hard_mining_adaptive = bool(cfg.get('hard_mining_adaptive', False))
+    _hard_mining_refresh_every = int(cfg.get('hard_mining_refresh_every',
+                                             cfg.get('eval_every', 2000)))
     # Curriculum needs per-sample init Dice too — compute it once and share
     # with hard-mining instead of duplicating the pass over train_caches.
     _curriculum_on = bool(cfg.get('curriculum_max_steps', False))
+    _topology_filter = bool(cfg.get('topology_filter', False))
     _init_dices = None
-    if _hard_mining_scale > 0 or _curriculum_on:
+    if _hard_mining_scale > 0 or _curriculum_on or _topology_filter:
         _init_dices = np.array([
             dice_score(train_caches['init_mask'][i], train_caches['gt_mask'][i])
             for i in range(len(train_samples))
         ])
+    # Boundary-correctable fraction per sample (Tier 1) — shared by hard-mining
+    # AND topology_filter below so sample_error_decomp runs at most once per
+    # sample rather than once per feature that needs it.
+    _boundary_frac = None
+    if _hard_mining_scale > 0 or _topology_filter:
+        _decomp = [sample_error_decomp(train_caches['init_mask'][i],
+                                       train_caches['gt_mask'][i])
+                  for i in range(len(train_samples))]
+        _boundary_frac = np.array([d[0] for d in _decomp])
+
+    # best_seen_dice[idx]: running max Dice ever reached from sample idx across
+    # all past training episodes (Tier 2). Initialised to init_dice (progress=0)
+    # so the FIRST weight computation is identical to the Tier-1 static form.
+    # Not persisted across `resume` (like the replay buffer) — a chunked resume
+    # just restarts the adaptive term from the static baseline, which is
+    # harmless (it re-adapts within one refresh cycle).
+    _best_seen_dice = _init_dices.copy() if _hard_mining_scale > 0 else None
+
+    def _hard_mining_weights() -> np.ndarray:
+        """Tier-1/2 boundary-aware hard-mining term alone (pre topo/gate)."""
+        progress  = np.maximum(_best_seen_dice - _init_dices, 0.0)
+        remaining = (1.0 - _init_dices) - progress
+        raw = remaining * _hard_mining_scale * _boundary_frac
+        raw -= raw.max()   # numerical stability before exp
+        return np.exp(raw)
 
     # ── Topology/interior training-sample reweighting (opt-in, off by default) ──
-    # At low-data scale the lite net makes structural errors (whole missing/false
-    # components) that contour nudging CANNOT fix — training on them is gradient
-    # noise. When `topology_filter` is on, samples whose (topology+interior)
-    # error fraction exceeds `topology_max_frac` are down-weighted (mode
-    # 'downweight', factor `topology_downweight`) or excluded (mode 'drop').
-    # Uses GT — legitimate at TRAINING time only, exactly like hard_mining above;
-    # the val/test sets are never filtered (no cherry-picking the eval). Default
-    # 'downweight' (not 'drop') so the agent still sees enough broken cases to
-    # learn to STOP/abstain on them at deployment.
-    _topology_filter = bool(cfg.get('topology_filter', False))
+    # Independent, blunter (binary-threshold) knob layered ON TOP of the Tier-1
+    # boundary-aware hard-mining above: samples whose (topology+interior) error
+    # fraction exceeds `topology_max_frac` are down-weighted (mode 'downweight',
+    # factor `topology_downweight`) or excluded (mode 'drop') regardless of
+    # hard_mining_scale. Uses GT — legitimate at TRAINING time only, exactly
+    # like hard_mining above; the val/test sets are never filtered (no
+    # cherry-picking the eval). Default 'downweight' (not 'drop') so the agent
+    # still sees enough broken cases to learn to STOP/abstain on them at
+    # deployment.
     _topo_weights = None
     if _topology_filter:
-        _cap = np.array([
-            sum(sample_error_decomp(train_caches['init_mask'][i],
-                                    train_caches['gt_mask'][i])[1:])   # topology+interior
-            for i in range(len(train_samples))
-        ])
+        _cap  = 1.0 - _boundary_frac   # topology + interior fraction
         _thr  = float(cfg.get('topology_max_frac', 0.5))
         _mode = cfg.get('topology_filter_mode', 'downweight')
         _dw   = float(cfg.get('topology_downweight', 0.1))
@@ -421,18 +478,13 @@ def run_drl_training(
             raise ValueError("topology_filter dropped ALL training samples — "
                              "lower topology_max_frac or use mode='downweight'.")
 
-    # ── Combined sampling weights (hard-mining × topology filter) ───────────────
-    _weights = None
     if _hard_mining_scale > 0:
-        _raw = (1.0 - _init_dices) * _hard_mining_scale
-        _raw -= _raw.max()   # numerical stability before exp
-        _weights = np.exp(_raw)
         hard_pct = (_init_dices < 0.90).mean() * 100
-        print(f'[drl] Hard sample mining ON: scale={_hard_mining_scale:.1f} | '
-              f'init_dice mean={_init_dices.mean():.4f} | '
+        print(f'[drl] Hard sample mining ON (boundary-aware'
+              f'{", adaptive" if _hard_mining_adaptive else ""}): '
+              f'scale={_hard_mining_scale:.1f} | init_dice mean={_init_dices.mean():.4f} | '
+              f'boundary_frac mean={_boundary_frac.mean():.2f} | '
               f'hard (<0.90): {hard_pct:.1f}% of train')
-    if _topo_weights is not None:
-        _weights = _topo_weights if _weights is None else (_weights * _topo_weights)
 
     # ── Refinable gate (GT-FREE, opt-in) ────────────────────────────────────────
     # Train ONLY on cases whose init mask is in the contour-refinable regime — a
@@ -447,6 +499,7 @@ def run_drl_training(
     _refinable_gate = bool(cfg.get('refinable_gate', False))
     _rf_min_area = float(cfg.get('refinable_min_cc_frac', 0.004))
     _rf_min_dom  = float(cfg.get('refinable_min_dominance', 0.5))
+    _rf_w = None
     if _refinable_gate:
         _rf_train = np.array([
             init_mask_refinable(train_caches['init_mask'][i], _rf_min_area, _rf_min_dom)
@@ -459,7 +512,6 @@ def run_drl_training(
             raise ValueError("refinable_gate excluded ALL training samples — loosen "
                              "refinable_min_cc_frac / refinable_min_dominance.")
         _rf_w = _rf_train.astype(float)
-        _weights = _rf_w if _weights is None else (_weights * _rf_w)
 
     # Gate the VALIDATION set the same way (GT-free) so the training curve,
     # checkpoint selection, and reported val metrics all reflect the refinable
@@ -478,8 +530,29 @@ def run_drl_training(
             raise ValueError("refinable_gate excluded ALL validation samples — loosen thresholds.")
         _eval_caches = _subset_caches(val_caches, np.nonzero(_rf_val)[0])
 
+    # ── Combine hard-mining × topology filter × refinable gate ──────────────────
+    # A single rebuild function so Tier 2's periodic refresh (in the main loop
+    # below) recombines with the SAME topo/gate terms rather than duplicating
+    # the combination logic in two places.
+    _weights = None
+
+    def _rebuild_weights(verbose: bool = False) -> None:
+        nonlocal _weights
+        w = _hard_mining_weights() if _hard_mining_scale > 0 else None
+        if _topo_weights is not None:
+            w = _topo_weights if w is None else (w * _topo_weights)
+        if _rf_w is not None:
+            w = _rf_w if w is None else (w * _rf_w)
+        _weights = (w / w.sum()) if w is not None else None
+        if verbose and _hard_mining_scale > 0:
+            progress = np.maximum(_best_seen_dice - _init_dices, 0.0)
+            n_stuck = int(((progress < 0.01) & (_init_dices < 0.90)).sum())
+            print(f"  [hard-mining] adaptive refresh | mean progress={progress.mean():.4f} | "
+                  f"still-stuck(<0.01 gain, <0.90 init)={n_stuck}/{len(train_samples)}")
+
+    _rebuild_weights()
+
     if _weights is not None:
-        _weights = _weights / _weights.sum()
         def _sample_idx():
             return int(np.random.choice(len(train_samples), p=_weights))
     else:
@@ -821,6 +894,21 @@ def run_drl_training(
             if done:
                 _ep_reward_buf.append(_ep_reward)
                 _ep_reward = 0.0
+                # Tier 2 (hard_mining_adaptive): record this episode's best-seen
+                # Dice against sample idx's running max, regardless of whether
+                # adaptive refresh is on — cheap (one comparison) and means
+                # turning hard_mining_adaptive on mid-run has real history to
+                # use immediately rather than starting from all-zero progress.
+                if _best_seen_dice is not None:
+                    _best_seen_dice[idx] = max(_best_seen_dice[idx], env.best_dice)
+
+            # Tier 2: periodically recompute hard-mining weights from the
+            # progress accumulated above, so a sample the agent has genuinely
+            # solved (or genuinely cannot touch) has its sampling weight adjust
+            # instead of staying frozen at its step-0 value for the whole run.
+            if (_hard_mining_adaptive and _hard_mining_scale > 0
+                    and step % _hard_mining_refresh_every == 0):
+                _rebuild_weights(verbose=True)
 
             # Periodic eval — also the cadence at which the resume/best
             # checkpoints refresh (eval_every controls both).
@@ -876,9 +964,26 @@ def run_drl_training(
     pbar.close()
     print(f'[drl] Done. Best val final-Dice: {best_dice:.4f}')
 
+    # Hard-mining diagnostics (Tier 1/2) — the per-sample arrays that drove
+    # training-sample selection, for post-hoc inspection in a notebook (e.g.
+    # "did boundary_frac actually suppress topology-broken samples?", "did
+    # best_seen_dice show real progress on the samples hard-mining kept
+    # boosting?"). None when hard_mining_scale<=0 (nothing to report).
+    hard_mining_diag = None
+    if _hard_mining_scale > 0:
+        hard_mining_diag = dict(
+            init_dice      = _init_dices,
+            boundary_frac  = _boundary_frac,
+            best_seen_dice = _best_seen_dice,
+            final_weights  = _weights if _weights is not None else np.full(
+                len(train_samples), 1.0 / len(train_samples)),
+            adaptive       = _hard_mining_adaptive,
+        )
+
     return dict(
         agent      = agent,
         history    = pd.DataFrame(history),
         best_dice  = best_dice,
         checkpoint = str(ckpt_path),
+        hard_mining_diag = hard_mining_diag,
     )
