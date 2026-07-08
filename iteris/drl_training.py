@@ -27,6 +27,7 @@ from .env     import (SegmentationEnv, signed_dt, dice_score, hd95_px)
 from .geometry import (iou_score, precision_recall, boundary_iou,
                        mean_surface_distance_px, sdt_direction_field)
 from .diagnostics import sample_error_decomp, init_mask_refinable
+from .geometry import _largest_cc
 from .buffer  import ReplayBuffer
 from .agents  import DQNAgent, DuelingDQNAgent, DDPGAgent, TD3Agent
 from .env_contour_refine import ContourRefineEnv
@@ -68,6 +69,17 @@ def _build_state_caches(samples: List[dict], image_size: int) -> dict:
     # Stored as float16 to save RAM; env converts to float32 on use.
     if all('prob_map' in s for s in samples):
         caches['prob_map'] = np.stack([s['prob_map'] for s in samples]).astype(np.float16)
+    # Largest-CC representation of the init mask for STATE channels 4-5. The
+    # single closed contour can only represent ONE component, so debris CCs are
+    # dropped here — byte-identical to ContourRefineEnv._state(), so the state
+    # the agent sees during a live rollout and the state rebuilt from the buffer
+    # at update() time match exactly. The RAW init_mask is kept (above) because
+    # the GT-free refinable gate / hard-mining need the unfiltered U-Net output.
+    init_repr = np.stack([_largest_cc(m).astype(np.uint8) for m in caches['init_mask']])
+    caches['init_repr'] = init_repr
+    if 'prob_map' in caches:
+        caches['prob_repr'] = (caches['prob_map'].astype(np.float32)
+                               * init_repr).astype(np.float16)
     return caches
 
 
@@ -88,17 +100,19 @@ def _make_state_builder(caches: dict, sdt_clip: float, directional: bool = False
     """
     def build(idx, current_mask, cached_sdt=None):
         image = caches['image'][idx]
-        init  = caches['init_mask'][idx].astype(np.float32)
+        # Channel 4: largest-CC init (debris dropped) — matches env._state().
+        init  = caches['init_repr'][idx].astype(np.float32)
         cur   = current_mask.astype(np.float32)
         if cached_sdt is not None:
             sdt = cached_sdt.astype(np.float32)
         else:
             sdt = signed_dt(current_mask, sdt_clip)
-        # 5th channel: U-Net probability map (static per sample). Falls back to
-        # the binary init mask when warm_start produced no prob_map. MUST match
-        # the channel order in ContourRefineEnv._state().
-        if 'prob_map' in caches:
-            prob = caches['prob_map'][idx].astype(np.float32)
+        # 5th channel: U-Net probability map masked to that same largest CC
+        # (static per sample). Falls back to the largest-CC init when warm_start
+        # produced no prob_map. MUST match the channel order + CC-masking in
+        # ContourRefineEnv._state().
+        if 'prob_repr' in caches:
+            prob = caches['prob_repr'][idx].astype(np.float32)
         else:
             prob = init
         chans = [image, cur, sdt, init, prob]

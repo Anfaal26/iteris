@@ -181,67 +181,74 @@ class Critic(nn.Module):
 # available too ("where" + "what"). See module docstring for the angle
 # convention this mirrors from env_contour_refine.py.
 
-class SectorPool(nn.Module):
-    """Angular-wedge mean-pooling over a conv feature map.
+def _mask_centroid_feat(x: torch.Tensor, h: int, w: int):
+    """Per-sample centroid of the current-mask channel (state index 1), returned
+    as (cy, cx) in FEATURE-MAP coordinates (each shape (B,)).
 
-    Precomputes (once, as non-trainable buffers) a boolean-as-float assignment
-    `sector_mask` of shape (n_sectors, feat_h*feat_w): cell (r, c) (flattened
-    index r*feat_w + c) belongs to sector
-        g = floor( mod(atan2(r - feat_h/2, c - feat_w/2), 2*pi) / (2*pi/n_sectors) )
-    clipped to [0, n_sectors-1]. This is the EXACT angle convention
+    The current mask is state channel 1 in both code paths that build the state
+    (ContourRefineEnv._state and drl_training._make_state_builder: [image, mask,
+    sdt, init, prob, ...]). Its mass centroid tracks the live contour centre, so
+    the SectorPool wedges below follow the mask as it deforms — approximating the
+    env's control-point centroid (points.mean) closely for the roughly star-
+    convex cardiac / tumour masks. Empty masks fall back to the feature centre.
+    """
+    m = x[:, 1]                                        # (B, H, W) current mask
+    B, H, W = m.shape
+    ys = torch.arange(H, device=x.device, dtype=torch.float32).view(1, H, 1)
+    xs = torch.arange(W, device=x.device, dtype=torch.float32).view(1, 1, W)
+    tot = m.sum(dim=(1, 2))                             # (B,)
+    safe = tot.clamp(min=1e-6)
+    cy = (m * ys).sum(dim=(1, 2)) / safe * (h / H)      # scale px -> feat coords
+    cx = (m * xs).sum(dim=(1, 2)) / safe * (w / W)
+    empty = tot < 1e-6
+    cy = torch.where(empty, torch.full_like(cy, h / 2.0), cy)
+    cx = torch.where(empty, torch.full_like(cx, w / 2.0), cx)
+    return cy, cx
+
+
+class SectorPool(nn.Module):
+    """Angular-wedge mean-pooling over a conv feature map, centred on EACH
+    sample's own mask centroid (passed into forward()) — NOT the image centre.
+
+    Cell (r, c) of the feature map is assigned to sector
+        g = floor( mod(atan2(r - cy, c - cx), 2*pi) / (2*pi/n_sectors) )
+    clipped to [0, n_sectors-1] — the EXACT angle convention
     ContourRefineEnv._sector_indices / _apply_continuous use (atan2(dy, dx),
-    mod 2*pi, floor-binned) but centred at the feature map's own spatial centre
-    instead of the live contour centroid — a static, zero-extra-data
-    approximation valid because CAMUS/BRISC masks sit near the image centre
-    after preprocessing.
+    mod 2*pi, floor-binned), now around the same (per-sample) contour centroid
+    the env uses instead of a static image centre. The previous static-centre
+    version mapped network 'sector g' to a fixed image region while env
+    'sector g' followed the live contour centroid — for the off-centre apical-
+    fan CAMUS / BRISC masks those are different regions, so the local-error ->
+    correct-sector signal the spatial head exists to learn was scrambled. The
+    wedge assignment is rebuilt per forward() from the feature-map size, so the
+    head is not tied to any particular image_size.
     """
 
-    def __init__(self, feat_h: int, feat_w: int, n_sectors: int):
+    def __init__(self, n_sectors: int):
         super().__init__()
-        self.feat_h = int(feat_h)
-        self.feat_w = int(feat_w)
         self.n_sectors = int(n_sectors)
-        # Alternate-size cache: the mask depends only on the conv feature-map
-        # spatial dims, which are fixed per run (16x16 for the project's 256x256
-        # inputs). Precompute the default; forward() rebuilds+caches for any other
-        # size so the spatial heads are not silently tied to image_size=256.
-        self._alt_cache = {}
-        mask, counts = self._build_mask(self.feat_h, self.feat_w)
-        self.register_buffer('sector_mask', mask)                    # (n_sectors, H*W)
-        self.register_buffer('sector_counts', counts)                # (n_sectors,)
 
-    def _build_mask(self, h: int, w: int):
-        rr, cc = torch.meshgrid(
-            torch.arange(h, dtype=torch.float32),
-            torch.arange(w, dtype=torch.float32),
-            indexing='ij',
-        )
-        dy = rr - h / 2.0
-        dx = cc - w / 2.0
-        ang = torch.remainder(torch.atan2(dy, dx), 2.0 * torch.pi)   # (h, w)
+    def forward(self, feat_map: torch.Tensor,
+                cy: torch.Tensor, cx: torch.Tensor) -> torch.Tensor:
+        """(B, C, h, w) + per-sample centroid (cy, cx) in feat coords
+        -> (B, n_sectors, C) per-sector mean features."""
+        b, c, h, w = feat_map.shape
+        device = feat_map.device
+        rr = torch.arange(h, device=device, dtype=torch.float32).view(1, h, 1)
+        cc = torch.arange(w, device=device, dtype=torch.float32).view(1, 1, w)
+        dy = rr - cy.view(b, 1, 1)
+        dx = cc - cx.view(b, 1, 1)
+        ang = torch.remainder(torch.atan2(dy, dx), 2.0 * torch.pi)   # (b, h, w)
         wedge = (2.0 * torch.pi) / self.n_sectors
         bins = torch.clamp(torch.floor(ang / wedge).long(), 0, self.n_sectors - 1)
-        bins_flat = bins.reshape(-1)                                 # (h*w,)
-        mask = torch.zeros(self.n_sectors, h * w, dtype=torch.float32)
-        mask.scatter_(0, bins_flat.unsqueeze(0), 1.0)
-        # ^ for each sector g: mask[g, i] = (bins_flat[i] == g).
-        return mask, mask.sum(dim=1).clamp(min=1.0)
-
-    def forward(self, feat_map: torch.Tensor) -> torch.Tensor:
-        """(B, C, feat_h, feat_w) -> (B, n_sectors, C) per-sector mean features."""
-        b, c, h, w = feat_map.shape
-        if h * w == self.sector_mask.shape[1]:
-            mask, counts = self.sector_mask, self.sector_counts
-        else:
-            key = (h, w)
-            if key not in self._alt_cache:
-                m, cnt = self._build_mask(h, w)
-                self._alt_cache[key] = (m.to(feat_map.device), cnt.to(feat_map.device))
-            mask, counts = self._alt_cache[key]
-        flat = feat_map.reshape(b, c, h * w)                         # (B, C, H*W)
-        # sum over cells assigned to each sector: (B,C,H*W) x (n_sectors,H*W)^T
-        summed = torch.einsum('bcn,gn->bgc', flat, mask)             # (B, n_sectors, C)
-        return summed / counts.view(1, -1, 1)
+        bins_flat = bins.reshape(b, h * w)                           # (b, h*w)
+        # one-hot per cell -> (b, n_sectors, h*w) boolean-as-float assignment
+        mask = F.one_hot(bins_flat, self.n_sectors).to(feat_map.dtype).permute(0, 2, 1)
+        counts = mask.sum(dim=2).clamp(min=1.0)                      # (b, n_sectors)
+        flat = feat_map.reshape(b, c, h * w)                         # (b, C, h*w)
+        # per-sample sum over cells assigned to each sector
+        summed = torch.einsum('bcn,bgn->bgc', flat, mask)           # (b, n_sectors, C)
+        return summed / counts.unsqueeze(-1)
 
 
 def _global_context_branch(embed_dim_out: int = 64):
@@ -276,7 +283,7 @@ class SpatialActor(nn.Module):
         if action_scale is None:
             action_scale = [1.0] * self.n_sectors
         self.conv = _make_conv_stack(in_channels)            # -> (B,128,16,16)
-        self.sector_pool = SectorPool(16, 16, self.n_sectors)
+        self.sector_pool = SectorPool(self.n_sectors)
         self.global_branch = _global_context_branch(64)
         self.mlp = nn.Sequential(
             nn.Linear(128 + 64, 64), nn.ReLU(inplace=True),
@@ -293,7 +300,8 @@ class SpatialActor(nn.Module):
 
     def forward(self, x):
         feat = self.conv(x)                                   # (B,128,16,16)
-        local = self.sector_pool(feat)                         # (B,n_sectors,128)
+        cy, cx = _mask_centroid_feat(x, feat.shape[2], feat.shape[3])
+        local = self.sector_pool(feat, cy, cx)                 # (B,n_sectors,128)
         glob = _run_global_context(self.global_branch, feat)   # (B,64)
         glob_exp = glob.unsqueeze(1).expand(-1, self.n_sectors, -1)   # (B,n_sectors,64)
         h = torch.cat([local, glob_exp], dim=-1)                # (B,n_sectors,192)
@@ -312,7 +320,7 @@ class SpatialCritic(nn.Module):
         super().__init__()
         self.n_sectors = int(action_dim)
         self.conv = _make_conv_stack(in_channels)             # -> (B,128,16,16)
-        self.sector_pool = SectorPool(16, 16, self.n_sectors)
+        self.sector_pool = SectorPool(self.n_sectors)
         self.global_branch = _global_context_branch(64)
         self.sector_mlp = nn.Sequential(
             nn.Linear(128 + 1, 64), nn.ReLU(inplace=True),
@@ -325,7 +333,8 @@ class SpatialCritic(nn.Module):
 
     def forward(self, state, action):
         feat = self.conv(state)                                # (B,128,16,16)
-        local = self.sector_pool(feat)                          # (B,n_sectors,128)
+        cy, cx = _mask_centroid_feat(state, feat.shape[2], feat.shape[3])
+        local = self.sector_pool(feat, cy, cx)                  # (B,n_sectors,128)
         act = action.reshape(action.shape[0], self.n_sectors, 1)
         h = torch.cat([local, act], dim=-1)                     # (B,n_sectors,129)
         per_sector = self.sector_mlp(h).squeeze(-1)              # (B,n_sectors)
@@ -357,7 +366,7 @@ class SpatialDuelingQNetwork(nn.Module):
                 f'Use the plain DuelingQNetwork for other action counts.'
             )
         self.conv = _make_conv_stack(in_channels)              # -> (B,128,16,16)
-        self.sector_pool = SectorPool(16, 16, self.N_SECTORS)
+        self.sector_pool = SectorPool(self.N_SECTORS)
         self.global_branch = _global_context_branch(64)
 
         self.out_head = nn.Sequential(
@@ -380,7 +389,8 @@ class SpatialDuelingQNetwork(nn.Module):
 
     def forward(self, x):
         feat = self.conv(x)                                     # (B,128,16,16)
-        local = self.sector_pool(feat)                           # (B,8,128)
+        cy, cx = _mask_centroid_feat(x, feat.shape[2], feat.shape[3])
+        local = self.sector_pool(feat, cy, cx)                   # (B,8,128)
         glob = _run_global_context(self.global_branch, feat)    # (B,64)
         glob_exp = glob.unsqueeze(1).expand(-1, self.N_SECTORS, -1)   # (B,8,64)
         h = torch.cat([local, glob_exp], dim=-1)                 # (B,8,192)

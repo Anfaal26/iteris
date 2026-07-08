@@ -245,6 +245,19 @@ class ContourRefineEnv:
         # and lower-dimensional than per-point offsets (see cont_sectors docstring).
         self.CONTINUOUS_ACTION_DIM = self.cont_sectors
 
+        # State channels 4-5 (init_mask, prob_map) show ONLY the largest
+        # connected component of the U-Net init — the region the single closed
+        # contour can actually represent. Debris CCs (extra false blobs the
+        # U-Net predicted) are dropped so the agent is never shown foreground it
+        # has no action to reach or merge into the one contour. Left raw, they
+        # leaked into the state and biased the policy (the dent carved into the
+        # WORST-case replay sat exactly where the debris blobs were). GT-FREE —
+        # derived only from the init mask. MUST stay identical to the buffer-
+        # replay state builder in drl_training._build_state_caches.
+        cc = _largest_cc(self.init_mask).astype(np.float32)
+        self._init_repr = cc
+        self._prob_repr = (self.prob_map * cc).astype(np.float32)
+
         self.reset()
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
@@ -653,8 +666,8 @@ class ContourRefineEnv:
             self.image,
             self.mask.astype(np.float32),
             sdt,
-            self.init_mask.astype(np.float32),
-            self.prob_map,                      # U-Net confidence — where to refine
+            self._init_repr,                    # largest-CC init (debris dropped)
+            self._prob_repr,                    # U-Net confidence, masked to that CC
         ]
         # Optional directional (DeepSnake-style) channels, appended AT THE END
         # so the sdt stays at index 2 (the ReplayBuffer caches next_state[2] as

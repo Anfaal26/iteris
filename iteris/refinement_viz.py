@@ -230,7 +230,13 @@ def plot_comparison(replays, baseline_cfg, cfg, class_idx=1, class_name='',
     fig, axes = plt.subplots(len(picks), 3, figsize=(12, 4 * len(picks)))
     for row, (label, r) in enumerate(picks):
         s = r['sample']
-        cells = [('U-Net init', s['init_mask'], r['init_dice']),
+        # Show the agent's ACTUAL starting mask (r['masks'][0] = the rasterised
+        # largest-CC init contour), not the raw s['init_mask']. init_dice, gain
+        # and every downstream metric are defined against this mask, so showing
+        # the raw multi-blob U-Net output here while labelling it with the
+        # single-contour init_dice was the source of the "which Dice is real?"
+        # mismatch. Now panel and label refer to the same mask.
+        cells = [('U-Net init (contour)', r['masks'][0], r['init_dice']),
                  (f'{cfg.get("agent_type","?")} refined', r['final_mask'], r['final_dice']),
                  ('Ground Truth', s['gt_mask'], 1.0)]
         for col, (title, mask, d) in enumerate(cells):
@@ -322,6 +328,12 @@ def plot_behaviour(replays, cfg, class_name='', out_path=None):
 
     stop_rate = float(np.mean([r['stopped'] for r in replays]))
     print(f'\n── {cfg.get("agent_type","")} {class_name} behaviour ──')
+    # NOTE: these means are over the {len(replays)} VISUALISATION replays only —
+    # a tiny random subset for the qualitative plots, NOT a performance metric.
+    # The reportable numbers are evaluate_testset()'s test-set JSON (init/final/
+    # routed_dice_mean over all test samples). Small-sample noise here (one bad
+    # debris case swings the mean) is expected — do not read these as results.
+    print(f'  [{len(replays)} viz samples only — not the reported metric; see test JSON]')
     print(f'  Mean init Dice  : {np.mean([r["init_dice"] for r in replays]):.4f}')
     print(f'  Mean final Dice : {np.mean([r["final_dice"] for r in replays]):.4f}')
     print(f'  Mean best-seen  : {np.mean([r["best_dice"] for r in replays]):.4f}')
