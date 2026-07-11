@@ -403,20 +403,28 @@ class ContourRefineEnv:
         if self._is_contour_boundary:
             # Optimal-stopping incentive: choosing STOP locks in a terminal bonus
             # proportional to how far above the episode-start baseline the committed
-            # mask is — terminal_bonus_scale * (dice - dice_0). This is the whole
-            # point of the STOP action:
+            # mask is — terminal_bonus_scale * max(0, dice - dice_0). This is the
+            # whole point of the STOP action:
             #   * Stopping AT the peak (large dice gain) earns the largest bonus, so
             #     the agent is taught to keep refining toward the boundary (dense
             #     reward guides direction) and stop once it has captured the gain.
-            #   * Stopping EARLY, before any gain, pays ~0 (dice ≈ dice_0), so there
+            #   * Stopping EARLY, before any gain, pays 0 (dice ≈ dice_0), so there
             #     is no incentive to stop prematurely — it only pays to stop AFTER
             #     improving. That is exactly optimal stopping, not "stop ASAP".
-            #   * Stopping at a WORSENED mask (dice < dice_0) pays a NEGATIVE bonus,
-            #     discouraging the agent from committing a mask it has degraded.
+            #   * The gain is clipped at 0: stopping at a WORSENED mask pays 0, NOT a
+            #     negative reward. On negative-headroom classes (e.g. BRISC tumor)
+            #     the init IS the peak, so almost any edit lowers Dice; a negative
+            #     STOP reward there would make the agent AVOID stopping and thrash
+            #     (keep editing to escape the penalty) — the opposite of do-no-harm.
+            #     Clipping keeps STOP=0 in that regime, and the clearly-negative
+            #     dense reward of harmful pushes still makes STOP the best action.
+            #     Committing a below-baseline mask is separately prevented at deploy
+            #     by the value floor (falls back to init), so no train-time penalty
+            #     is needed here.
             # Unlike max_steps timeout (which earns nothing, see step()), a chosen
             # STOP is thus strictly preferred whenever the current mask is above
             # baseline. terminal_bonus_scale=0 recovers the old always-0 STOP reward.
-            raw_reward = self.terminal_bonus_scale * (new_dice - self.dice_history[0])
+            raw_reward = self.terminal_bonus_scale * max(0.0, new_dice - self.dice_history[0])
             clip = self.reward_clip + self.terminal_bonus_scale
         elif self._is_pbrs:
             # PBRS already telescopes to the final potential; no separate STOP term.

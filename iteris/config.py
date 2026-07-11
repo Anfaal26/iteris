@@ -185,17 +185,13 @@ _REFINE_SHARED: Dict = dict(
     reward_mode='contour_boundary',
     reward_clip=10.0,              # deltas are in pixels, not Dice units
     reward_step_penalty=0.0,       # DuelingDDQN's YAML 0.05 drove an 88%-STOP collapse
-    # Optimal-stopping STOP incentive (discrete agents only -- continuous TD3 has
-    # no STOP action). A CHOSEN STOP earns terminal_bonus_scale*(dice - dice_0);
-    # timing out at max_steps earns nothing (see ContourRefineEnv.step /
-    # _terminal_step). The dense reward alone left STOP unlearnable near the peak
-    # (~0/noisy margin -> 12% / 0% STOP observed, good masks then edited past their
-    # peak); this gives a clean, above-noise target for WHEN to commit and also
-    # sharpens the value fn (Q peaks at high-dice states -> better value-floored
-    # deploy). Scale 20: a +0.05-Dice gain -> +1.0 bonus (~a few dense steps),
-    # a near-converged +0.005 -> +0.1 (correctly small). PROVISIONAL -- validate
-    # via the 10/20/40 sweep in the trial notebook before trusting the magnitude.
-    terminal_bonus_scale=20.0,
+    # NOTE: terminal_bonus_scale (the optimal-stopping STOP incentive) is NOT set
+    # here -- it is a per-class value passed to apply_refinement_config() below,
+    # because several per-agent YAML blocks still carry a stale
+    # `terminal_bonus_scale: 0.0/3.0` (from the old PBRS reward) that
+    # resolve_agent_config would otherwise merge over any top-level value. Passing
+    # it as an apply_refinement_config arg makes it the LAST write, so the intended
+    # per-class value always wins regardless of those stale block values.
 
     # GT-free routing gate -- train/eval only on cases whose init mask is a
     # single dominant, plausibly-sized component; excluded cases are ROUTED to
@@ -244,6 +240,7 @@ def is_continuous_agent(agent_type: str) -> bool:
 
 def apply_refinement_config(cfg: dict, *, baseline_cfg_name: str,
                             uncertainty_gate: bool = False,
+                            terminal_bonus_scale: float = 20.0,
                             verbose: bool = True) -> dict:
     """Apply the full contour-refinement config to a resolved agent ``cfg``,
     IN PLACE, choosing the TD3-vs-discrete specific settings from
@@ -260,6 +257,15 @@ def apply_refinement_config(cfg: dict, *, baseline_cfg_name: str,
         baseline_cfg_name: e.g. 'CAMUS/camus.yaml' / 'BRISC/brisc.yaml'
             (the ATTENTION U-Net; Phase B adds label_frac downstream).
         uncertainty_gate: True only where the prob_map diagnostic is USABLE.
+        terminal_bonus_scale: the optimal-stopping STOP incentive magnitude, set
+            PER CLASS by that class's headroom + target size (see the STOP-bonus
+            note in _REFINE_SHARED and the per-notebook calls). Default 20.0 is
+            the CAMUS value (large structures, confirmed positive headroom); BRISC
+            passes a lower value (smaller targets -> higher Dice-sensitivity per
+            boundary pixel -> a fixed scale yields a proportionally larger bonus,
+            so drop the scale to keep the bonus/dense-return ratio comparable).
+            Applied LAST so it overrides any stale per-agent-block value in the
+            YAML. 0.0 disables the STOP bonus (recovers the old always-0 STOP).
         verbose: print a one-line summary (goes to the run log).
     """
     at = str(cfg.get('agent_type', '')).upper()
@@ -273,6 +279,9 @@ def apply_refinement_config(cfg: dict, *, baseline_cfg_name: str,
     cfg.update(_REFINE_SHARED)
     cfg['uncertainty_gate'] = bool(uncertainty_gate)
     cfg.update(_REFINE_CONTINUOUS if at in CONTINUOUS_AGENTS else _REFINE_DISCRETE)
+    # Applied AFTER the dicts above and after resolve_agent_config, so this is the
+    # final write and always wins over a stale per-agent-block terminal_bonus_scale.
+    cfg['terminal_bonus_scale'] = float(terminal_bonus_scale)
 
     if verbose:
         kind = 'continuous' if at in CONTINUOUS_AGENTS else 'discrete'
@@ -280,5 +289,6 @@ def apply_refinement_config(cfg: dict, *, baseline_cfg_name: str,
               f"reward={cfg['reward_mode']} uncertainty_gate={cfg['uncertainty_gate']} "
               f"refinable_gate={cfg['refinable_gate']} disp_px={cfg['disp_px']} "
               f"max_steps={cfg['max_steps']} spatial_head={cfg['spatial_head']} "
-              f"bc_warm_start={cfg['bc_warm_start']} bc_demo_max_steps={cfg['bc_demo_max_steps']}")
+              f"bc_warm_start={cfg['bc_warm_start']} bc_demo_max_steps={cfg['bc_demo_max_steps']} "
+              f"stop_bonus={cfg['terminal_bonus_scale']:.0f}")
     return cfg
