@@ -185,6 +185,17 @@ _REFINE_SHARED: Dict = dict(
     reward_mode='contour_boundary',
     reward_clip=10.0,              # deltas are in pixels, not Dice units
     reward_step_penalty=0.0,       # DuelingDDQN's YAML 0.05 drove an 88%-STOP collapse
+    # Optimal-stopping STOP incentive (discrete agents only -- continuous TD3 has
+    # no STOP action). A CHOSEN STOP earns terminal_bonus_scale*(dice - dice_0);
+    # timing out at max_steps earns nothing (see ContourRefineEnv.step /
+    # _terminal_step). The dense reward alone left STOP unlearnable near the peak
+    # (~0/noisy margin -> 12% / 0% STOP observed, good masks then edited past their
+    # peak); this gives a clean, above-noise target for WHEN to commit and also
+    # sharpens the value fn (Q peaks at high-dice states -> better value-floored
+    # deploy). Scale 20: a +0.05-Dice gain -> +1.0 bonus (~a few dense steps),
+    # a near-converged +0.005 -> +0.1 (correctly small). PROVISIONAL -- validate
+    # via the 10/20/40 sweep in the trial notebook before trusting the magnitude.
+    terminal_bonus_scale=20.0,
 
     # GT-free routing gate -- train/eval only on cases whose init mask is a
     # single dominant, plausibly-sized component; excluded cases are ROUTED to
