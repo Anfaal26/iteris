@@ -24,6 +24,19 @@
   deployed: true
   selectable: true
 
+- id: lite-unet
+  name: Lite U-Net
+  family: baseline
+  description: >-
+    Compact U-Net baseline — a lighter encoder/decoder for the low-compute
+    regime. Not yet deployed.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
+  deployed: false
+  selectable: false
+
 - id: dqn
   name: DQN
   family: discrete-drl
@@ -71,6 +84,20 @@
   description: >-
     Deterministic Policy Gradient with a continuous action space (vertex
     displacement) and an actor-critic architecture. Training in progress —
+    not yet deployed.
+  diceCamus: null
+  diceBrisc: null
+  iou: null
+  hd: null
+  deployed: false
+  selectable: false
+
+- id: td3
+  name: TD3
+  family: continuous-drl
+  description: >-
+    Twin Delayed DDPG — clipped double-Q critics and delayed policy updates
+    over a continuous sector-displacement action space. Training in progress —
     not yet deployed.
   diceCamus: null
   diceBrisc: null

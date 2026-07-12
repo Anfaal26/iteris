@@ -14,12 +14,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from . import inference, llm
+from . import drl, inference, llm
+from .drl import RegistryMiss
 from .schemas import (
     CompareRequest,
     CompareResponse,
     CompareResult,
     HealthResponse,
+    InferRequest,
+    InferResponse,
     InterpretRequest,
     ModelRecord,
     PredictRequest,
@@ -161,3 +164,37 @@ def interpret(body: InterpretRequest) -> StreamingResponse:
     if not os.environ.get('ANTHROPIC_API_KEY'):
         raise HTTPException(501, 'ANTHROPIC_API_KEY is not configured on this Space.')
     return StreamingResponse(llm.stream_interpretation(body), media_type='text/plain')
+
+
+@app.post('/infer', response_model=InferResponse)
+def infer(body: InferRequest) -> InferResponse:
+    """
+    Generic inference entry point keyed by (dataset, model_family, algo, regime)
+    — the DRL counterpart to /predict (which only ever serves DEPLOYED_MODEL_ID).
+    Currently only camus/drl/duelingddqn/low has a registered+configured
+    checkpoint; every other combination 404s with the missing key so the
+    frontend can grey out that option instead of surfacing a failed request.
+    """
+    try:
+        result = drl.infer(
+            dataset=body.dataset,
+            model_family=body.modelFamily,
+            algo=body.algo,
+            regime=body.regime,
+            image_b64=body.imageB64,
+            gt_b64=body.gtMaskB64,
+        )
+    except RegistryMiss as exc:
+        raise HTTPException(404, {
+            'error': 'not_registered',
+            'key': {
+                'dataset': body.dataset,
+                'modelFamily': body.modelFamily,
+                'algo': body.algo,
+                'regime': body.regime,
+            },
+            'detail': str(exc),
+        })
+    return InferResponse(
+        dataset=body.dataset, algo=body.algo, regime=body.regime, **result,
+    )

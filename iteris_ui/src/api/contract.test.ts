@@ -6,18 +6,21 @@ import { api } from './client';
  * spec-shaped data. These guard the contract the page agents build against.
  */
 describe('mock api', () => {
-  it('returns the six deployed models', async () => {
+  it('returns the full model registry', async () => {
     const models = await api.models();
-    expect(models).toHaveLength(5); // U-Net baseline + DQN, DDQN, Dueling DQN, DDPG
-    expect(models.find((m) => m.id === 'ddpg')?.diceCamus).toBe(0.912);
-    expect(models.find((m) => m.id === 'unet-baseline')?.selectable).toBe(false);
+    // Attention U-Net + Lite U-Net + DQN, DDQN, Dueling DQN, DDPG, TD3
+    expect(models).toHaveLength(7);
+    // Only the Attention U-Net baseline is deployed/selectable today.
+    expect(models.find((m) => m.id === 'unet-baseline')?.selectable).toBe(true);
+    expect(models.find((m) => m.id === 'dueling-dqn')?.deployed).toBe(false);
   });
 
   it('predicts with per-structure metrics for CAMUS', async () => {
     const res = await api.predict({
       imageB64: '',
-      modelId: 'ddpg',
+      modelId: 'dueling-dqn',
       dataset: 'camus',
+      regime: 'low',
       mode: 'single',
     });
     expect(res.masks).toHaveLength(3);

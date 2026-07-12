@@ -1,310 +1,435 @@
 /**
- * ControlPanel — left sidebar with upload, preprocessing, model selection,
- * and analysis controls (spec §6 Zone 1–4).
+ * ControlPanel — left sidebar (redesign).
+ *
+ * Restructured, not re-skinned: same dark tokens, mono micro-labels, pill
+ * controls and rounded-xl cards as the rest of the app. Sections top→bottom:
+ *   • Image      — side-by-side Scan / GT-mask dropzones + read-only detection chip
+ *   • Model      — Attention Res U-Net · Lite U-Net · DRL (expanded: DuelingDDQN / TD3)
+ *   • Data regime — Low / High segmented control, default flips with the model
+ *   • View mode  — Single / Wipe (+ source chips) / Side-by-Side
+ *   • ▷ run       — circular play button pinned to the bottom
+ * The whole rail collapses to an icon strip via the chevron at its top edge.
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  SampleImageTile,
-  PreprocessingStepIndicator,
-  ModelCard,
-} from '@/components';
+import React, { useState, useCallback, useRef } from 'react';
+import { SampleImageTile } from '@/components';
 import type {
   SampleImage,
-  ModelRecord,
   ModelId,
   DatasetId,
+  Regime,
   ViewMode,
+  WipeSource,
 } from '@/api/contract';
-import type { StepStatus } from '@/components';
-import { ROUTES } from '@/routes';
+import { isModelAvailable, isCombinationAvailable } from '@/api/contract';
+import type { DetectionResult } from '@/lib/detectDataset';
 
 /** Props for the ControlPanel component. */
 export interface ControlPanelProps {
   samples: SampleImage[];
-  models: ModelRecord[];
   selectedModel: ModelId;
-  selectedDataset: DatasetId;
+  /** Detected (or assumed-default) dataset used for availability gating. */
+  dataset: DatasetId;
+  /** Result of auto-detecting the uploaded scan; null before a scan is present. */
+  detection: DetectionResult | null;
+  selectedRegime: Regime;
   viewMode: ViewMode;
-  playbackEnabled: boolean;
+  /** The two sources currently paired in Wipe mode. */
+  wipeSources: [WipeSource, WipeSource];
   loading: boolean;
-  activeImageLabel?: string;
-  onModelSelect: (id: ModelId) => void;
-  onDatasetChange: (id: DatasetId) => void;
-  onViewModeChange: (m: ViewMode) => void;
-  onPlaybackToggle: (v: boolean) => void;
-  onSampleSelect: (sample: SampleImage) => void;
-  /** dataUrl is the full `data:<mime>;base64,...` string from FileReader. */
-  onImageUpload: (dataUrl: string, filename: string) => void;
-  /** Ground-truth mask, for real Dice/IoU/HD instead of the zeroed placeholder. */
-  onGtMaskUpload: (dataUrl: string) => void;
+  collapsed: boolean;
+  scanLabel?: string;
   gtMaskLabel?: string;
+  onToggleCollapse: () => void;
+  onModelSelect: (id: ModelId) => void;
+  onRegimeChange: (r: Regime) => void;
+  onViewModeChange: (m: ViewMode) => void;
+  onWipeSourcesChange: (s: [WipeSource, WipeSource]) => void;
+  onSampleSelect: (sample: SampleImage) => void;
+  /** dataUrl is the full `data:<mime>;base64,...` string; file is the raw File (for detection). */
+  onScanUpload: (dataUrl: string, file: File) => void;
+  onGtMaskUpload: (dataUrl: string, file: File) => void;
   onRunInference: () => void;
 }
 
-const MODEL_GROUPS: { label: string; family: string }[] = [
-  { label: 'Discrete DRL', family: 'discrete-drl' },
-  { label: 'Continuous DRL', family: 'continuous-drl' },
-  { label: 'Baseline', family: 'baseline' },
+/** Top-level model picker structure. DRL is a group; the rest are leaves. */
+type PickerNode =
+  | { kind: 'model'; id: ModelId; name: string }
+  | {
+      kind: 'group';
+      label: string;
+      children: { id: ModelId; name: string; sub: string }[];
+    };
+
+const PICKER: PickerNode[] = [
+  { kind: 'model', id: 'unet-baseline', name: 'Attention Res U-Net' },
+  { kind: 'model', id: 'lite-unet', name: 'Lite U-Net' },
+  {
+    kind: 'group',
+    label: 'DRL',
+    children: [
+      { id: 'dueling-dqn', name: 'DuelingDDQN', sub: 'Discrete' },
+      { id: 'td3', name: 'TD3', sub: 'Continuous' },
+    ],
+  },
 ];
 
-const PREPROCESSING_LABELS = ['Load', 'Normalise', 'Resize', 'Augment', 'Ready'];
+const WIPE_SOURCE_LABEL: Record<WipeSource, string> = {
+  'attention-unet': 'Attention U-Net',
+  gt: 'GT',
+  drl: 'DRL',
+};
 
-function usePreprocessingSteps(active: boolean): StepStatus[] {
-  const [steps, setSteps] = useState<StepStatus[]>(
-    PREPROCESSING_LABELS.map((label) => ({ label, done: false })),
-  );
-
-  useEffect(() => {
-    if (!active) {
-      setSteps(PREPROCESSING_LABELS.map((label) => ({ label, done: false })));
-      return;
-    }
-    let cancelled = false;
-    const interval = 800 / PREPROCESSING_LABELS.length;
-    PREPROCESSING_LABELS.forEach((_, idx) => {
-      const start = Date.now();
-      setTimeout(() => {
-        if (cancelled) return;
-        setSteps((prev) =>
-          prev.map((s, i) =>
-            i === idx
-              ? { ...s, done: true, elapsedMs: Math.round(Date.now() - start) }
-              : s,
-          ),
-        );
-      }, interval * (idx + 1));
-    });
-    return () => { cancelled = true; };
-  }, [active]);
-
-  return steps;
+/** Reads a File as a data URL and forwards it (with the File) to `onLoad`. */
+function readFile(file: File, onLoad: (dataUrl: string, file: File) => void) {
+  const reader = new FileReader();
+  reader.onload = () => onLoad(reader.result as string, file);
+  reader.readAsDataURL(file);
 }
 
-/** Left control panel with upload, preprocessing, model selection, and controls. */
-export const ControlPanel: React.FC<ControlPanelProps> = ({
-  samples,
-  models,
-  selectedModel,
-  selectedDataset,
-  viewMode,
-  playbackEnabled,
-  loading,
-  activeImageLabel,
-  onModelSelect,
-  onDatasetChange,
-  onViewModeChange,
-  onPlaybackToggle,
-  onSampleSelect,
-  onImageUpload,
-  onGtMaskUpload,
-  gtMaskLabel,
-  onRunInference,
-}) => {
-  const [isDragOver, setIsDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const gtFileInputRef = useRef<HTMLInputElement>(null);
-  const steps = usePreprocessingSteps(!!activeImageLabel);
-
-  const handleGtFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      onGtMaskUpload(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-  };
-
+/** A single dashed dropzone (Scan or GT mask). */
+const DropZone: React.FC<{
+  label: string;
+  filled?: string;
+  /** GT is secondary until a scan exists. */
+  disabled?: boolean;
+  onFile: (dataUrl: string, file: File) => void;
+  icon: React.ReactNode;
+}> = ({ label, filled, disabled, onFile, icon }) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      setIsDragOver(false);
+      setOver(false);
+      if (disabled) return;
       const file = e.dataTransfer.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        onImageUpload(reader.result as string, file.name);
-      };
-      reader.readAsDataURL(file);
+      if (file) readFile(file, onFile);
     },
-    [onImageUpload],
+    [disabled, onFile],
+  );
+  return (
+    <div className="flex-1 min-w-0">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+        onDrop={handleDrop}
+        onDragOver={(e) => { e.preventDefault(); if (!disabled) setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        aria-label={`Upload ${label}`}
+        className={[
+          'w-full flex flex-col items-center gap-1 rounded-lg border border-dashed px-2 py-3',
+          'transition-colors duration-panel ease-out text-center',
+          disabled
+            ? 'border-border/50 opacity-50 cursor-not-allowed'
+            : over
+              ? 'border-accent bg-accent/5 cursor-pointer'
+              : filled
+                ? 'border-accent/40 cursor-pointer'
+                : 'border-border hover:border-accent/50 cursor-pointer',
+        ].join(' ')}
+      >
+        <span className={filled ? 'text-accent' : 'text-muted'} aria-hidden="true">
+          {icon}
+        </span>
+        <span className="text-[11px] font-body text-muted truncate max-w-full">
+          {filled ?? label}
+        </span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".dcm,.nii,.nii.gz,.png,.jpg,.jpeg"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) readFile(file, onFile);
+        }}
+      />
+    </div>
+  );
+};
+
+/** Uppercase mono section micro-label, matching the rest of the app. */
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <h2 className="text-xs font-heading font-semibold text-muted uppercase tracking-wider mb-2">
+    {children}
+  </h2>
+);
+
+/** Left control panel — collapses to an icon rail. */
+export const ControlPanel: React.FC<ControlPanelProps> = ({
+  samples,
+  selectedModel,
+  dataset,
+  detection,
+  selectedRegime,
+  viewMode,
+  wipeSources,
+  loading,
+  collapsed,
+  scanLabel,
+  gtMaskLabel,
+  onToggleCollapse,
+  onModelSelect,
+  onRegimeChange,
+  onViewModeChange,
+  onWipeSourcesChange,
+  onSampleSelect,
+  onScanUpload,
+  onGtMaskUpload,
+  onRunInference,
+}) => {
+  const canRun = !!scanLabel && !loading;
+
+  const runButton = (
+    <button
+      type="button"
+      onClick={onRunInference}
+      disabled={!canRun}
+      aria-label="Run inference"
+      className={[
+        'w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0',
+        'transition-colors duration-panel ease-out',
+        canRun ? 'bg-accent hover:bg-accent/90' : 'bg-accent/40 cursor-not-allowed',
+      ].join(' ')}
+    >
+      {loading ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin text-white" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.3" />
+          <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-white ml-0.5" aria-hidden="true">
+          <path d="M8 5v14l11-7z" />
+        </svg>
+      )}
+    </button>
   );
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      onImageUpload(reader.result as string, file.name);
-    };
-    reader.readAsDataURL(file);
-  };
+  // Collapsed: a slim rail with just expand + run, so the viewer gets the room.
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Control panel (collapsed)"
+        className="flex flex-col items-center justify-between h-full bg-surface border-r border-border py-4 w-12 flex-shrink-0"
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label="Expand control panel"
+          className="text-muted hover:text-text transition-colors duration-panel ease-out"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+        {runButton}
+      </aside>
+    );
+  }
 
   return (
     <aside
       aria-label="Control panel"
-      className="flex flex-col gap-4 h-full overflow-y-auto bg-surface border-r border-border p-4"
+      className="flex flex-col h-full overflow-hidden bg-surface border-r border-border flex-shrink-0"
       style={{ width: 'var(--control-panel-width)', minWidth: 'var(--control-panel-width)' }}
     >
-      {/* Zone 1 — Upload */}
-      <section aria-label="Image upload">
-        <h2 className="text-xs font-heading font-semibold text-muted uppercase tracking-wider mb-2">
-          Image
-        </h2>
-
-        {activeImageLabel ? (
-          <div className="border border-border rounded-lg p-3 bg-bg flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-body text-text truncate">{activeImageLabel}</span>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-xs font-body text-accent hover:underline ml-2 flex-shrink-0"
-              >
-                Replace
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div
-            role="region"
-            aria-label="Drop zone for DICOM, NIfTI, or PNG files"
-            onDrop={handleDrop}
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
-            onClick={() => fileInputRef.current?.click()}
-            className={[
-              'border-2 border-dashed rounded-lg p-4 flex flex-col items-center gap-2 cursor-pointer',
-              'transition-colors duration-panel ease-out',
-              isDragOver ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50',
-            ].join(' ')}
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+        {/* Header with collapse chevron */}
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-heading uppercase tracking-wider text-muted">Workspace</span>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label="Collapse control panel"
+            className="text-muted hover:text-text transition-colors duration-panel ease-out"
           >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="text-muted"
-              aria-hidden="true"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
             </svg>
-            <p className="text-xs font-body text-muted text-center">
-              Drop DICOM, NIfTI, or PNG
-            </p>
-          </div>
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".dcm,.nii,.nii.gz,.png,.jpg"
-          className="hidden"
-          aria-label="Upload image file"
-          onChange={handleFileChange}
-        />
+          </button>
+        </div>
 
-        {/* Sample grid */}
-        <p className="text-xs font-body text-muted mt-3 mb-2">Or choose a sample:</p>
-        <div className="grid grid-cols-2 gap-2">
-          {samples.slice(0, 6).map((s) => (
-            <SampleImageTile
-              key={s.id}
-              image={s}
-              onSelect={() => onSampleSelect(s)}
+        {/* Image — dual dropzones + detection chip */}
+        <section aria-label="Image upload">
+          <SectionLabel>Image</SectionLabel>
+          <div className="flex gap-2">
+            <DropZone
+              label="Scan"
+              filled={scanLabel}
+              onFile={onScanUpload}
+              icon={
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              }
             />
-          ))}
-        </div>
-      </section>
+            <DropZone
+              label="GT mask"
+              filled={gtMaskLabel}
+              disabled={!scanLabel}
+              onFile={onGtMaskUpload}
+              icon={
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                  <path d="M12 21s-7-4.35-7-10a7 7 0 0 1 14 0c0 5.65-7 10-7 10z" />
+                  <circle cx="12" cy="11" r="2.5" />
+                </svg>
+              }
+            />
+          </div>
 
-      {/* Zone 2 — Preprocessing */}
-      {activeImageLabel && (
-        <section aria-label="Preprocessing status">
-          <h2 className="text-xs font-heading font-semibold text-muted uppercase tracking-wider mb-2">
-            Preprocessing
-          </h2>
-          <PreprocessingStepIndicator steps={steps} className="w-full" />
-        </section>
-      )}
+          {/* Read-only detection chip — never a control */}
+          {detection && (
+            <div
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-bg px-2.5 py-1"
+              title={`Detected from ${detection.source}`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-accent" aria-hidden="true" />
+              <span className="text-[11px] font-body text-muted">
+                {detection.confidence === 'low' ? 'Looks like' : 'Detected'}: {detection.label}
+              </span>
+            </div>
+          )}
 
-      {/* Zone 3 — Model selection */}
-      <section aria-label="Model selection">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-heading font-semibold text-muted uppercase tracking-wider">
-            Model
-          </h2>
-          <a
-            href={ROUTES.research}
-            className="text-xs font-body text-accent hover:underline"
-          >
-            View full research results →
-          </a>
-        </div>
-        <div className="flex flex-col gap-2">
-          {MODEL_GROUPS.map((group) => {
-            const groupModels = models.filter((m) => m.family === group.family);
-            if (groupModels.length === 0) return null;
-            return (
-              <div key={group.family}>
-                <p className="text-xs font-body text-muted mb-1">{group.label}</p>
-                {groupModels.map((m) => (
-                  <ModelCard
-                    key={m.id}
-                    model={m}
-                    variant="compact"
-                    active={selectedModel === m.id}
-                    onSelect={(id) => onModelSelect(id as ModelId)}
-                    className="mb-1 w-full"
-                  />
+          {/* Samples */}
+          {samples.length > 0 && (
+            <>
+              <p className="text-[11px] font-body text-muted mt-3 mb-1.5">Or choose a sample:</p>
+              <div className="grid grid-cols-2 gap-2">
+                {samples.slice(0, 4).map((s) => (
+                  <SampleImageTile key={s.id} image={s} onSelect={() => onSampleSelect(s)} />
                 ))}
               </div>
-            );
-          })}
-        </div>
-      </section>
+            </>
+          )}
+        </section>
 
-      {/* Zone 4 — Analysis Controls */}
-      <section aria-label="Analysis controls">
-        <h2 className="text-xs font-heading font-semibold text-muted uppercase tracking-wider mb-3">
-          Analysis
-        </h2>
-
-        {/* Dataset selector */}
-        <div className="mb-3">
-          <p className="text-xs font-body text-muted mb-1">Dataset</p>
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            {(['camus', 'brisc'] as DatasetId[]).map((d) => (
-              <button
-                key={d}
-                type="button"
-                aria-pressed={selectedDataset === d}
-                onClick={() => onDatasetChange(d)}
-                className={[
-                  'flex-1 py-1.5 text-xs font-body transition-colors duration-panel ease-out',
-                  selectedDataset === d
-                    ? 'bg-accent text-white'
-                    : 'text-muted hover:text-text',
-                ].join(' ')}
-              >
-                {d.toUpperCase()}
-              </button>
-            ))}
+        {/* Model picker */}
+        <section aria-label="Model selection">
+          <SectionLabel>Model</SectionLabel>
+          <div className="flex flex-col gap-1.5">
+            {PICKER.map((node) => {
+              if (node.kind === 'model') {
+                const enabled = isModelAvailable(dataset, node.id);
+                const active = selectedModel === node.id;
+                return (
+                  <button
+                    key={node.id}
+                    type="button"
+                    disabled={!enabled}
+                    aria-pressed={active}
+                    onClick={() => onModelSelect(node.id)}
+                    className={[
+                      'w-full text-left rounded-lg border px-3 py-2 text-sm font-body',
+                      'transition-colors duration-panel ease-out',
+                      active
+                        ? 'border-accent bg-accent/10 text-text'
+                        : enabled
+                          ? 'border-border text-muted hover:border-accent/50'
+                          : 'border-border/50 text-muted/40 cursor-not-allowed',
+                    ].join(' ')}
+                  >
+                    {node.name}
+                    {!enabled && <span className="ml-1 text-[10px]">· soon</span>}
+                  </button>
+                );
+              }
+              // DRL group — expanded, boxed, selected by default.
+              const groupActive = node.children.some((c) => c.id === selectedModel);
+              return (
+                <div
+                  key={node.label}
+                  className={[
+                    'rounded-lg border px-2.5 py-2',
+                    groupActive ? 'border-accent' : 'border-border',
+                  ].join(' ')}
+                >
+                  <div className="flex items-center justify-between px-0.5 pb-1.5">
+                    <span className="text-sm font-body font-medium text-text">{node.label}</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent" aria-hidden="true">
+                      <path d="M6 15l6-6 6 6" />
+                    </svg>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {node.children.map((c) => {
+                      const enabled = isModelAvailable(dataset, c.id);
+                      const active = selectedModel === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          disabled={!enabled}
+                          aria-pressed={active}
+                          onClick={() => onModelSelect(c.id)}
+                          className={[
+                            'w-full flex items-center justify-between rounded-md px-2 py-1.5 text-left',
+                            'transition-colors duration-panel ease-out',
+                            active
+                              ? 'bg-accent/15 text-text'
+                              : enabled
+                                ? 'text-muted hover:bg-bg'
+                                : 'text-muted/40 cursor-not-allowed',
+                          ].join(' ')}
+                        >
+                          <span className="text-sm font-body">
+                            {c.name}
+                            {!enabled && <span className="ml-1 text-[10px]">· soon</span>}
+                          </span>
+                          <span className="text-[11px] font-body text-muted/70">{c.sub}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        </section>
 
-        {/* Mode selector */}
-        <div className="mb-3">
-          <p className="text-xs font-body text-muted mb-1">View mode</p>
+        {/* Data regime — default flips with the model, unavailable options greyed */}
+        <section aria-label="Data regime">
+          <SectionLabel>Data regime</SectionLabel>
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            {(['low', 'high'] as Regime[]).map((r) => {
+              const enabled = isCombinationAvailable(dataset, selectedModel, r);
+              const active = selectedRegime === r;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  disabled={!enabled}
+                  aria-pressed={active}
+                  onClick={() => onRegimeChange(r)}
+                  className={[
+                    'flex-1 py-1.5 text-xs font-body capitalize transition-colors duration-panel ease-out',
+                    active
+                      ? 'bg-accent text-white'
+                      : enabled
+                        ? 'text-muted hover:text-text'
+                        : 'text-muted/30 cursor-not-allowed',
+                  ].join(' ')}
+                >
+                  {r} data
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* View mode */}
+        <section aria-label="View mode">
+          <SectionLabel>View mode</SectionLabel>
           <div className="flex flex-col gap-1">
             {(
               [
-                { id: 'single', label: 'Single Model' },
-                { id: 'wipe', label: 'Wipe Comparison' },
-                { id: 'side-by-side', label: 'Side-by-Side' },
+                { id: 'single', label: 'Single model' },
+                { id: 'wipe', label: 'Wipe comparison' },
+                { id: 'side-by-side', label: 'Side-by-side' },
               ] as { id: ViewMode; label: string }[]
             ).map(({ id, label }) => (
               <button
@@ -317,73 +442,62 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   'transition-colors duration-panel ease-out',
                   viewMode === id
                     ? 'bg-accent/15 text-accent border border-accent/30'
-                    : 'border border-border text-muted hover:border-accent/50',
+                    : 'border border-transparent text-muted hover:text-text',
                 ].join(' ')}
               >
                 {label}
               </button>
             ))}
           </div>
-        </div>
 
-        {/* Iteration Playback toggle */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-body text-muted">Iteration Playback</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={playbackEnabled}
-            onClick={() => onPlaybackToggle(!playbackEnabled)}
-            className={[
-              'relative inline-flex h-5 w-9 items-center rounded-full',
-              'transition-colors duration-panel ease-out',
-              playbackEnabled ? 'bg-accent' : 'bg-border',
-            ].join(' ')}
-          >
-            <span
-              className={[
-                'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow',
-                'transition-transform duration-panel ease-out',
-                playbackEnabled ? 'translate-x-4' : 'translate-x-0.5',
-              ].join(' ')}
-            />
-          </button>
-        </div>
+          {/* Wipe source chips — pick any two available sources */}
+          {viewMode === 'wipe' && (
+            <div className="mt-2">
+              <p className="text-[11px] font-body text-muted mb-1.5">Compare (pick two):</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {(['attention-unet', 'gt', 'drl'] as WipeSource[]).map((src) => {
+                  const selected = wipeSources.includes(src);
+                  // GT is only available once a mask is attached.
+                  const enabled = src !== 'gt' || !!gtMaskLabel;
+                  return (
+                    <button
+                      key={src}
+                      type="button"
+                      disabled={!enabled}
+                      aria-pressed={selected}
+                      onClick={() => {
+                        if (!enabled) return;
+                        if (selected) {
+                          // Keep at least two selected — swap out the *other* one instead.
+                          const other = wipeSources.find((s) => s !== src)!;
+                          onWipeSourcesChange([src, other]);
+                        } else {
+                          onWipeSourcesChange([wipeSources[1], src]);
+                        }
+                      }}
+                      className={[
+                        'text-[11px] px-2.5 py-1 rounded-full border transition-colors duration-panel ease-out',
+                        selected
+                          ? 'bg-accent/15 text-accent border-accent'
+                          : enabled
+                            ? 'text-muted border-border hover:border-accent/50'
+                            : 'text-muted/30 border-border/50 cursor-not-allowed',
+                      ].join(' ')}
+                    >
+                      {WIPE_SOURCE_LABEL[src]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
 
-        {/* Upload GT mask — enables real Dice/IoU/HD instead of the zeroed placeholder */}
-        <button
-          type="button"
-          onClick={() => gtFileInputRef.current?.click()}
-          className="w-full mb-3 py-2 text-xs font-body text-muted border border-dashed border-border rounded-md hover:border-accent/50 transition-colors duration-panel ease-out"
-        >
-          {gtMaskLabel ? `GT mask: ${gtMaskLabel}` : 'Upload GT mask'}
-        </button>
-        <input
-          ref={gtFileInputRef}
-          type="file"
-          accept=".png,.jpg,.jpeg"
-          className="hidden"
-          aria-label="Upload ground truth mask"
-          onChange={handleGtFileChange}
-        />
-
-        {/* Run Inference */}
-        <button
-          type="button"
-          onClick={onRunInference}
-          disabled={loading}
-          aria-label="Run inference"
-          className={[
-            'w-full h-[52px] rounded-lg text-sm font-heading font-semibold text-white',
-            'transition-colors duration-panel ease-out',
-            loading
-              ? 'bg-accent/60 cursor-not-allowed'
-              : 'bg-accent hover:bg-accent/90',
-          ].join(' ')}
-        >
-          {loading ? 'Running…' : 'Run Inference'}
-        </button>
-      </section>
+      {/* Run — circular play button pinned to the bottom */}
+      <div className="flex justify-center border-t border-border py-3 flex-shrink-0">
+        {runButton}
+      </div>
     </aside>
   );
 };

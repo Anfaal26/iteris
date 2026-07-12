@@ -1,52 +1,50 @@
 /**
- * ImageViewer — centre canvas zone with floating toolbar and mode overlays (spec §6).
+ * ImageViewer — centre canvas zone with floating toolbar and mode overlays.
+ * Occupies the top of the single-scroll page; Wipe mode compares any two of the
+ * sidebar-selected sources (Attention U-Net / GT / DRL).
  */
 
 import React, { useState } from 'react';
 import { IterationPlaybackTimeline, ExportButtonGroup } from '@/components';
-import type {
-  MaskLayer,
-  ViewMode,
-  IterationStep,
-  CompareResult,
-  Metrics,
-} from '@/api/contract';
+import type { MaskLayer, ViewMode, IterationStep, CompareResult, WipeSource } from '@/api/contract';
 import { structureColor } from '@/tokens';
 import { SingleMode } from '../modes/SingleMode';
-import { WipeMode } from '../modes/WipeMode';
+import { WipeMode, type WipeSide } from '../modes/WipeMode';
 import { SideBySideMode } from '../modes/SideBySideMode';
 
-/** Props for ImageViewer. */
 export interface ImageViewerProps {
   anatomyLabel: string;
   /** Full `data:<mime>;base64,...` URL of the active image, for display only. */
   imageB64?: string;
   masks: MaskLayer[];
   baselineMasks: MaskLayer[];
+  /** Ground-truth mask preview URL, when attached (a Wipe source). */
+  gtMaskUrl?: string;
   viewMode: ViewMode;
+  wipeSources: [WipeSource, WipeSource];
   playbackEnabled: boolean;
   stepSequence?: IterationStep[];
   compareResults?: CompareResult[];
-  baselineMetrics?: Metrics;
-  drlMetrics?: Metrics;
   hasResult: boolean;
 }
 
-/**
- * Centre image viewer with floating toolbar and mode overlays.
- * Manages W/L sliders, visibility toggles, and opacity locally.
- */
+const WIPE_SOURCE_LABEL: Record<WipeSource, string> = {
+  'attention-unet': 'Attention U-Net',
+  gt: 'GT',
+  drl: 'DRL',
+};
+
 export const ImageViewer: React.FC<ImageViewerProps> = ({
   anatomyLabel,
   imageB64,
   masks,
   baselineMasks,
+  gtMaskUrl,
   viewMode,
+  wipeSources,
   playbackEnabled,
   stepSequence,
   compareResults,
-  baselineMetrics,
-  drlMetrics,
   hasResult,
 }) => {
   const [windowLevel, setWindowLevel] = useState(200);
@@ -57,7 +55,6 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
     () => new Set(masks.map((m) => m.structure)),
   );
 
-  // Update visible structures when masks change
   React.useEffect(() => {
     setVisibleStructures(new Set(masks.map((m) => m.structure)));
   }, [masks]);
@@ -65,27 +62,36 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   const toggleStructure = (structureId: string) => {
     setVisibleStructures((prev) => {
       const next = new Set(prev);
-      if (next.has(structureId)) {
-        next.delete(structureId);
-      } else {
-        next.add(structureId);
-      }
+      if (next.has(structureId)) next.delete(structureId);
+      else next.add(structureId);
       return next;
     });
   };
 
-  // Determine which masks to display (step-based if playback active)
   const displayMasks =
     playbackEnabled && stepSequence && stepSequence[currentStep]
       ? stepSequence[currentStep].masks
       : masks;
 
+  /** Resolve a wipe source to a renderable side (respects visibility toggles). */
+  const resolveSide = (src: WipeSource): WipeSide => {
+    if (src === 'gt') {
+      return {
+        label: WIPE_SOURCE_LABEL.gt,
+        overlays: gtMaskUrl ? [{ id: 'gt', imageB64: gtMaskUrl }] : [],
+      };
+    }
+    const layers = src === 'attention-unet' ? baselineMasks : displayMasks;
+    return {
+      label: WIPE_SOURCE_LABEL[src],
+      overlays: layers
+        .filter((m) => visibleStructures.has(m.structure))
+        .map((m) => ({ id: m.structure, imageB64: m.imageB64 })),
+    };
+  };
+
   return (
-    <div
-      className="relative flex-1 flex flex-col overflow-hidden bg-bg"
-      aria-label="Image viewer"
-    >
-      {/* Main viewer area */}
+    <div className="relative flex-1 flex flex-col overflow-hidden bg-bg" aria-label="Image viewer">
       <div className="flex-1 relative overflow-hidden">
         {viewMode === 'single' && (
           <SingleMode
@@ -102,12 +108,9 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           <WipeMode
             anatomyLabel={anatomyLabel}
             imageB64={imageB64}
-            baselineMasks={baselineMasks}
-            drlMasks={displayMasks}
-            visibleStructures={visibleStructures}
+            left={resolveSide(wipeSources[0])}
+            right={resolveSide(wipeSources[1])}
             overlayOpacity={overlayOpacity}
-            baselineMetrics={baselineMetrics}
-            drlMetrics={drlMetrics}
           />
         )}
         {viewMode === 'side-by-side' && (
@@ -127,32 +130,12 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         style={{ backdropFilter: 'blur(8px)' }}
         aria-label="Viewer toolbar"
       >
-        {/* W/L sliders */}
         <div className="flex items-center gap-2">
-          <label className="text-xs font-body text-muted whitespace-nowrap">
-            W/L
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="400"
-            value={windowWidth}
-            onChange={(e) => setWindowWidth(Number(e.target.value))}
-            aria-label="Window width"
-            className="w-20 accent-accent"
-          />
-          <input
-            type="range"
-            min="0"
-            max="400"
-            value={windowLevel}
-            onChange={(e) => setWindowLevel(Number(e.target.value))}
-            aria-label="Window level"
-            className="w-20 accent-accent"
-          />
+          <label className="text-xs font-body text-muted whitespace-nowrap">W/L</label>
+          <input type="range" min="0" max="400" value={windowWidth} onChange={(e) => setWindowWidth(Number(e.target.value))} aria-label="Window width" className="w-20 accent-accent" />
+          <input type="range" min="0" max="400" value={windowLevel} onChange={(e) => setWindowLevel(Number(e.target.value))} aria-label="Window level" className="w-20 accent-accent" />
         </div>
 
-        {/* Structure visibility toggles */}
         {hasResult && masks.length > 0 && (
           <div className="flex items-center gap-1.5" role="group" aria-label="Structure visibility">
             {masks.map((mask) => (
@@ -175,24 +158,11 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           </div>
         )}
 
-        {/* Overlay opacity slider */}
         <div className="flex items-center gap-2">
-          <label className="text-xs font-body text-muted whitespace-nowrap">
-            Opacity
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={overlayOpacity}
-            onChange={(e) => setOverlayOpacity(Number(e.target.value))}
-            aria-label="Overlay opacity"
-            className="w-20 accent-accent"
-          />
+          <label className="text-xs font-body text-muted whitespace-nowrap">Opacity</label>
+          <input type="range" min="0" max="1" step="0.05" value={overlayOpacity} onChange={(e) => setOverlayOpacity(Number(e.target.value))} aria-label="Overlay opacity" className="w-20 accent-accent" />
         </div>
 
-        {/* Export button group */}
         {hasResult && (
           <div className="ml-auto">
             <ExportButtonGroup />
@@ -200,14 +170,9 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         )}
       </div>
 
-      {/* Iteration Playback Timeline */}
       {playbackEnabled && stepSequence && stepSequence.length > 0 && (
         <div className="border-t border-border p-3">
-          <IterationPlaybackTimeline
-            steps={stepSequence}
-            currentStep={currentStep}
-            onStepChange={setCurrentStep}
-          />
+          <IterationPlaybackTimeline steps={stepSequence} currentStep={currentStep} onStepChange={setCurrentStep} />
         </div>
       )}
     </div>

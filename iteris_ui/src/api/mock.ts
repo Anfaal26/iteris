@@ -9,6 +9,7 @@
 import modelsData from '@/content/models.yaml';
 import samplesData from '@/content/samples.yaml';
 import type {
+  ChatRequest,
   CompareRequest,
   CompareResponse,
   HealthResponse,
@@ -16,6 +17,7 @@ import type {
   IterationStep,
   MaskLayer,
   Metrics,
+  ModelId,
   ModelRecord,
   PredictRequest,
   PredictResponse,
@@ -104,6 +106,11 @@ export async function samples(): Promise<SampleImage[]> {
   return samplesData as SampleImage[];
 }
 
+/** DRL agents refine a contour over an episode; baselines do a single pass. */
+function isDrl(modelId: ModelId): boolean {
+  return modelId === 'dqn' || modelId === 'ddqn' || modelId === 'dueling-dqn' || modelId === 'td3';
+}
+
 export async function predict(body: PredictRequest): Promise<PredictResponse> {
   const dice = body.dataset === 'camus' ? 0.912 : 0.84;
   const masks = buildMasks(body.dataset);
@@ -113,8 +120,9 @@ export async function predict(body: PredictRequest): Promise<PredictResponse> {
     dataset: body.dataset,
     masks,
     metrics: buildMetrics(body.dataset, dice),
+    refinementSteps: isDrl(body.modelId) ? 18 : undefined,
     preprocessingMs: 180,
-    inferenceMs: 640,
+    inferenceMs: isDrl(body.modelId) ? 940 : 640,
     imageWidth: SIZE,
     imageHeight: SIZE,
   };
@@ -170,5 +178,38 @@ export async function* interpret(body: InterpretRequest): AsyncGenerator<string>
       yield `${w} `;
       await new Promise((r) => setTimeout(r, 12));
     }
+  }
+}
+
+/**
+ * Mock chat — a grounded, streamed answer that references the live metrics so
+ * the thread feels real without a backend. The last user turn steers the reply.
+ */
+export async function* chat(body: ChatRequest): AsyncGenerator<string> {
+  const { context } = body;
+  const last = [...body.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const q = last.toLowerCase();
+  const m = context.metrics;
+  const modelName = context.modelId.toUpperCase();
+  const gt = context.hasGroundTruth;
+
+  let reply: string;
+  if (/lv|endo|boundary|improve/.test(q)) {
+    reply = `On the LV endocardium, ${modelName} pushed the contour toward the high-gradient wall the baseline under-segmented, lifting per-class Dice to ${m.structures[0]?.dice ?? m.dice}. The refinement steps concentrate where the initial mask leaked into papillary muscle.`;
+  } else if (/compare|attention|u-?net|baseline/.test(q)) {
+    reply = gt
+      ? `Versus the Attention U-Net baseline (Dice ${m.baselineDice}), this run reaches ${m.dice} — a ${(m.dice - m.baselineDice).toFixed(3)} delta, mostly from tightened boundaries rather than new regions.`
+      : `No ground-truth mask is attached, so Dice/IoU aren't computed for this image. Attach a GT mask to get a real delta versus the ${m.baselineDice} baseline.`;
+  } else if (/hausdorff|hd|worst|outlier/.test(q)) {
+    reply = `Hausdorff distance here is ${m.hd} (95th-pct ${m.hd95}), so the worst-case boundary excursion is small — the agent avoided the large stray components that drive HD up.`;
+  } else {
+    reply = gt
+      ? `This ${context.dataset.toUpperCase()} result from ${modelName} scores Dice ${m.dice} / IoU ${m.iou} across ${m.structures.length} structure(s). Ask about a specific structure, the baseline delta, or the refinement trajectory.`
+      : `This ${context.dataset.toUpperCase()} run used ${modelName}. Metrics need a ground-truth mask to compute — attach one in the sidebar and I can quantify the boundaries.`;
+  }
+
+  for (const w of reply.split(' ')) {
+    yield `${w} `;
+    await new Promise((r) => setTimeout(r, 14));
   }
 }

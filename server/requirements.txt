@@ -5,3 +5,5 @@ numpy
 huggingface_hub
 python-multipart
 anthropic
+scipy
+scikit-image

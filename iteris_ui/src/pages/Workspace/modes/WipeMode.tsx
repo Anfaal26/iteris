@@ -1,47 +1,57 @@
 /**
- * WipeMode — split wipe comparison between U-Net baseline and selected DRL model.
+ * WipeMode — split wipe comparison between any two chosen sources
+ * (Attention U-Net / GT / DRL). The two sides are resolved upstream in
+ * ImageViewer from the sidebar's source chips, so this component just renders
+ * whatever overlay set each side carries.
  */
 
 import React, { useState } from 'react';
 import { WipeDivider } from '@/components';
-import type { MaskLayer, Metrics } from '@/api/contract';
 
-/** Props for WipeMode. */
+/** One overlay image to stack on the scan (a structure mask or the GT mask). */
+export interface WipeOverlay {
+  id: string;
+  imageB64: string;
+}
+
+/** A named side of the wipe (left or right of the divider). */
+export interface WipeSide {
+  label: string;
+  overlays: WipeOverlay[];
+}
+
 export interface WipeModeProps {
   anatomyLabel: string;
   imageB64?: string;
-  baselineMasks: MaskLayer[];
-  drlMasks: MaskLayer[];
-  visibleStructures: Set<string>;
+  left: WipeSide;
+  right: WipeSide;
   overlayOpacity: number;
-  baselineMetrics?: Metrics;
-  drlMetrics?: Metrics;
 }
 
-/** Wipe comparison view — left half baseline, right half DRL model. */
 export const WipeMode: React.FC<WipeModeProps> = ({
   anatomyLabel,
   imageB64,
-  baselineMasks,
-  drlMasks,
-  visibleStructures,
+  left,
+  right,
   overlayOpacity,
-  baselineMetrics,
-  drlMetrics,
 }) => {
   const [wipeValue, setWipeValue] = useState(50);
 
-  const diceDelta =
-    drlMetrics && baselineMetrics
-      ? (drlMetrics.dice - baselineMetrics.dice).toFixed(3)
-      : null;
+  const overlayImgs = (overlays: WipeOverlay[], side: string) =>
+    overlays.map((o) => (
+      <img
+        key={`${side}-${o.id}`}
+        src={o.imageB64}
+        alt={`${side} ${o.id}`}
+        className="absolute inset-0 w-full h-full object-fill"
+        style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
+      />
+    ));
 
   return (
     <div className="flex flex-col w-full h-full">
-      {/* Wipe viewer */}
       <div className="relative flex-1 flex items-center justify-center bg-landing-bg overflow-hidden">
-        <div className="relative aspect-square" style={{ width: 'min(85%, 85vh, 640px)' }}>
-          {/* Base image — real scan if available, grey placeholder otherwise */}
+        <div className="relative aspect-square" style={{ width: 'min(85%, 80vh, 640px)' }}>
           {imageB64 ? (
             <img
               src={imageB64}
@@ -49,102 +59,34 @@ export const WipeMode: React.FC<WipeModeProps> = ({
               className="absolute inset-0 w-full h-full object-fill rounded-lg bg-[#2a2f3a]"
             />
           ) : (
-            <svg
-              width="100%"
-              height="100%"
-              viewBox="0 0 256 256"
-              aria-label={`${anatomyLabel} wipe comparison`}
-              role="img"
-              className="rounded-lg"
-            >
+            <svg width="100%" height="100%" viewBox="0 0 256 256" role="img" aria-label={`${anatomyLabel} wipe comparison`} className="rounded-lg">
               <rect width="256" height="256" fill="#2a2f3a" rx="8" />
-              <text
-                x="128"
-                y="128"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill="#64748b"
-                fontSize="12"
-                fontFamily="system-ui"
-              >
+              <text x="128" y="128" textAnchor="middle" dominantBaseline="middle" fill="#64748b" fontSize="12" fontFamily="system-ui">
                 {anatomyLabel}
               </text>
             </svg>
           )}
 
-          {/* Left half — baseline masks clipped */}
-          <div
-            className="absolute inset-0 overflow-hidden rounded-lg"
-            style={{ clipPath: `inset(0 ${100 - wipeValue}% 0 0)` }}
-          >
-            {baselineMasks.map((mask) =>
-              visibleStructures.has(mask.structure) ? (
-                <img
-                  key={mask.structure}
-                  src={mask.imageB64}
-                  alt={`Baseline ${mask.label} mask`}
-                  className="absolute inset-0 w-full h-full"
-                  style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
-                />
-              ) : null,
-            )}
+          {/* Left side — clipped to the wipe */}
+          <div className="absolute inset-0 overflow-hidden rounded-lg" style={{ clipPath: `inset(0 ${100 - wipeValue}% 0 0)` }}>
+            {overlayImgs(left.overlays, 'left')}
           </div>
 
-          {/* Right half — DRL masks clipped */}
-          <div
-            className="absolute inset-0 overflow-hidden rounded-lg"
-            style={{ clipPath: `inset(0 0 0 ${wipeValue}%)` }}
-          >
-            {drlMasks.map((mask) =>
-              visibleStructures.has(mask.structure) ? (
-                <img
-                  key={mask.structure}
-                  src={mask.imageB64}
-                  alt={`DRL ${mask.label} mask`}
-                  className="absolute inset-0 w-full h-full"
-                  style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
-                />
-              ) : null,
-            )}
+          {/* Right side — clipped to the wipe */}
+          <div className="absolute inset-0 overflow-hidden rounded-lg" style={{ clipPath: `inset(0 0 0 ${wipeValue}%)` }}>
+            {overlayImgs(right.overlays, 'right')}
           </div>
 
-          {/* Wipe divider */}
           <WipeDivider value={wipeValue} onChange={setWipeValue} height={256} />
 
-          {/* Labels */}
           <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-xs font-mono bg-surface/80 text-muted">
-            Baseline
+            {left.label}
           </div>
           <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-xs font-mono bg-surface/80 text-accent">
-            DRL
+            {right.label}
           </div>
         </div>
       </div>
-
-      {/* Metrics delta */}
-      {diceDelta !== null && (
-        <div className="flex items-center justify-center gap-4 py-3 border-t border-border bg-surface">
-          <div className="text-center">
-            <p className="text-xs font-body text-muted">Baseline Dice</p>
-            <p className="text-sm font-mono text-text">{baselineMetrics!.dice.toFixed(3)}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs font-body text-muted">DRL Dice</p>
-            <p className="text-sm font-mono text-text">{drlMetrics!.dice.toFixed(3)}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs font-body text-muted">Δ Dice</p>
-            <p
-              className={[
-                'text-sm font-mono',
-                parseFloat(diceDelta) >= 0 ? 'text-success' : 'text-error',
-              ].join(' ')}
-            >
-              {parseFloat(diceDelta) >= 0 ? '+' : ''}{diceDelta}
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

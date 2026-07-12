@@ -17,6 +17,8 @@ import { api } from '@/api/client';
 /** Props for the ResultsPanel component. */
 export interface ResultsPanelProps {
   result: PredictResponse | null;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   onExportJson?: () => void;
   onDownloadPng?: () => void;
 }
@@ -30,6 +32,8 @@ function metricStatus(value: number, baseline: number): MetricStatus {
 /** Right panel with metric cards, structure rows, accordion details, and export actions. */
 export const ResultsPanel: React.FC<ResultsPanelProps> = ({
   result,
+  collapsed,
+  onToggleCollapse,
   onExportJson,
   onDownloadPng,
 }) => {
@@ -57,14 +61,48 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
     setTimeout(() => setInterpretLoading(false), 500);
   };
 
+  // Collapsed: slim rail with just an expand chevron, freeing room for the viewer.
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Results panel (collapsed)"
+        className="flex flex-col items-center h-full bg-surface border-l border-border py-4 w-12 flex-shrink-0"
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label="Expand results panel"
+          className="text-muted hover:text-text transition-colors duration-panel ease-out"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+        </button>
+      </aside>
+    );
+  }
+
   if (!result) {
     return (
       <aside
         aria-label="Results panel"
-        className="flex flex-col items-center justify-center h-full bg-surface border-l border-border p-4 text-center"
+        className="flex flex-col h-full bg-surface border-l border-border p-4"
         style={{ width: 'var(--results-panel-width)', minWidth: 'var(--results-panel-width)' }}
       >
-        <p className="text-sm font-body text-muted">
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-[11px] font-heading uppercase tracking-wider text-muted">Summary</span>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label="Collapse results panel"
+            className="text-muted hover:text-text transition-colors duration-panel ease-out"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
+        </div>
+        <p className="text-sm font-body text-muted m-auto text-center">
           Run inference to see results here.
         </p>
       </aside>
@@ -88,6 +126,21 @@ export const ResultsPanel: React.FC<ResultsPanelProps> = ({
       className="flex flex-col gap-4 h-full overflow-y-auto bg-surface border-l border-border p-4"
       style={{ width: 'var(--results-panel-width)', minWidth: 'var(--results-panel-width)' }}
     >
+      {/* Panel header with collapse control */}
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-heading uppercase tracking-wider text-muted">Summary</span>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label="Collapse results panel"
+          className="text-muted hover:text-text transition-colors duration-panel ease-out"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+      </div>
+
       {/* Metric cards */}
       <section aria-label="Aggregate metrics">
         <h2 className="text-xs font-heading font-semibold text-muted uppercase tracking-wider mb-2">

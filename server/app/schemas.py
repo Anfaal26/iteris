@@ -8,7 +8,8 @@ from pydantic import BaseModel
 
 DatasetId = Literal['camus', 'brisc']
 ModelFamily = Literal['baseline', 'discrete-drl', 'continuous-drl']
-ModelId = Literal['unet-baseline', 'dqn', 'ddqn', 'dueling-dqn', 'ddpg']
+ModelId = Literal['unet-baseline', 'lite-unet', 'dqn', 'ddqn', 'dueling-dqn', 'ddpg', 'td3']
+Regime = Literal['low', 'high']
 ViewMode = Literal['single', 'wipe', 'side-by-side']
 Difficulty = Literal['easy', 'medium', 'hard']
 StructureId = Literal['lv_endo', 'lv_epi', 'la', 'glioma', 'meningioma', 'pituitary']
@@ -52,6 +53,7 @@ class PredictRequest(BaseModel):
     imageB64: str
     modelId: ModelId
     dataset: DatasetId
+    regime: Optional[Regime] = None
     mode: ViewMode
     playback: Optional[bool] = False
     gtMaskB64: Optional[str] = None
@@ -87,6 +89,36 @@ class CompareRequest(BaseModel):
     imageB64: str
     modelIds: List[ModelId]
     dataset: DatasetId
+    regime: Optional[Regime] = None
+
+
+ModelFamilyArg = Literal['baseline', 'drl']
+AlgoId = Literal['duelingddqn', 'td3', 'dqn', 'ddqn', 'ddpg']
+
+
+class InferRequest(BaseModel):
+    """POST /infer — the generic inference entry point keyed by
+    (dataset, model_family, algo, regime). See app/drl.py REGISTRY."""
+    imageB64: str
+    dataset: DatasetId
+    modelFamily: ModelFamilyArg
+    algo: AlgoId
+    regime: Regime
+    gtMaskB64: Optional[str] = None
+
+
+class InferResponse(BaseModel):
+    sessionId: str
+    dataset: DatasetId
+    algo: AlgoId
+    regime: Regime
+    masks: List[MaskLayer]
+    metrics: Metrics
+    # DRL-only: refinement episode length. None for a single U-Net pass.
+    refinementSteps: Optional[int] = None
+    inferenceMs: float
+    imageWidth: int
+    imageHeight: int
 
 
 class CompareResult(BaseModel):
