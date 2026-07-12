@@ -6,14 +6,15 @@
  * browser calls same-origin `/api/infer`; this forwards the body server-side
  * and relays the response back. See iteris_ui/src/api/client.ts inferViaDrlRoute.
  *
- * Written against ONLY native Node.js `http` primitives (statusCode/setHeader/
- * end, and reading the request as a stream) rather than the `.status()/.json()/
- * .send()` convenience methods some Vercel setups attach — those aren't
- * guaranteed present for a plain Vite project's /api functions (that's what
- * caused the 500s: those methods didn't exist here, and the very first call to
- * one of them threw before any response was ever sent). `req`/`res` ARE a
- * Node `http.IncomingMessage`/`ServerResponse` under the hood regardless of
- * framework, so these low-level methods always work.
+ * Signature per Vercel's current documented contract for a plain (non-Next.js)
+ * project: a NAMED export per HTTP method (`export function POST(request)`),
+ * taking and returning the standard Fetch `Request`/`Response`. Two earlier
+ * attempts at this file used a default-exported handler and a Node
+ * `(req, res)` signature respectively — neither matches Vercel's actual
+ * routing contract for /api functions outside Next.js, so both crashed with
+ * an uncaught error before any response was ever sent (surfaced as a bare
+ * 500 with no useful body). This is the form Vercel's docs show verbatim for
+ * "other frameworks": https://vercel.com/docs/functions/functions-api-reference
  *
  * Required env vars (set in the Vercel project, not committed):
  *   ITERIS_SPACE_URL    e.g. https://anfaal26-iteris-api.hf.space
@@ -26,49 +27,24 @@
  * Vercel's 10s Hobby-plan default so a cold start doesn't get killed mid-flight.
  */
 
-export const config = { maxDuration: 60 };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
-import type { IncomingMessage, ServerResponse } from 'http';
-
-/** Reads the full request body as a string — no reliance on auto body-parsing. */
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (chunk) => { data += chunk; });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
+const jsonResponse = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
   });
-}
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(body));
-}
-
-export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (req.method !== 'POST') {
-    sendJson(res, 405, { error: 'method_not_allowed' });
-    return;
-  }
-
+export async function POST(request: Request): Promise<Response> {
   const spaceUrl = process.env.ITERIS_SPACE_URL;
   if (!spaceUrl) {
-    sendJson(res, 501, {
+    return jsonResponse(501, {
       error: 'not_configured',
       detail: 'ITERIS_SPACE_URL is not set on this Vercel project.',
     });
-    return;
   }
 
-  let body: string;
-  try {
-    body = await readBody(req);
-  } catch (cause) {
-    sendJson(res, 400, { error: 'bad_request', detail: String(cause) });
-    return;
-  }
-
+  const body = await request.text();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (process.env.ITERIS_SPACE_TOKEN) {
     headers.Authorization = `Bearer ${process.env.ITERIS_SPACE_TOKEN}`;
@@ -82,12 +58,12 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       body,
     });
   } catch (cause) {
-    sendJson(res, 502, { error: 'upstream_unreachable', detail: String(cause) });
-    return;
+    return jsonResponse(502, { error: 'upstream_unreachable', detail: String(cause) });
   }
 
   const text = await upstream.text();
-  res.statusCode = upstream.status;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(text);
+  return new Response(text, {
+    status: upstream.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
