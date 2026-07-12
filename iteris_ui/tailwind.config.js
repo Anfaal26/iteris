@@ -9,20 +9,27 @@ export default {
     extend: {
       colors: {
         bg: 'var(--bg)',
-        surface: 'var(--surface)',
+        // Colours used anywhere with a Tailwind `/opacity` modifier (bg-accent/15,
+        // border-border/50, text-landing-text/60, ...) MUST resolve through the
+        // `rgb(var(--x-rgb) / <alpha-value>)` pattern — Tailwind can only inject
+        // an alpha channel into a colour format it can parse at build time, and a
+        // bare `var(--hex)` reference is opaque to it (the modifier silently
+        // renders fully transparent otherwise). See the --*-rgb tokens in index.css.
+        surface: 'rgb(var(--surface-rgb) / <alpha-value>)',
+        'surface-2': 'var(--surface-2)',
         text: 'var(--text)',
-        muted: 'var(--muted)',
-        border: 'var(--border)',
-        accent: 'var(--color-accent)',
-        success: 'var(--color-success)',
-        warning: 'var(--color-warning)',
-        error: 'var(--color-error)',
-        uncertainty: 'var(--color-uncertainty)',
-        'landing-bg': 'var(--color-landing-bg)',
-        'landing-text': 'var(--color-landing-text)',
+        muted: 'rgb(var(--muted-rgb) / <alpha-value>)',
+        border: 'rgb(var(--border-rgb) / <alpha-value>)',
+        accent: 'rgb(var(--color-accent-rgb) / <alpha-value>)',
+        success: 'rgb(var(--color-success-rgb) / <alpha-value>)',
+        warning: 'rgb(var(--color-warning-rgb) / <alpha-value>)',
+        error: 'rgb(var(--color-error-rgb) / <alpha-value>)',
+        uncertainty: 'rgb(var(--color-uncertainty-rgb) / <alpha-value>)',
+        'landing-bg': 'rgb(var(--color-landing-bg-rgb) / <alpha-value>)',
+        'landing-text': 'rgb(var(--color-landing-text-rgb) / <alpha-value>)',
         'landing-footer': 'var(--color-landing-footer)',
         'grad-a': 'var(--color-gradient-a)',
-        'grad-b': 'var(--color-gradient-b)',
+        'grad-b': 'rgb(var(--color-gradient-b-rgb) / <alpha-value>)',
         'grad-c': 'var(--color-gradient-c)',
         mask: {
           'lv-endo': 'var(--mask-lv-endo)',
@@ -47,6 +54,10 @@ export default {
       backgroundImage: {
         'iteris-gradient':
           'linear-gradient(90deg, var(--color-gradient-a), var(--color-gradient-b), var(--color-gradient-c))',
+      },
+      boxShadow: {
+        card: 'var(--shadow-sm)',
+        float: 'var(--shadow-md)',
       },
       spacing: {
         navbar: 'var(--navbar-height)',

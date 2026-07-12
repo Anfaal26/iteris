@@ -126,8 +126,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
 
       {/* Floating toolbar */}
       <div
-        className="absolute bottom-4 inset-x-4 bg-surface/95 border border-border rounded-xl px-4 py-3 flex flex-wrap items-center gap-4"
-        style={{ backdropFilter: 'blur(8px)' }}
+        className="absolute bottom-4 inset-x-4 bg-surface border border-border rounded-xl px-4 py-3 flex flex-wrap items-center gap-4 shadow-float"
         aria-label="Viewer toolbar"
       >
         <div className="flex items-center gap-2">

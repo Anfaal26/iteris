@@ -1,6 +1,7 @@
 /**
  * useTheme — reads and sets the active ITERIS theme by toggling
- * `data-theme="reading-room"` on `document.documentElement`.
+ * `data-theme="light"` on `document.documentElement`. Dark is the default
+ * (no attribute); light is the explicit opt-in.
  *
  * The CSS in src/index.css re-maps all `--bg`, `--surface`, etc. tokens when
  * the attribute is present, so no JS colour values are needed here.
@@ -13,7 +14,7 @@ import type { ThemeName } from '@/tokens';
 export interface UseThemeReturn {
   /** Current active theme name. */
   theme: ThemeName;
-  /** Toggle between 'clinical' and 'reading-room'. */
+  /** Toggle between 'dark' and 'light'. */
   toggleTheme: () => void;
   /** Directly set the theme. */
   setTheme: (t: ThemeName) => void;
@@ -28,12 +29,12 @@ export function useTheme(): UseThemeReturn {
     const stored = typeof window !== 'undefined'
       ? (localStorage.getItem('iteris-theme') as ThemeName | null)
       : null;
-    return stored ?? 'clinical';
+    return stored ?? 'dark';
   });
 
   useEffect(() => {
-    if (theme === 'reading-room') {
-      document.documentElement.setAttribute('data-theme', 'reading-room');
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
     } else {
       document.documentElement.removeAttribute('data-theme');
     }
@@ -43,7 +44,7 @@ export function useTheme(): UseThemeReturn {
   const setTheme = useCallback((t: ThemeName) => setThemeState(t), []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState((prev) => (prev === 'clinical' ? 'reading-room' : 'clinical'));
+    setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
   }, []);
 
   return { theme, toggleTheme, setTheme };

@@ -56,12 +56,12 @@ export const WipeMode: React.FC<WipeModeProps> = ({
             <img
               src={imageB64}
               alt={anatomyLabel}
-              className="absolute inset-0 w-full h-full object-fill rounded-lg bg-[#2a2f3a]"
+              className="absolute inset-0 w-full h-full object-fill rounded-lg bg-surface-2"
             />
           ) : (
             <svg width="100%" height="100%" viewBox="0 0 256 256" role="img" aria-label={`${anatomyLabel} wipe comparison`} className="rounded-lg">
-              <rect width="256" height="256" fill="#2a2f3a" rx="8" />
-              <text x="128" y="128" textAnchor="middle" dominantBaseline="middle" fill="#64748b" fontSize="12" fontFamily="system-ui">
+              <rect width="256" height="256" fill="var(--surface-2)" rx="8" />
+              <text x="128" y="128" textAnchor="middle" dominantBaseline="middle" fill="var(--muted)" fontSize="12" fontFamily="var(--font-body)">
                 {anatomyLabel}
               </text>
             </svg>

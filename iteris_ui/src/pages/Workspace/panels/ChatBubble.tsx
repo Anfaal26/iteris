@@ -32,7 +32,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         <div
           role="dialog"
           aria-label="Ask about this result"
-          className="w-[340px] max-w-[calc(100vw-2.5rem)] h-[440px] max-h-[70vh] rounded-2xl bg-surface border border-border shadow-2xl flex flex-col overflow-hidden"
+          className="w-[340px] max-w-[calc(100vw-2.5rem)] h-[440px] max-h-[70vh] rounded-2xl bg-surface border border-border shadow-float flex flex-col overflow-hidden"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <span className="text-sm font-heading font-semibold text-text">Ask about this result</span>

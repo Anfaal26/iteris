@@ -10,7 +10,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LogoMark } from '@/components/LogoMark/LogoMark';
-import { ReadingRoomToggle } from '@/components/ReadingRoomToggle/ReadingRoomToggle';
+import { ThemeToggle } from '@/components/ThemeToggle/ThemeToggle';
 
 export interface NavItem {
   label: string;
@@ -108,7 +108,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right — icons + CTA */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          <ReadingRoomToggle className={isDark ? 'text-landing-text/50 hover:text-landing-text' : ''} />
+          <ThemeToggle className={isDark ? 'text-landing-text/50 hover:text-landing-text' : ''} />
 
           {onSearch && (
             <button type="button" onClick={onSearch} aria-label="Open search" className={iconCls}>

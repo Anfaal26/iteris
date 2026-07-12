@@ -13,25 +13,54 @@
  */
 
 :root {
-  /* ---- Clinical / light theme (Research + Workspace default) ---- */
-  --color-bg: #f7f8fa;
-  --color-surface: #ffffff;
-  --color-text: #0f1923;
-  --color-muted: #64748b;
-  --color-border: #e2e8f0;
-  --color-accent: #0a7ea4;
-  --color-success: #16a34a; /* above baseline  */
-  --color-warning: #d97706; /* near baseline   */
-  --color-error: #dc2626; /* below baseline  */
-  --color-uncertainty: #7c3aed; /* confidence overlays */
+  /* ---- Clinical dark theme (default) ----
+   * A SOFT dark — deliberately not near-black/OLED-crushed. True-neutral greys
+   * (equal-ish R/G/B, no blue cast) rather than Tailwind's blue-leaning "slate"
+   * ramp, so borders read as neutral grey, not tinted blue. 3-tier surface
+   * system: bg (deepest) -> surface (panels/sidebar) -> surface-2 (cards/chips).
+   */
+  --color-bg: #17181b;
+  --color-surface: #1e2023;
+  --color-surface-2: #26282c;
+  --color-text: #e7e8ea;
+  --color-muted: #999ba1;
+  --color-border: #34363b;
+  --color-accent: #3b82f6; /* blue-500 — ~7.8:1 on this bg */
+  --color-success: #22c55e; /* above baseline  */
+  --color-warning: #f59e0b; /* near baseline   */
+  --color-error: #f87171; /* below baseline  */
+  --color-uncertainty: #a78bfa; /* confidence overlays */
+
+  /* ---- RGB triplets (space-separated, no `rgb()`) for the tokens above that
+   * get used with a Tailwind `/opacity` modifier (e.g. bg-accent/15). Tailwind
+   * can only inject an alpha channel into a colour it can parse at build time —
+   * a bare `var(--hex)` reference is opaque to it, so `/NN` modifiers on those
+   * silently produce fully-transparent output. Keep every triplet here in sync
+   * with its hex sibling above (and re-declared in [data-theme='light'] for the
+   * tokens that theme re-maps). ---- */
+  --color-accent-rgb: 59 130 246;
+  --color-success-rgb: 34 197 94;
+  --color-warning-rgb: 245 158 11;
+  --color-error-rgb: 248 113 113;
+  --color-uncertainty-rgb: 167 139 250;
+  --color-surface-rgb: 30 32 35;
+  --color-border-rgb: 52 54 59;
+  --color-muted-rgb: 153 155 161;
+
+  /* ---- Elevation — border-anchored, restrained (no glow/blur in app chrome). ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
 
   /* ---- Landing page only (dark) ---- */
   /* Medical imaging cold-blue palette */
   --color-landing-bg: #030508;
+  --color-landing-bg-rgb: 3 5 8;
   --color-landing-text: #f0f9ff;
+  --color-landing-text-rgb: 240 249 255;
   --color-landing-footer: #020407;
   --color-gradient-a: #bae6fd;   /* ice-white / MRI highlight           */
   --color-gradient-b: #38bdf8;   /* scanner blue / contrast-agent cyan  */
+  --color-gradient-b-rgb: 56 189 248;
   --color-gradient-c: #0ea5e9;   /* deep imaging blue                   */
 
   /* Glass / frost utilities */
@@ -53,8 +82,8 @@
   --mask-pituitary: #fb923c;
 
   /* ---- Typography ---- */
-  --font-heading: 'Sora', system-ui, sans-serif;
-  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-heading: 'Figtree', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
 
   /* ---- Motion (spec §10 motion rules) ---- */
@@ -70,24 +99,46 @@
   --results-panel-width: 280px;
   --research-sidebar-width: 240px;
 
-  /* ---- Active theme aliases (overridden by [data-theme]) ---- */
+  /* ---- Active theme aliases (overridden by [data-theme='light']) ---- */
   --bg: var(--color-bg);
   --surface: var(--color-surface);
+  --surface-2: var(--color-surface-2);
   --text: var(--color-text);
   --muted: var(--color-muted);
   --border: var(--color-border);
-  --chrome-opacity: 1;
+  /* RGB-triplet aliases follow --surface/--border/--muted through theme swaps,
+   * exactly like --surface aliases --color-surface above. */
+  --surface-rgb: var(--color-surface-rgb);
+  --border-rgb: var(--color-border-rgb);
+  --muted-rgb: var(--color-muted-rgb);
 }
 
-/* Reading Room — near-black dark mode for image viewing.
-   Dims UI chrome to 40%, keeps viewer/masks at full brightness (handled per-component). */
-[data-theme='reading-room'] {
-  --bg: var(--color-landing-bg);
-  --surface: #0b0f17;
-  --text: #e6edf3;
-  --muted: #7d8896;
-  --border: #1c2430;
-  --chrome-opacity: 0.4;
+/* Clinical LIGHT theme — a soft off-white, not stark #fff, with white cards for
+   contrast against it. Same neutral (non-blue-tinted) grey family as dark, just
+   inverted in value. Semantic colours (accent/success/warning/error/uncertainty)
+   get their own theme-tuned shade here too, since a hue picked for contrast on a
+   near-black background is not automatically legible on white and vice versa. */
+[data-theme='light'] {
+  --bg: #f4f5f6;
+  --surface: #ffffff;
+  --surface-2: #eef0f1;
+  --text: #1b1c1f;
+  --muted: #6b6e74;
+  --border: #dcdedf;
+  --surface-rgb: 255 255 255;
+  --border-rgb: 220 222 223;
+  --muted-rgb: 107 110 116;
+
+  --color-accent: #2563eb; /* blue-600 — ~4.6:1 on white, blue-500 falls short for text */
+  --color-accent-rgb: 37 99 235;
+  --color-success: #16a34a; /* green-600 */
+  --color-success-rgb: 22 163 74;
+  --color-warning: #d97706; /* amber-600 */
+  --color-warning-rgb: 217 119 6;
+  --color-error: #dc2626; /* red-600 */
+  --color-error-rgb: 220 38 38;
+  --color-uncertainty: #7c3aed; /* violet-600 */
+  --color-uncertainty-rgb: 124 58 237;
 }
 
 * {
@@ -114,6 +165,32 @@ body {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Thin, modern, theme-aware scrollbars — no default OS chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border-rgb)) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--border-rgb));
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--muted-rgb) / 0.6);
 }
 
 /* Reduce Motion — disables all transitions/animations (spec §10). */

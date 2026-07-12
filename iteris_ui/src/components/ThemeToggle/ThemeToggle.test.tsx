@@ -1,26 +1,26 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ReadingRoomToggle } from './ReadingRoomToggle';
+import { ThemeToggle } from './ThemeToggle';
 
-describe('ReadingRoomToggle', () => {
+describe('ThemeToggle', () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.removeAttribute('data-theme');
   });
 
-  it('renders with initial clinical theme label', () => {
-    render(<ReadingRoomToggle />);
-    expect(screen.getByRole('button', { name: /reading-room/i })).toBeInTheDocument();
+  it('renders with initial dark theme label', () => {
+    render(<ThemeToggle />);
+    expect(screen.getByRole('button', { name: /switch to light theme/i })).toBeInTheDocument();
   });
 
-  it('toggles to reading-room theme when clicked', () => {
-    render(<ReadingRoomToggle />);
+  it('toggles to light theme when clicked', () => {
+    render(<ThemeToggle />);
     const btn = screen.getByRole('button');
     fireEvent.click(btn);
-    expect(document.documentElement.getAttribute('data-theme')).toBe('reading-room');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
   it('has correct aria-pressed state', () => {
-    render(<ReadingRoomToggle />);
+    render(<ThemeToggle />);
     const btn = screen.getByRole('button');
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(btn);

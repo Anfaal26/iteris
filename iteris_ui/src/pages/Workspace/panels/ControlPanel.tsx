@@ -286,7 +286,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           {/* Read-only detection chip — never a control */}
           {detection && (
             <div
-              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-bg px-2.5 py-1"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2.5 py-1"
               title={`Detected from ${detection.source}`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-accent" aria-hidden="true" />
@@ -372,7 +372,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                             active
                               ? 'bg-accent/15 text-text'
                               : enabled
-                                ? 'text-muted hover:bg-bg'
+                                ? 'text-muted hover:bg-surface-2'
                                 : 'text-muted/40 cursor-not-allowed',
                           ].join(' ')}
                         >

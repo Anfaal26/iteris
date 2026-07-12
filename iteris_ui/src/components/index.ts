@@ -11,9 +11,9 @@ export type { LogoMarkProps } from './LogoMark/LogoMark';
 export { useTheme } from './theme/useTheme';
 export type { UseThemeReturn } from './theme/useTheme';
 
-// 3. ReadingRoomToggle
-export { ReadingRoomToggle } from './ReadingRoomToggle/ReadingRoomToggle';
-export type { ReadingRoomToggleProps } from './ReadingRoomToggle/ReadingRoomToggle';
+// 3. ThemeToggle
+export { ThemeToggle } from './ThemeToggle/ThemeToggle';
+export type { ThemeToggleProps } from './ThemeToggle/ThemeToggle';
 
 // 4. Navbar
 export { Navbar } from './Navbar/Navbar';

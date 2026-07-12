@@ -48,7 +48,7 @@ export const SingleMode: React.FC<SingleModeProps> = ({
           <img
             src={imageB64}
             alt={anatomyLabel}
-            className="absolute inset-0 w-full h-full object-fill rounded-lg bg-[#2a2f3a]"
+            className="absolute inset-0 w-full h-full object-fill rounded-lg bg-surface-2"
           />
         ) : (
           <svg
@@ -59,11 +59,11 @@ export const SingleMode: React.FC<SingleModeProps> = ({
             role="img"
             className="rounded-lg"
           >
-            <rect width="256" height="256" fill="#2a2f3a" rx="8" />
+            <rect width="256" height="256" fill="var(--surface-2)" rx="8" />
             {[64, 128, 192].map((v) => (
               <React.Fragment key={v}>
-                <line x1={v} y1="0" x2={v} y2="256" stroke="#3a3f4a" strokeWidth="0.5" />
-                <line x1="0" y1={v} x2="256" y2={v} stroke="#3a3f4a" strokeWidth="0.5" />
+                <line x1={v} y1="0" x2={v} y2="256" stroke="var(--border)" strokeWidth="0.5" />
+                <line x1="0" y1={v} x2="256" y2={v} stroke="var(--border)" strokeWidth="0.5" />
               </React.Fragment>
             ))}
             <text
@@ -71,9 +71,9 @@ export const SingleMode: React.FC<SingleModeProps> = ({
               y="128"
               textAnchor="middle"
               dominantBaseline="middle"
-              fill="#64748b"
+              fill="var(--muted)"
               fontSize="12"
-              fontFamily="system-ui"
+              fontFamily="var(--font-body)"
             >
               {anatomyLabel}
             </text>

@@ -13,6 +13,7 @@ const cssVar = (name: string): string => `var(${name})`;
 export const colors = {
   bg: cssVar('--bg'),
   surface: cssVar('--surface'),
+  surface2: cssVar('--surface-2'),
   text: cssVar('--text'),
   muted: cssVar('--muted'),
   border: cssVar('--border'),
@@ -34,7 +35,7 @@ export const colorsHex = {
   gradientA: '#bae6fd',   /* ice-white / MRI highlight  */
   gradientB: '#38bdf8',   /* scanner blue               */
   gradientC: '#0ea5e9',   /* deep imaging blue          */
-  accent: '#0a7ea4',
+  accent: '#3b82f6',
 } as const;
 
 /** Mask overlay colours — reserved, never used in UI chrome (spec §10). */
@@ -85,4 +86,5 @@ export const structureColor: Record<string, string> = {
   pituitary: maskColors.pituitary,
 };
 
-export type ThemeName = 'clinical' | 'reading-room';
+/** 'dark' is the default (:root); 'light' is applied via [data-theme='light']. */
+export type ThemeName = 'dark' | 'light';

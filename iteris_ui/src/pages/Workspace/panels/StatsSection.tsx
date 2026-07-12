@@ -18,7 +18,7 @@ export interface StatsSectionProps {
 
 /** A small labelled stat chip. */
 const StatChip: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="flex flex-col rounded-lg bg-bg border border-border px-3 py-2">
+  <div className="flex flex-col rounded-lg bg-surface-2 border border-border px-3 py-2">
     <span className="text-[10px] font-heading uppercase tracking-wider text-muted">{label}</span>
     <span className="text-sm font-mono text-text mt-0.5">{value}</span>
   </div>

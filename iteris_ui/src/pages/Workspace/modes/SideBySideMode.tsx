@@ -62,7 +62,7 @@ export const SideBySideMode: React.FC<SideBySideModeProps> = ({
               <img
                 src={imageB64}
                 alt={`${anatomyLabel} — ${r.modelId}`}
-                className="absolute inset-0 w-full h-full object-fill rounded-lg bg-[#2a2f3a]"
+                className="absolute inset-0 w-full h-full object-fill rounded-lg bg-surface-2"
               />
             ) : (
               <svg
@@ -73,15 +73,15 @@ export const SideBySideMode: React.FC<SideBySideModeProps> = ({
                 role="img"
                 className="rounded-lg"
               >
-                <rect width="256" height="256" fill="#2a2f3a" rx="8" />
+                <rect width="256" height="256" fill="var(--surface-2)" rx="8" />
                 <text
                   x="128"
                   y="128"
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  fill="#64748b"
+                  fill="var(--muted)"
                   fontSize="14"
-                  fontFamily="system-ui"
+                  fontFamily="var(--font-body)"
                 >
                   {anatomyLabel}
                 </text>

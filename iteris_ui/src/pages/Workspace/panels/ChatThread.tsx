@@ -73,7 +73,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                 'max-w-[85%] rounded-xl px-3 py-2 text-sm font-body whitespace-pre-wrap',
                 m.role === 'user'
                   ? 'bg-accent/15 text-text border border-accent/30'
-                  : 'bg-bg text-text border border-border',
+                  : 'bg-surface-2 text-text border border-border',
               ].join(' ')}
             >
               {m.content}
@@ -113,7 +113,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
           onChange={(e) => setDraft(e.target.value)}
           placeholder={disabled ? 'Run inference to ask…' : 'Ask a question…'}
           aria-label="Ask about this result"
-          className="flex-1 rounded-lg bg-bg border border-border px-3 py-2 text-sm font-body text-text placeholder:text-muted/60 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+          className="flex-1 rounded-lg bg-surface-2 border border-border px-3 py-2 text-sm font-body text-text placeholder:text-muted/60 focus:outline-none focus:border-accent/50 disabled:opacity-50"
         />
         <button
           type="submit"
