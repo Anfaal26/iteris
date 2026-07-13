@@ -161,10 +161,20 @@ def _load_agent(entry: DrlEntry) -> torch.nn.Module:
     raw = torch.load(path, map_location='cpu')
     state = raw
     if isinstance(raw, dict):
-        for k in ('online_state_dict', 'q_state_dict', 'model_state_dict', 'state_dict', 'model'):
-            if k in raw:
-                state = raw[k]
-                break
+        # Real training-checkpoint format (iteris.agents.DQNAgent.state_dict):
+        # {'agent': {'q': <online net>, 'q_target': <target net>}, 'optimizers':
+        # ..., 'best_dice':..., 'history':..., 'step':...}. The greedy/inference
+        # network is the ONLINE net, agent['q'] — not q_target (that trails the
+        # online net during training) and not the top-level 'agent' dict itself
+        # (that's {'q':..., 'q_target':...}, not a flat state_dict).
+        agent_state = raw.get('agent')
+        if isinstance(agent_state, dict) and 'q' in agent_state:
+            state = agent_state['q']
+        else:
+            for k in ('online_state_dict', 'q_state_dict', 'model_state_dict', 'state_dict', 'model'):
+                if k in raw:
+                    state = raw[k]
+                    break
     net = _build_network(entry, state)
     _NET_CACHE[key] = net
     return net

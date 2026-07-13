@@ -166,6 +166,84 @@ def _subset_caches(caches: dict, idx: np.ndarray) -> dict:
     return {k: v[idx] for k, v in caches.items()}
 
 
+def agent_state_channels(cfg: dict) -> int:
+    """Number of state channels the agent's first conv expects (5, or 7 with the
+    directional-state ablation). Single source of truth for in_channels, shared
+    by build_agent and any code that reconstructs the network."""
+    return 7 if bool(cfg.get('directional_state', False)) else 5
+
+
+def continuous_action_dim(cfg: dict, env_cls) -> int:
+    """Continuous action width for cfg + env_cls: cont_sectors angular wedges on
+    the contour env, else the 3-D global SegmentationEnv action. None for
+    discrete agents. Shared by build_agent and re-evaluation."""
+    _, action_type = AGENT_REGISTRY[cfg['agent_type'].upper()]
+    if action_type != 'continuous':
+        return None
+    is_contour = (env_cls is ContourRefineEnv)
+    return int(cfg.get('cont_sectors', 16)) if is_contour else CONTINUOUS_ACTION_DIM
+
+
+def build_agent(cfg: dict, env_cls, device):
+    """Construct the DRL agent for ``cfg`` + ``env_cls`` with the EXACT network
+    architecture training uses (in_channels, action head, action_dim/scale,
+    spatial head). This is the SINGLE place the agent network is built, so
+    training (run_drl_training) and re-evaluation
+    (iteris/evaluation/re_eval_td3.py) can never drift on how the model is
+    constructed — a checkpoint saved by one loads cleanly into the other. Returns
+    a fresh-weights agent; load a checkpoint separately via
+    ``agent.load_state_dict(torch.load(path)['agent'])``.
+    """
+    agent_cls, action_type = AGENT_REGISTRY[cfg['agent_type'].upper()]
+    is_contour = (env_cls is ContourRefineEnv)
+    num_actions_for_cls = env_cls.NUM_DISCRETE_ACTIONS
+    cont_action_dim = continuous_action_dim(cfg, env_cls)
+
+    common = dict(in_channels=agent_state_channels(cfg), gamma=cfg.get('gamma', 0.99),
+                  tau=cfg.get('tau', 0.005),
+                  embed_dim=cfg.get('embed_dim', 256), device=device)
+    if action_type == 'discrete':
+        # num_actions is env-class-dependent — agent's output head must match
+        # exactly or argmax will produce invalid indices.
+        return agent_cls(num_actions=num_actions_for_cls,
+                         lr=cfg.get('lr', 1e-4),
+                         spatial=cfg.get('spatial_head', False), **common)
+
+    common.pop('lr', None)
+    if is_contour:
+        action_scale = [1.0] * cont_action_dim   # env multiplies by disp_px
+    else:
+        _legacy_scale = cfg.get('cont_action_scale', 0.02)
+        morph_scale   = cfg.get('cont_morph_scale', 0.25)
+        trans_scale   = cfg.get('cont_trans_scale', _legacy_scale)
+        action_scale  = [morph_scale, trans_scale, trans_scale]
+
+    if cfg['agent_type'].upper() == 'TD3':
+        return agent_cls(
+            action_dim   = cont_action_dim,
+            action_scale = action_scale,
+            actor_lr     = cfg.get('actor_lr',  1e-4),
+            critic_lr    = cfg.get('critic_lr', 1e-3),
+            policy_delay = cfg.get('policy_delay', 2),
+            expl_noise   = cfg.get('expl_noise', 0.2),
+            target_noise = cfg.get('target_noise', 0.2),
+            noise_clip   = cfg.get('noise_clip', 0.5),
+            spatial      = cfg.get('spatial_head', False),
+            **common,
+        )
+    # DDPG
+    return agent_cls(
+        action_dim         = cont_action_dim,
+        action_scale       = action_scale,
+        actor_lr           = cfg.get('actor_lr',  1e-4),
+        critic_lr          = cfg.get('critic_lr', 1e-3),
+        ou_theta           = cfg.get('ou_theta', 0.15),
+        ou_sigma           = cfg.get('ou_sigma', None),
+        actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
+        **common,
+    )
+
+
 def _make_env(caches: dict, idx: int, env_kwargs: dict,
               env_cls=SegmentationEnv) -> SegmentationEnv:
     # Pass prob_map if warm_start produced one (enables ADD_UNCERTAIN/REMOVE_UNCERTAIN)
@@ -674,50 +752,10 @@ def run_drl_training(
                            else CONTINUOUS_ACTION_DIM)
 
     # ── Agent ─────────────────────────────────────────────────────────────────
-    common = dict(in_channels=_n_state_ch, gamma=cfg.get('gamma', 0.99),
-                  tau=cfg.get('tau', 0.005),
-                  embed_dim=cfg.get('embed_dim', 256), device=device)
-    if action_type == 'discrete':
-        # num_actions is env-class-dependent — agent's output head must match
-        # exactly or argmax will produce invalid indices.
-        agent = agent_cls(num_actions=num_actions_for_cls,
-                          lr=cfg.get('lr', 1e-4),
-                          spatial=cfg.get('spatial_head', False), **common)
-    else:
-        common.pop('lr', None)
-        if is_contour:
-            action_scale = [1.0] * cont_action_dim   # env multiplies by disp_px
-        else:
-            _legacy_scale = cfg.get('cont_action_scale', 0.02)
-            morph_scale   = cfg.get('cont_morph_scale', 0.25)
-            trans_scale   = cfg.get('cont_trans_scale', _legacy_scale)
-            action_scale  = [morph_scale, trans_scale, trans_scale]
-
-        if cfg['agent_type'].upper() == 'TD3':
-            agent = agent_cls(
-                action_dim   = cont_action_dim,
-                action_scale = action_scale,
-                actor_lr     = cfg.get('actor_lr',  1e-4),
-                critic_lr    = cfg.get('critic_lr', 1e-3),
-                policy_delay = cfg.get('policy_delay', 2),
-                expl_noise   = cfg.get('expl_noise', 0.2),
-                target_noise = cfg.get('target_noise', 0.2),
-                noise_clip   = cfg.get('noise_clip', 0.5),
-                spatial      = cfg.get('spatial_head', False),
-                **common,
-            )
-        else:   # DDPG
-            ou_sigma_raw = cfg.get('ou_sigma', None)
-            agent = agent_cls(
-                action_dim         = cont_action_dim,
-                action_scale       = action_scale,
-                actor_lr           = cfg.get('actor_lr',  1e-4),
-                critic_lr          = cfg.get('critic_lr', 1e-3),
-                ou_theta           = cfg.get('ou_theta', 0.15),
-                ou_sigma           = ou_sigma_raw,
-                actor_freeze_steps = cfg.get('actor_freeze_steps', 2000),
-                **common,
-            )
+    # Built via the shared build_agent() so re-evaluation
+    # (iteris/evaluation/re_eval_td3.py) constructs a byte-identical network and
+    # a training checkpoint loads into it cleanly.
+    agent = build_agent(cfg, env_cls, device)
 
     # ── TD3+BC: oracle-demonstration actor warm-start (opt-in) ─────────────────
     # Fujimoto & Gu 2021. Vanilla TD3's deterministic actor starts near-identity
@@ -1001,6 +1039,26 @@ def run_drl_training(
 
     pbar.close()
     print(f'[drl] Done. Best val final-Dice: {best_dice:.4f}')
+
+    # ── Reload the BEST-val checkpoint into the returned agent ─────────────────
+    # run_drl_training trains `agent` in place, so at this point it holds the
+    # FINAL-step weights. Downstream eval/viz (evaluate_testset, build_replays in
+    # the notebooks) use the returned agent, so without this reload they would
+    # measure the final weights, NOT the deployable best-val checkpoint. For an
+    # agent that peaks early then drifts (e.g. TD3 actor drift after bc_lambda
+    # decays), the final weights can be well below the best checkpoint, so the
+    # reported test number would understate the deployable result. Reloading here
+    # makes every notebook's eval reflect the model that is actually saved and
+    # deployed. Monotonic agents (DuelingDDQN) are unaffected (final ≈ best). The
+    # resume path is untouched — it restores from last_path, not the return value.
+    if ckpt_path.exists():
+        _best_ck = torch.load(ckpt_path, map_location=device)
+        agent.load_state_dict(_best_ck['agent'])
+        print(f'[drl] Reloaded best-val checkpoint into agent for eval '
+              f'(val deploy-Dice {best_dice:.4f}, step {_best_ck.get("step")}).')
+    else:
+        print('[drl] No best-val checkpoint on disk (no eval improved over init) '
+              '— returning final-step agent unchanged.')
 
     # Hard-mining diagnostics (Tier 1/2) — the per-sample arrays that drove
     # training-sample selection, for post-hoc inspection in a notebook (e.g.

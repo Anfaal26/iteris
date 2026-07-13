@@ -195,6 +195,14 @@ def infer(body: InferRequest) -> InferResponse:
             },
             'detail': str(exc),
         })
+    except Exception as exc:  # noqa: BLE001 — surface the real cause instead of a bare 500
+        import traceback
+        raise HTTPException(500, {
+            'error': 'infer_failed',
+            'exception': type(exc).__name__,
+            'detail': str(exc),
+            'traceback': traceback.format_exc()[-4000:],
+        })
     return InferResponse(
         dataset=body.dataset, algo=body.algo, regime=body.regime, **result,
     )
