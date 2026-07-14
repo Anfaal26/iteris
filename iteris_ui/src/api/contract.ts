@@ -212,16 +212,13 @@ export interface SampleImage {
  * ------------------------------------------------------------------ */
 
 /** Algo id the /infer registry keys on — the backend-facing name for a ModelId. */
-export type AlgoId = 'dqn' | 'ddqn' | 'duelingddqn' | 'ddpg' | 'td3';
+export type AlgoId = 'duelingddqn' | 'td3';
 
-/** Maps a frontend ModelId to the backend's (family, algo) pair, or null for
+/** Maps a frontend ModelId to the backend's algo id, or null for
  * non-DRL models (unet-baseline / lite-unet), which stay on /predict. */
 export function drlBackend(modelId: ModelId): { algo: AlgoId } | null {
   switch (modelId) {
-    case 'dqn': return { algo: 'dqn' };
-    case 'ddqn': return { algo: 'ddqn' };
     case 'dueling-dqn': return { algo: 'duelingddqn' };
-    case 'ddpg': return { algo: 'ddpg' };
     case 'td3': return { algo: 'td3' };
     default: return null;
   }

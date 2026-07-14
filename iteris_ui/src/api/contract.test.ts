@@ -8,9 +8,8 @@ import { api } from './client';
 describe('mock api', () => {
   it('returns the full model registry', async () => {
     const models = await api.models();
-    // Attention U-Net + Lite U-Net + DQN, DDQN, Dueling DQN, DDPG, TD3
-    expect(models).toHaveLength(7);
-    // Only the Attention U-Net baseline is deployed/selectable today.
+    // Attention U-Net, Lite U-Net, Dueling DQN, TD3
+    expect(models).toHaveLength(4);
     expect(models.find((m) => m.id === 'unet-baseline')?.selectable).toBe(true);
     expect(models.find((m) => m.id === 'dueling-dqn')?.deployed).toBe(false);
   });
@@ -34,7 +33,7 @@ describe('mock api', () => {
   it('produces a 20-step sequence in playback mode', async () => {
     const res = await api.predict({
       imageB64: '',
-      modelId: 'ddpg',
+      modelId: 'td3',
       dataset: 'brisc',
       mode: 'single',
       playback: true,
@@ -45,9 +44,9 @@ describe('mock api', () => {
   it('streams interpretation sections', async () => {
     let text = '';
     for await (const chunk of api.interpret({
-      modelId: 'ddpg',
+      modelId: 'td3',
       structures: ['glioma'],
-      metrics: (await api.predict({ imageB64: '', modelId: 'ddpg', dataset: 'brisc', mode: 'single' })).metrics,
+      metrics: (await api.predict({ imageB64: '', modelId: 'td3', dataset: 'brisc', mode: 'single' })).metrics,
       dataset: 'brisc',
       modality: 'mri',
     })) {
