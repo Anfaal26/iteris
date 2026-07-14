@@ -130,23 +130,17 @@ const HeroSection = () => (
     <div className="relative z-10 flex flex-col justify-center gap-10 px-8 sm:px-12 lg:px-16 xl:px-20
                     w-full lg:w-[48%] pt-32 pb-24">
 
-      {/* Eyebrow chip — glass pill */}
+      {/* Eyebrow — plain typographic label, no pill */}
       <div
         className="self-start animate-[fadeSlideUp_0.7s_ease-out_both]"
         style={{ animationDelay: '0ms' }}
       >
-        <span
-          className="inline-flex items-center gap-2 rounded-full px-4 py-1.5
-                     font-mono text-[11px] tracking-widest uppercase"
-          style={{
-            background: 'rgba(56,189,248,0.08)',
-            border: '1px solid rgba(186,230,253,0.15)',
-            color: 'var(--color-gradient-b)',
-          }}
+        <p
+          className="m-0 font-mono text-[11px] uppercase"
+          style={{ color: 'rgba(56,189,248,0.55)', letterSpacing: '0.18em' }}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-grad-b animate-pulse" />
-          Taylor's University · PRJ63504 Capstone
-        </span>
+          Taylor's University &nbsp;·&nbsp; PRJ63504 Capstone
+        </p>
       </div>
 
       {/* H1 — very large */}
@@ -156,13 +150,13 @@ const HeroSection = () => (
                    animate-[fadeSlideUp_0.7s_ease-out_both]"
         style={{ animationDelay: '120ms', letterSpacing: '-0.02em' }}
       >
-        Precision Medical
+        See How AI
         <br />
         <span
           className="bg-iteris-gradient bg-clip-text text-transparent"
           style={{ WebkitBackgroundClip: 'text' }}
         >
-          Segmentation.
+          Learns to See.
         </span>
       </h1>
 
@@ -213,29 +207,6 @@ const HeroSection = () => (
         </a>
       </div>
 
-      {/* Stat pills row */}
-      <div
-        className="flex flex-wrap gap-2 animate-[fadeSlideUp_0.7s_ease-out_both]"
-        style={{ animationDelay: '480ms' }}
-      >
-        {[
-          { val: 'CAMUS + BRISC', label: 'Two datasets', dot: 'bg-grad-b' },
-          { val: 'p < 0.001', label: 'Statistical sig.', dot: 'bg-success' },
-          { val: '20 steps', label: 'Refinement depth', dot: 'bg-grad-a' },
-        ].map((s) => (
-          <span
-            key={s.label}
-            className="inline-flex items-center gap-2 rounded-full px-3 py-1.5
-                       font-mono text-[11px] text-landing-text/70"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot}`} aria-hidden="true" />
-            <strong className="text-landing-text font-bold">{s.val}</strong>
-            <span className="text-landing-text/40">{s.label}</span>
-          </span>
-        ))}
-      </div>
-
       {/* Scroll cue */}
       <p
         className="font-body text-[11px] text-landing-text/20 flex items-center gap-2
@@ -279,7 +250,7 @@ export default function Landing() {
         onSettings={() => {}}
       />
 
-      <main className="bg-landing-bg text-landing-text font-body">
+      <main data-theme="dark" className="bg-landing-bg text-landing-text font-body">
         <HeroSection />
         <FeatureStrip />
         <HowItWorks />

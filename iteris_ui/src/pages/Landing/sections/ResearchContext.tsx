@@ -14,13 +14,13 @@ export const ResearchContext: React.FC = () => (
         <div className="absolute inset-0 pointer-events-none" aria-hidden="true"
           style={{ background: 'radial-gradient(ellipse at 0% 50%, rgba(56,189,248,0.06) 0%, transparent 60%)' }} />
         <blockquote className="relative font-heading text-xl sm:text-2xl font-medium leading-snug text-landing-text">
-          "A key novelty of this work is the real-time iteration playback interface:
-          rather than presenting only a final segmentation mask, ITERIS exposes the
-          full 20-step DRL boundary-refinement trajectory — enabling researchers to
-          inspect precisely where and how the agent improves upon the initial U-Net prediction."
+          "Classical segmentation commits to a boundary in a single forward pass.
+          This work asks what happens when the model can look again — a reinforcement
+          learning agent that revises the initial U-Net contour step by step, learning
+          through interaction rather than through imitation."
         </blockquote>
         <figcaption className="relative mt-7 text-[13px]" style={{ color: 'rgba(240,249,255,0.38)' }}>
-          — PRJ63504 Capstone · Taylor's University · 2024
+          — PRJ63504 Capstone · Taylor's University · 2025
         </figcaption>
       </figure>
     </div>

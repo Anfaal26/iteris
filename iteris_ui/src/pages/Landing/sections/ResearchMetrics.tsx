@@ -2,11 +2,9 @@
 import React from 'react';
 
 const METRICS = [
-  { value: '4',        label: 'Models Evaluated',    sub: 'U-Net · Lite U-Net · Dueling DQN · TD3' },
-  { value: '2',        label: 'Datasets',             sub: 'CAMUS · BRISC'                           },
-  { value: '<0.001',   label: 'p-value',              sub: 'Wilcoxon · 5-fold CV'                    },
-  { value: '20',       label: 'Refinement Steps',     sub: 'Per episode · DRL boundary agent'        },
-  { value: '5-fold',   label: 'Cross-Validation',     sub: 'Patient-level stratified splits'         },
+  { value: '4',  label: 'Models Evaluated',  sub: 'U-Net · Lite U-Net · Dueling DQN · TD3' },
+  { value: '2',  label: 'Datasets',          sub: 'CAMUS · BRISC'                           },
+  { value: '20', label: 'Refinement Steps',  sub: 'Per episode · DRL boundary agent'        },
 ];
 
 export const ResearchMetrics: React.FC = () => (
