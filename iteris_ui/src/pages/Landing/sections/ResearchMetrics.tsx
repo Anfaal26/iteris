@@ -1,12 +1,12 @@
-/** ResearchMetrics — glass metrics strip with 5 key research numbers. */
+/** ResearchMetrics — key research numbers. All values factual and verifiable. */
 import React from 'react';
 
 const METRICS = [
-  { value: '0.912',   label: 'Best Dice Score',    sub: 'DDPG · CAMUS'               },
-  { value: '3',       label: 'DRL Agent Families', sub: 'DQN · DDQN · DDPG'          },
-  { value: '2',       label: 'Datasets Evaluated', sub: 'CAMUS · BRISC'              },
-  { value: '<0.001',  label: 'p-value',            sub: 'Wilcoxon · 5-fold CV'       },
-  { value: '20',      label: 'Episode Steps',      sub: 'Boundary refinement / image'},
+  { value: '4',        label: 'Models Evaluated',    sub: 'U-Net · Lite U-Net · Dueling DQN · TD3' },
+  { value: '2',        label: 'Datasets',             sub: 'CAMUS · BRISC'                           },
+  { value: '<0.001',   label: 'p-value',              sub: 'Wilcoxon · 5-fold CV'                    },
+  { value: '20',       label: 'Refinement Steps',     sub: 'Per episode · DRL boundary agent'        },
+  { value: '5-fold',   label: 'Cross-Validation',     sub: 'Patient-level stratified splits'         },
 ];
 
 export const ResearchMetrics: React.FC = () => (

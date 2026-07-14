@@ -30,7 +30,7 @@ const CARDS: FeatureCard[] = [
   { title: 'Iteration Playback', description: 'Watch the DRL agent refine boundaries across 20 episodes with live Δ Dice sparklines. Full trajectory visibility no other tool offers.', icon: <PlayIcon />, hero: true },
   { title: 'Wipe Comparison',   description: 'Drag a vertical divider to compare baseline and DRL masks pixel-perfect on the same scan with synced zoom.', icon: <WipeIcon /> },
   { title: 'Side-by-Side View', description: 'Three model outputs, shared viewport, per-column metrics, best-Dice badge highlighted automatically.', icon: <SideBySideIcon /> },
-  { title: 'Model Library',     description: 'Full performance tables, convergence curves, and one-click workspace load for all four DRL agents.', icon: <LibraryIcon /> },
+  { title: 'Model Library',     description: 'Performance tables, convergence curves, and one-click workspace load for both DRL architectures and the U-Net baselines.', icon: <LibraryIcon /> },
 ];
 
 const GLASS: React.CSSProperties = { backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' };

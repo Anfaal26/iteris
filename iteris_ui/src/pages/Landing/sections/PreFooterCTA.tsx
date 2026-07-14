@@ -18,7 +18,7 @@ export const PreFooterCTA: React.FC = () => (
         Ready to explore?
       </h2>
       <p className="text-[15px] leading-relaxed max-w-md" style={{ color: 'rgba(240,249,255,0.45)' }}>
-        Run inference on real medical scans, replay DRL boundary refinement step by step, and generate LLM-powered interpretations.
+        Run inference on real medical scans, replay boundary refinement step by step, and review Claude-generated case interpretations.
       </p>
       <div className="flex flex-col sm:flex-row items-center gap-3">
         <a href="/workspace"

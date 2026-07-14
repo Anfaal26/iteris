@@ -14,13 +14,10 @@ export type Modality = 'ultrasound' | 'mri';
 /** Algorithm families and the deployed checkpoints. */
 export type ModelFamily = 'baseline' | 'discrete-drl' | 'continuous-drl';
 export type ModelId =
-  | 'unet-baseline' // Attention Res U-Net
-  | 'lite-unet' // Lite U-Net (compact baseline)
-  | 'dqn'
-  | 'ddqn'
-  | 'dueling-dqn' // DuelingDDQN — discrete DRL refinement
-  | 'ddpg'
-  | 'td3'; // TD3 — continuous DRL refinement
+  | 'unet-baseline'  // Attention Res U-Net
+  | 'lite-unet'      // Lite U-Net (compact baseline)
+  | 'dueling-dqn'   // Dueling DQN — discrete DRL refinement
+  | 'td3';           // TD3 — continuous DRL refinement
 
 /**
  * Data regime a checkpoint was trained under. DRL agents default to `low`,

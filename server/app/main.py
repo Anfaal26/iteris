@@ -62,23 +62,13 @@ MODELS: list[ModelRecord] = [
         selectable=True,
     ),
     ModelRecord(
-        id='dqn', name='DQN', family='discrete-drl',
-        description='Double Deep Q-Network contour refinement. Training in progress — not yet deployed.',
-        diceCamus=None, diceBrisc=None, iou=None, hd=None, deployed=False, selectable=False,
-    ),
-    ModelRecord(
-        id='ddqn', name='DDQN', family='discrete-drl',
-        description='Double DQN with separate online/target networks. Training in progress — not yet deployed.',
-        diceCamus=None, diceBrisc=None, iou=None, hd=None, deployed=False, selectable=False,
-    ),
-    ModelRecord(
         id='dueling-dqn', name='Dueling DQN', family='discrete-drl',
-        description='Dueling Double DQN. Training in progress — not yet deployed.',
+        description='Dueling Double DQN with value/advantage streams and 8-direction discrete action space. Evaluation in progress — deployment pending results.',
         diceCamus=None, diceBrisc=None, iou=None, hd=None, deployed=False, selectable=False,
     ),
     ModelRecord(
-        id='ddpg', name='DDPG', family='continuous-drl',
-        description='Continuous-action actor-critic contour refinement. Training in progress — not yet deployed.',
+        id='td3', name='TD3', family='continuous-drl',
+        description='Twin Delayed DDPG with clipped double-Q critics and continuous vertex-displacement actions. Evaluation in progress — deployment pending results.',
         diceCamus=None, diceBrisc=None, iou=None, hd=None, deployed=False, selectable=False,
     ),
 ]

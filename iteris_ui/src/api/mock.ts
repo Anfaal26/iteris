@@ -92,7 +92,7 @@ function buildMetrics(dataset: PredictRequest['dataset'], dice: number): Metrics
 export async function health(): Promise<HealthResponse> {
   return {
     status: 'ok',
-    modelsLoaded: 6,
+    modelsLoaded: 4,
     gpuAvailable: false,
     datasetsAvailable: ['camus', 'brisc'],
   };
@@ -108,7 +108,7 @@ export async function samples(): Promise<SampleImage[]> {
 
 /** DRL agents refine a contour over an episode; baselines do a single pass. */
 function isDrl(modelId: ModelId): boolean {
-  return modelId === 'dqn' || modelId === 'ddqn' || modelId === 'dueling-dqn' || modelId === 'td3';
+  return modelId === 'dueling-dqn' || modelId === 'td3';
 }
 
 export async function predict(body: PredictRequest): Promise<PredictResponse> {

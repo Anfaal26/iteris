@@ -3,7 +3,7 @@ import React from 'react';
 
 const STEPS = [
   { num: '01', title: 'Upload a Scan',      description: 'Drop a DICOM, NIfTI, or PNG study — or pick from the curated CAMUS/BRISC sample library.' },
-  { num: '02', title: 'Choose a Model',     description: 'Select DQN, DDQN, Dueling DQN, or DDPG from the model library with full performance metrics.' },
+  { num: '02', title: 'Choose a Model',     description: 'Select Dueling DQN (discrete) or TD3 (continuous) from the model library, or benchmark against the Attention U-Net baseline.' },
   { num: '03', title: 'Run Segmentation',   description: 'Preprocessing, normalisation, and DRL boundary refinement complete in seconds with live feedback.' },
   { num: '04', title: 'Explore Results',    description: 'Step through iteration playback, wipe-compare masks, export Dice and Hausdorff as JSON.' },
 ];

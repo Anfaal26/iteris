@@ -156,13 +156,13 @@ const HeroSection = () => (
                    animate-[fadeSlideUp_0.7s_ease-out_both]"
         style={{ animationDelay: '120ms', letterSpacing: '-0.02em' }}
       >
-        See How AI
+        Precision Medical
         <br />
         <span
           className="bg-iteris-gradient bg-clip-text text-transparent"
           style={{ WebkitBackgroundClip: 'text' }}
         >
-          Learns to See.
+          Segmentation.
         </span>
       </h1>
 
@@ -173,9 +173,9 @@ const HeroSection = () => (
                    animate-[fadeSlideUp_0.7s_ease-out_both]"
         style={{ animationDelay: '240ms' }}
       >
-        A DRL-powered medical image segmentation workstation. Compare DQN,
-        DDQN and DDPG agents on cardiac ultrasound and brain MRI — with full
-        iteration playback.
+        A research workstation for deep reinforcement learning boundary
+        refinement. Compare Dueling DQN (discrete) and TD3 (continuous) against
+        the Attention U-Net baseline on cardiac ultrasound and brain MRI.
       </p>
 
       {/* CTAs */}
@@ -219,9 +219,9 @@ const HeroSection = () => (
         style={{ animationDelay: '480ms' }}
       >
         {[
-          { val: '0.912', label: 'Best Dice · DDPG', dot: 'bg-grad-b' },
-          { val: 'p < 0.001', label: 'Statistical Sig.', dot: 'bg-success' },
-          { val: '20 steps', label: 'Playback depth', dot: 'bg-grad-a' },
+          { val: 'CAMUS + BRISC', label: 'Two datasets', dot: 'bg-grad-b' },
+          { val: 'p < 0.001', label: 'Statistical sig.', dot: 'bg-success' },
+          { val: '20 steps', label: 'Refinement depth', dot: 'bg-grad-a' },
         ].map((s) => (
           <span
             key={s.label}
