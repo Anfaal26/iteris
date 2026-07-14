@@ -254,8 +254,10 @@ def apply_refinement_config(cfg: dict, *, baseline_cfg_name: str,
 
     Args:
         cfg: the per-agent cfg from ``resolve_agent_config``.
-        baseline_cfg_name: e.g. 'CAMUS/camus.yaml' / 'BRISC/brisc.yaml'
-            (the ATTENTION U-Net; Phase B adds label_frac downstream).
+        baseline_cfg_name: e.g. 'CAMUS/camus.yaml' / 'BRISC/brisc.yaml' -- the
+            single U-Net this notebook's agent refines directly (no separate
+            lite-baseline/attention-competitor split). Phase B adds label_frac
+            downstream.
         uncertainty_gate: True only where the prob_map diagnostic is USABLE.
         terminal_bonus_scale: the optimal-stopping STOP incentive magnitude, set
             PER CLASS by that class's headroom + target size (see the STOP-bonus

@@ -15,8 +15,8 @@ target_class:        1
 class_name:          glioma
 tumor_type_filter:   glioma          # filters warm_start samples by tumor_type field
 dataset:             BRISC
-baseline_cfg_name:   BRISC/brisc_lite.yaml   # RL refines the LITE baseline (attn net = competitor)
-baseline_checkpoint: /kaggle/input/brisc-baseline-outputs/brisc_lite_unet_best.pt
+baseline_cfg_name:   BRISC/brisc.yaml        # RL refines this U-Net directly (single-baseline design -- no separate lite/competitor split)
+baseline_checkpoint: /kaggle/input/brisc-baseline-outputs/brisc_best.pt
 
 # ── Reward shaping — glioma rationale ────────────────────────────────────────
 # Gliomas have diffuse boundaries — Dice fluctuates more than meningioma.
