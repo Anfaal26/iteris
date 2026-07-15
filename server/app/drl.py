@@ -20,14 +20,17 @@ Each CAMUS DRL request fans out to every registered class-agent for that
 contour, and combines the per-class binary masks into one label map with a fixed
 priority order — exactly the multi-class orchestration the brief describes.
 
-NOTE FOR THE MAINTAINER:
-  The episode dynamics below reuse the *vendored* ContourRefineEnv + Dueling
-  networks (copied verbatim from the iteris package) and the CAMUS-c1 training
-  hyperparameters (configs/CAMUS/DRL/camus_drl_c1.yaml). This path is written
-  against those but has not been run end-to-end here — verify one real request
-  once the checkpoint is live in Anfaal26/iteris-drl-camus (the network variant
-  is auto-detected from the state-dict keys, so a plain vs. spatial Dueling
-  head both load).
+Both discrete (DuelingDDQN, greedy argmax) and continuous (TD3, Actor forward
+pass) agents are supported — the episode loop and checkpoint unwrapping branch
+on `DrlEntry.action_type`. The network variant (plain vs. sector-spatial head)
+is auto-detected from the checkpoint's state-dict keys, so either loads without
+a code change.
+
+Verified end-to-end for CAMUS LV DuelingDDQN (Phase A). The other 7 Phase-A
+entries (CAMUS myo/LA × both algos, BRISC tumor × both algos) are wired against
+their exact training configs (configs/CAMUS/DRL/camus_drl_c{1,2,3}.yaml,
+configs/BRISC/DRL/brisc_drl_tumor.yaml) but not yet each individually smoke-
+tested — do that once their checkpoints land in the HF repos below.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ from huggingface_hub import hf_hub_download
 from PIL import Image
 
 from . import inference
-from .drl_networks import DuelingQNetwork, SpatialDuelingQNetwork
+from .drl_networks import Actor, DuelingQNetwork, SpatialActor, SpatialDuelingQNetwork
 from .env_contour_refine import ContourRefineEnv
 from .schemas import MaskLayer, Metrics, StructureMetrics
 
@@ -72,6 +75,9 @@ class DrlEntry:
     hf_repo: str
     hf_filename: str
     action_type: str = 'discrete'
+    # Discrete (DuelingDDQN): fixed at 18 (8 push-out + 8 push-in + smooth + stop).
+    # Continuous (TD3): the trained action_dim == cont_sectors, which VARIES per
+    # checkpoint (16 for CAMUS, 12 for BRISC) — must match env_cfg['cont_sectors'].
     num_actions: int = 18
     in_channels: int = 5
     # Env hyperparameters — MUST match the checkpoint's training config
@@ -79,30 +85,96 @@ class DrlEntry:
     env_cfg: dict = field(default_factory=dict)
 
 
-# CAMUS-c1 (LV endocardium), high regime, DuelingDDQN — the one hosted checkpoint.
-# Colors mirror iteris_ui maskColorsHex / inference.STRUCTURE_DEFS.
-_CAMUS_C1_ENV = dict(
+# Env hyperparameters per checkpoint — MUST match its training config exactly
+# (configs/CAMUS/DRL/camus_drl_c{1,2,3}.yaml, configs/BRISC/DRL/brisc_drl_tumor.yaml).
+# They differ per class/dataset (e.g. CAMUS-LA and BRISC use a different
+# spline_smooth; BRISC's TD3 uses 12 continuous sectors, not 16) — do not
+# assume they're interchangeable.
+_SHARED = dict(
     max_steps=10,
     n_points=32,
     disp_px=2.0,
-    spline_smooth=2.0,
-    smooth_lambda=0.5,
-    directional_state=False,   # 5 state channels
+    directional_state=False,   # 5 state channels, all 8 checkpoints
     reward_mode='dice_delta',  # rewards are unused at deploy; keep the light path
     disable_auto_stop=True,    # no GT at deploy → don't let GT-based auto-stop fire
 )
+_CAMUS_LV_DUELING_ENV = dict(_SHARED, spline_smooth=2.0, smooth_lambda=0.5)
+_CAMUS_LV_TD3_ENV = dict(_SHARED, spline_smooth=2.0, cont_sectors=16)
+_CAMUS_MYO_DUELING_ENV = dict(_SHARED, spline_smooth=2.0, smooth_lambda=0.5)
+_CAMUS_MYO_TD3_ENV = dict(_SHARED, spline_smooth=2.0, cont_sectors=16)
+_CAMUS_LA_DUELING_ENV = dict(_SHARED, spline_smooth=2.5, smooth_lambda=0.5)
+_CAMUS_LA_TD3_ENV = dict(_SHARED, spline_smooth=2.5, cont_sectors=16)
+_BRISC_TUMOR_DUELING_ENV = dict(_SHARED, spline_smooth=0.0, smooth_lambda=0.5)
+_BRISC_TUMOR_TD3_ENV = dict(_SHARED, spline_smooth=0.0, cont_sectors=12)
 
+_CAMUS_REPO = os.environ.get('HF_REPO_CAMUS_DRL', 'Anfaal26/iteris-drl-camus')
+_BRISC_REPO = os.environ.get('HF_REPO_BRISC_DRL', 'Anfaal26/iteris-drl-brisc')
+
+# Colors mirror iteris_ui maskColorsHex / inference.STRUCTURE_DEFS.
 REGISTRY: dict[tuple[str, str, str, str], DrlEntry] = {
     ('camus', 'lv', 'high', 'duelingddqn'): DrlEntry(
         dataset='camus', klass='lv', regime='high', algo='duelingddqn',
         structure_id='lv_endo', label='LV Endocardium', color='#00c9a7',
-        unet_class_index=1,
-        hf_repo=os.environ.get('HF_REPO_CAMUS_DRL', 'Anfaal26/iteris-drl-camus'),
-        hf_filename=os.environ.get(
-            'HF_FILE_CAMUS_LV_HIGH_DUELINGDDQN', 'duelingddqn/lv/high.pt',
-        ),
+        unet_class_index=1, hf_repo=_CAMUS_REPO,
+        hf_filename=os.environ.get('HF_FILE_CAMUS_LV_HIGH_DUELINGDDQN', 'duelingddqn/lv/high.pt'),
         num_actions=18, in_channels=5, action_type='discrete',
-        env_cfg=_CAMUS_C1_ENV,
+        env_cfg=_CAMUS_LV_DUELING_ENV,
+    ),
+    ('camus', 'myo', 'high', 'duelingddqn'): DrlEntry(
+        dataset='camus', klass='myo', regime='high', algo='duelingddqn',
+        structure_id='lv_epi', label='LV Epicardium', color='#f59e0b',
+        unet_class_index=2, hf_repo=_CAMUS_REPO,
+        hf_filename=os.environ.get('HF_FILE_CAMUS_MYO_HIGH_DUELINGDDQN', 'duelingddqn/myo/high.pt'),
+        num_actions=18, in_channels=5, action_type='discrete',
+        env_cfg=_CAMUS_MYO_DUELING_ENV,
+    ),
+    ('camus', 'la', 'high', 'duelingddqn'): DrlEntry(
+        dataset='camus', klass='la', regime='high', algo='duelingddqn',
+        structure_id='la', label='Left Atrium', color='#f87171',
+        unet_class_index=3, hf_repo=_CAMUS_REPO,
+        hf_filename=os.environ.get('HF_FILE_CAMUS_LA_HIGH_DUELINGDDQN', 'duelingddqn/la/high.pt'),
+        num_actions=18, in_channels=5, action_type='discrete',
+        env_cfg=_CAMUS_LA_DUELING_ENV,
+    ),
+    ('camus', 'lv', 'high', 'td3'): DrlEntry(
+        dataset='camus', klass='lv', regime='high', algo='td3',
+        structure_id='lv_endo', label='LV Endocardium', color='#00c9a7',
+        unet_class_index=1, hf_repo=_CAMUS_REPO,
+        hf_filename=os.environ.get('HF_FILE_CAMUS_LV_HIGH_TD3', 'td3/lv/high.pt'),
+        num_actions=16, in_channels=5, action_type='continuous',
+        env_cfg=_CAMUS_LV_TD3_ENV,
+    ),
+    ('camus', 'myo', 'high', 'td3'): DrlEntry(
+        dataset='camus', klass='myo', regime='high', algo='td3',
+        structure_id='lv_epi', label='LV Epicardium', color='#f59e0b',
+        unet_class_index=2, hf_repo=_CAMUS_REPO,
+        hf_filename=os.environ.get('HF_FILE_CAMUS_MYO_HIGH_TD3', 'td3/myo/high.pt'),
+        num_actions=16, in_channels=5, action_type='continuous',
+        env_cfg=_CAMUS_MYO_TD3_ENV,
+    ),
+    ('camus', 'la', 'high', 'td3'): DrlEntry(
+        dataset='camus', klass='la', regime='high', algo='td3',
+        structure_id='la', label='Left Atrium', color='#f87171',
+        unet_class_index=3, hf_repo=_CAMUS_REPO,
+        hf_filename=os.environ.get('HF_FILE_CAMUS_LA_HIGH_TD3', 'td3/la/high.pt'),
+        num_actions=16, in_channels=5, action_type='continuous',
+        env_cfg=_CAMUS_LA_TD3_ENV,
+    ),
+    ('brisc', 'tumor', 'high', 'duelingddqn'): DrlEntry(
+        dataset='brisc', klass='tumor', regime='high', algo='duelingddqn',
+        structure_id='glioma', label='Tumor (unclassified)', color='#818cf8',
+        unet_class_index=1, hf_repo=_BRISC_REPO,
+        hf_filename=os.environ.get('HF_FILE_BRISC_TUMOR_HIGH_DUELINGDDQN', 'duelingddqn/tumor/high.pt'),
+        num_actions=18, in_channels=5, action_type='discrete',
+        env_cfg=_BRISC_TUMOR_DUELING_ENV,
+    ),
+    ('brisc', 'tumor', 'high', 'td3'): DrlEntry(
+        dataset='brisc', klass='tumor', regime='high', algo='td3',
+        structure_id='glioma', label='Tumor (unclassified)', color='#818cf8',
+        unet_class_index=1, hf_repo=_BRISC_REPO,
+        hf_filename=os.environ.get('HF_FILE_BRISC_TUMOR_HIGH_TD3', 'td3/tumor/high.pt'),
+        num_actions=12, in_channels=5, action_type='continuous',
+        env_cfg=_BRISC_TUMOR_TD3_ENV,
     ),
 }
 
@@ -139,15 +211,21 @@ def _download_checkpoint(entry: DrlEntry) -> str:
 
 
 def _build_network(entry: DrlEntry, state: dict) -> torch.nn.Module:
-    """Instantiate the Dueling head that matches the checkpoint. The spatial and
-    plain variants have disjoint parameter names, so we pick from the keys —
-    robust to which one the checkpoint was trained with."""
+    """Instantiate the network class that matches the checkpoint's action_type
+    (discrete -> Dueling head, continuous -> TD3 Actor) and spatial variant
+    (plain vs. sector-local heads have disjoint parameter names, so we pick
+    from the keys — robust to which one the checkpoint was trained with).
+    action_scale on the Actor variants is a registered buffer, so its real
+    trained values load automatically via load_state_dict; the placeholder
+    passed to the constructor only needs the right shape."""
     keys = ' '.join(state.keys())
-    spatial = 'sector_pool' in keys or 'out_head' in keys or 'global_branch' in keys
-    if spatial:
-        net = SpatialDuelingQNetwork(in_channels=entry.in_channels, num_actions=entry.num_actions)
+    spatial = 'sector_pool' in keys or 'global_branch' in keys
+    if entry.action_type == 'continuous':
+        Cls = SpatialActor if spatial else Actor
+        net = Cls(in_channels=entry.in_channels, action_dim=entry.num_actions)
     else:
-        net = DuelingQNetwork(in_channels=entry.in_channels, num_actions=entry.num_actions)
+        Cls = SpatialDuelingQNetwork if spatial else DuelingQNetwork
+        net = Cls(in_channels=entry.in_channels, num_actions=entry.num_actions)
     net.load_state_dict(state)
     net.eval()
     return net
@@ -161,15 +239,19 @@ def _load_agent(entry: DrlEntry) -> torch.nn.Module:
     raw = torch.load(path, map_location='cpu')
     state = raw
     if isinstance(raw, dict):
-        # Real training-checkpoint format (iteris.agents.DQNAgent.state_dict):
-        # {'agent': {'q': <online net>, 'q_target': <target net>}, 'optimizers':
-        # ..., 'best_dice':..., 'history':..., 'step':...}. The greedy/inference
-        # network is the ONLINE net, agent['q'] — not q_target (that trails the
-        # online net during training) and not the top-level 'agent' dict itself
-        # (that's {'q':..., 'q_target':...}, not a flat state_dict).
+        # Real training-checkpoint format (iteris.agents.{DQNAgent,TD3Agent}.
+        # state_dict): {'agent': {...}, 'optimizers':..., 'best_dice':...,
+        # 'history':..., 'step':...}. Inside 'agent':
+        #   DQNAgent (discrete) -> {'q': <online>, 'q_target': <target>}
+        #   TD3Agent (continuous) -> {'actor': <online>, 'actor_target':...,
+        #                             'critic1':..., 'critic2':..., ...}
+        # Inference always wants the ONLINE net (q / actor), never the target
+        # (trails during training) or a critic (not used for action selection).
         agent_state = raw.get('agent')
         if isinstance(agent_state, dict) and 'q' in agent_state:
             state = agent_state['q']
+        elif isinstance(agent_state, dict) and 'actor' in agent_state:
+            state = agent_state['actor']
         else:
             for k in ('online_state_dict', 'q_state_dict', 'model_state_dict', 'state_dict', 'model'):
                 if k in raw:
@@ -228,8 +310,13 @@ def _run_episode(entry: DrlEntry, image: np.ndarray, init_mask: np.ndarray,
     steps = 0
     for _ in range(int(entry.env_cfg.get('max_steps', 10))):
         s = torch.from_numpy(state).unsqueeze(0).float()
-        q = net(s)
-        action = int(q.argmax(dim=1).item())
+        if entry.action_type == 'continuous':
+            # Actor.forward already returns the tanh × action_scale continuous
+            # action — no exploration noise (deploy wants the greedy policy).
+            action = net(s).squeeze(0).numpy()
+        else:
+            q = net(s)
+            action = int(q.argmax(dim=1).item())
         state, _reward, done, _info = env.step(action)
         steps += 1
         if done:

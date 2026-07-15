@@ -274,8 +274,12 @@ export const AVAILABLE_COMBINATIONS: ReadonlyArray<{
   // Attention Res U-Net baseline — the deployed CAMUS/BRISC checkpoint (high regime).
   { dataset: 'camus', modelId: 'unet-baseline', regime: 'high' },
   { dataset: 'brisc', modelId: 'unet-baseline', regime: 'high' },
-  // DuelingDDQN, CAMUS LV endocardium, high regime — the one DRL checkpoint hosted so far.
+  // Phase A DRL (high regime): DuelingDDQN + TD3, both CAMUS (3-class fan-out —
+  // see server drl.py REGISTRY) and BRISC (single tumor class).
   { dataset: 'camus', modelId: 'dueling-dqn', regime: 'high' },
+  { dataset: 'camus', modelId: 'td3', regime: 'high' },
+  { dataset: 'brisc', modelId: 'dueling-dqn', regime: 'high' },
+  { dataset: 'brisc', modelId: 'td3', regime: 'high' },
 ];
 
 /** Default regime for a model family: DRL → low, U-Net baselines → high. */

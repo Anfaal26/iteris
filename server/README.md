@@ -39,25 +39,44 @@ See `/health`, `/models`, `/predict` for the live contract — mirrors
 `(dataset, modelFamily, algo, regime)` — see `app/drl.py`'s `REGISTRY` dict.
 
 Checkpoints follow the **same pattern as the Attention U-Net baselines**: they
-live in a separate HF Hub model repo, `Anfaal26/iteris-drl-camus`, pulled at
-runtime via `huggingface_hub.hf_hub_download` and cached by that library — no
-Kaggle credentials or downloads happen on this Space at all. Weights get into
-that repo via a Kaggle notebook (`hf-link.ipynb`) that uploads training-output
+live in separate HF Hub model repos (`Anfaal26/iteris-drl-camus`,
+`Anfaal26/iteris-drl-brisc`), pulled at runtime via
+`huggingface_hub.hf_hub_download` and cached by that library — no Kaggle
+credentials or downloads happen on this Space at all. Weights get into those
+repos via a Kaggle notebook (`hf-link.ipynb`) that uploads training-output
 datasets to HF Hub; this Space only ever reads from HF Hub.
 
-**Current registry entry**: CAMUS class 1 (LV endocardium), high regime,
-DuelingDDQN — sourced from the Kaggle dataset
-[`junkit1688/pa-camus-dueling-1-outputs`](https://www.kaggle.com/datasets/junkit1688/pa-camus-dueling-1-outputs),
-uploaded to `Anfaal26/iteris-drl-camus` at `duelingddqn/lv/high.pt`.
+**Phase A registry (high regime, both algorithms, both datasets)** — 8 entries
+in `app/drl.py`'s `REGISTRY`, each an env-overridable `(HF_REPO_*, HF_FILE_*)`
+pair with a default already pointing at the canonical path, so no Space
+secrets are required unless a repo/path ever changes:
 
-Both `HF_REPO_CAMUS_DRL` and `HF_FILE_CAMUS_LV_HIGH_DUELINGDDQN` have defaults
-baked in matching that path, so **no Space secrets are required** for this
-entry — only overridable if the repo/path ever changes.
+| Dataset | Class | Algo | HF repo | Path | Kaggle source |
+|---|---|---|---|---|---|
+| CAMUS | LV endo | DuelingDDQN | iteris-drl-camus | `duelingddqn/lv/high.pt` | `junkit1688/pa-camus-dueling-1-outputs` |
+| CAMUS | LV epi/myo | DuelingDDQN | iteris-drl-camus | `duelingddqn/myo/high.pt` | `junkit1688/pa-camus-dueling-2-outputs` |
+| CAMUS | LA | DuelingDDQN | iteris-drl-camus | `duelingddqn/la/high.pt` | `anfaalhossain/pa-camus-dueling-3-outputs` |
+| CAMUS | LV endo | TD3 | iteris-drl-camus | `td3/lv/high.pt` | `chuachongeu/pa-camus-td3-c1-outputs` |
+| CAMUS | LV epi/myo | TD3 | iteris-drl-camus | `td3/myo/high.pt` | `chuachongeu/pa-camus-td3-c2-outputs` |
+| CAMUS | LA | TD3 | iteris-drl-camus | `td3/la/high.pt` | `chuachongeu/pa-camus-td3-c3-outputs` |
+| BRISC | tumor | DuelingDDQN | iteris-drl-brisc | `duelingddqn/tumor/high.pt` | `junkit1688/pa-brisc-dueling-1-outputs` |
+| BRISC | tumor | TD3 | iteris-drl-brisc | `td3/tumor/high.pt` | `anfaalhossain/pa-brisc-td3-outputs` |
 
-Adding class 2/3, the low regime, or TD3 later is a matter of: (1) upload the
-new checkpoint to `Anfaal26/iteris-drl-camus` at its own `algo/class/regime.pt`
-path via the same notebook pattern, (2) add one `DrlEntry` to `REGISTRY` in
-`app/drl.py` — no changes to the loading or request-handling logic.
+CAMUS's 3 classes are trained as **separate agents**; a single CAMUS+algo
+request fans out to all 3 registered class-agents and combines their masks
+into one label map (`CLASS_PRIORITY` in `drl.py`). BRISC is single-class.
+
+Env hyperparameters (n_points, disp_px, spline_smooth, cont_sectors, ...) are
+per-checkpoint and MUST match the exact training config — see the `_CAMUS_*`
+/ `_BRISC_*` dicts in `drl.py`, sourced from
+`configs/CAMUS/DRL/camus_drl_c{1,2,3}.yaml` and
+`configs/BRISC/DRL/brisc_drl_tumor.yaml`. Don't assume they're interchangeable
+across classes/datasets — CAMUS-LA and BRISC use a different `spline_smooth`,
+and BRISC's TD3 uses 12 continuous sectors vs. 16 for CAMUS.
+
+Adding the low regime later is a matter of: (1) upload the new checkpoint at
+its own `algo/class/low.pt` path via the same notebook pattern, (2) add one
+`DrlEntry` to `REGISTRY` — no changes to the loading or request-handling logic.
 
 **Frontend wiring**: the Vercel app never talks to this Space's `/infer`
 directly — it calls its own same-origin `/api/infer` serverless function
