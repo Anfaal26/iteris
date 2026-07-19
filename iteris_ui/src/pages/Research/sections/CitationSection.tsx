@@ -10,15 +10,15 @@ export interface CitationSectionProps {
 }
 
 const BIBTEX = `@misc{iteris2026,
-  title        = {Deep Reinforcement Learning for Adaptive Boundary
+  title        = {Iteris: Deep Reinforcement Learning for Adaptive Contour
                    Refinement in Medical Image Segmentation},
-  author       = {Anwar, Ahmad Faaiz and {Capstone Team PRJ63504}},
+  author       = {Hossain, Mohammad Anfaal and {Capstone Team PRJ63504}},
   year         = {2026},
   institution  = {Taylor's University, School of Computer Science
                    and Digital Technology},
-  note         = {Capstone project PRJ63504; code and weights at
-                   https://github.com/iteris-ui/iteris},
-  howpublished = {\\url{https://github.com/iteris-ui/iteris}},
+  note         = {Capstone project PRJ63504 (in progress); code at
+                   https://github.com/Anfaal26/iteris},
+  howpublished = {\\url{https://github.com/Anfaal26/iteris}},
 }`;
 
 interface ExternalLink {
@@ -30,19 +30,18 @@ interface ExternalLink {
 const LINKS: ExternalLink[] = [
   {
     label: 'GitHub Repository',
-    href: 'https://github.com/iteris-ui/iteris',
+    href: 'https://github.com/Anfaal26/iteris',
     description: 'Source code, training scripts, and model checkpoints.',
   },
   {
-    label: 'Hugging Face Hub',
-    href: 'https://huggingface.co/iteris',
-    description: 'Pre-trained DDPG and Dueling DQN model weights.',
+    label: 'Live Workstation',
+    href: 'https://iteris-pearl.vercel.app',
+    description: 'This site — run inference and explore the model library.',
   },
   {
     label: 'CAMUS Dataset',
     href: 'https://www.creatis.insa-lyon.fr/Challenge/camus/',
-    description:
-      'Official CAMUS echocardiography challenge dataset (450 patients).',
+    description: 'Official CAMUS echocardiography challenge dataset.',
   },
   {
     label: 'BRISC Dataset',

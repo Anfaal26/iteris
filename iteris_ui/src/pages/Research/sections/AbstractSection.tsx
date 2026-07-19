@@ -32,18 +32,23 @@ export const AbstractSection: React.FC<AbstractSectionProps> = ({ id = 'abstract
           id="abstract-heading"
           className="font-heading text-2xl font-bold text-text leading-snug mb-4"
         >
-          Deep Reinforcement Learning for Adaptive Boundary Refinement in
-          Medical Image Segmentation
+          Iteris: Deep Reinforcement Learning for Adaptive Contour
+          Refinement in Medical Image Segmentation
         </h1>
 
         {/* Authors */}
         <p className="font-body text-sm text-muted mb-1">
-          Ahmad Faaiz Anwar&thinsp;·&thinsp;Capstone Team PRJ63504
+          Mohammad Anfaal Hossain&thinsp;·&thinsp;Capstone Team PRJ63504
         </p>
         <p className="font-body text-sm text-muted mb-1">
           School of Computer Science and Digital Technology, Taylor's University
         </p>
-        <p className="font-body text-sm text-muted mb-6">Submitted June 2026</p>
+        <p className="font-body text-sm text-muted mb-6">
+          <span className="px-2 py-0.5 rounded-full border border-border text-xs mr-2">
+            In progress
+          </span>
+          Academic year 2025/2026
+        </p>
 
         {/* Abstract body */}
         <div
@@ -51,34 +56,34 @@ export const AbstractSection: React.FC<AbstractSectionProps> = ({ id = 'abstract
           aria-label="Abstract"
         >
           <p>
-            Accurate segmentation of cardiac and neural structures in medical images is a
-            prerequisite for many downstream clinical workflows, yet standard encoder-decoder
-            networks such as U-Net often produce contours with irregular boundaries and
-            inconsistent delineation of thin or low-contrast structures. We address this
-            limitation by framing boundary refinement as a sequential decision-making problem
-            and solving it with deep reinforcement learning (DRL) agents that iteratively
-            adjust segmentation contours produced by a frozen U-Net backbone.
+            Classical segmentation networks commit to a boundary in a single forward pass.
+            This work asks what happens when the model can look again. We frame boundary
+            refinement as a sequential decision-making problem: a frozen U-Net produces an
+            initial contour, and a deep reinforcement learning (DRL) agent revises it
+            step by step by displacing contour vertices along outward normals within
+            angular sectors, learning through interaction with a reward signal rather than
+            through imitation of ground truth.
           </p>
           <p>
-            We train and evaluate four DRL algorithms — Deep Q-Network (DQN), Double DQN
-            (DDQN), Dueling DQN, and Deep Deterministic Policy Gradient (DDPG) — on two
-            independent benchmarks: the CAMUS echocardiography dataset (450 patients, three
-            cardiac structures) and the BRISC multi-class brain MRI dataset (three tumour
-            classes). The Markov Decision Process is formulated with a patch-CNN state
-            encoder, a structure-aware multi-component reward that jointly optimises Dice
-            coefficient, boundary smoothness, and anatomical plausibility, and an
-            episode-start reward that seeds the agent close to the gold-standard contour.
+            We compare two DRL formulations on the same contour-refinement environment — a
+            discrete Dueling Double DQN over angular sectors, and a continuous TD3
+            (Twin Delayed DDPG) agent — against two segmentation backbones, a compact
+            Lite U-Net and an Attention Residual U-Net, on two independent benchmarks: the
+            CAMUS cardiac ultrasound dataset (LV endocardium, LV epicardium, left atrium)
+            and the BRISC brain MRI dataset (glioma, meningioma, pituitary). The reward is a
+            baseline-centred, potential-based shaping term (Φ = K·(Dice − Dice₀)) chosen
+            specifically to remove the path-dependence and discount drag that made earlier
+            reward formulations collapse to a do-nothing policy at the baseline.
           </p>
           <p>
-            Our best-performing agent, DDPG with a continuous vertex-displacement action
-            space, achieves a mean Dice of 0.912 on CAMUS and 0.840 on BRISC — representing
-            gains of 2.2 pp and 3.0 pp respectively over the U-Net baseline. Discrete agents
-            (DQN, DDQN, Dueling DQN) achieve consistent improvements of 1.1–1.8 pp. A
-            transfer learning experiment demonstrates that fine-tuning a CAMUS-trained DDPG
-            agent on as few as 20% of BRISC labels recovers 98.3% of the fully-supervised
-            Dice, indicating strong cross-modality generalisation. Ablation studies confirm
-            the importance of the per-structure reward weighting and target-network
-            stabilisation.
+            Evaluation is not yet complete — the discrete and continuous agents are
+            currently in training against the Lite U-Net baseline, with the Attention U-Net
+            serving as the upper-bound competitor. Result, convergence, and ablation figures
+            on this page will populate as evaluation runs finish; see the{' '}
+            <a href="#results" className="text-accent hover:underline">
+              Results
+            </a>{' '}
+            section for current status.
           </p>
         </div>
       </div>

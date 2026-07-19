@@ -18,34 +18,17 @@ interface RewardRow {
 
 const REWARD_ROWS: RewardRow[] = [
   {
-    component: 'Dice reward',
-    formula: 'r_Dice = ΔDice(t)',
-    weight: '0.50',
-    purpose: 'Primary segmentation quality signal',
+    component: 'Potential-based shaping',
+    formula: 'Φ(s) = K·(Dice(s) − Dice₀)',
+    weight: 'K = 10 (CAMUS) / 15 (BRISC)',
+    purpose:
+      'Baseline-centred so holding position pays ~0 return, preventing the collapse to a do-nothing policy seen with an un-centred Φ = Dice at high baseline Dice',
   },
   {
-    component: 'Boundary smoothness',
-    formula: 'r_smooth = −κ(t)',
-    weight: '0.20',
-    purpose: 'Penalises high-curvature contour artefacts',
-  },
-  {
-    component: 'Anatomical plausibility',
-    formula: 'r_anat = IoU(hull(t))',
-    weight: '0.15',
-    purpose: 'Enforces convex-hull shape prior',
-  },
-  {
-    component: 'Episode-start bonus',
-    formula: 'r_init = Dice(s_0)',
-    weight: '0.10',
-    purpose: 'Seeds agent near gold-standard contour',
-  },
-  {
-    component: 'Per-structure weight',
-    formula: 'w_s · r_s',
-    weight: '0.05',
-    purpose: 'Up-weights thin structures (LV endo, pituitary)',
+    component: 'Step reward',
+    formula: 'r(s,a,s′) = γΦ(s′) − Φ(s)',
+    weight: '—',
+    purpose: 'Reward difference telescopes to K·(Dice_final − Dice₀) over an episode, independent of the action path taken',
   },
 ];
 
@@ -66,17 +49,19 @@ export const MethodsSection: React.FC<MethodsSectionProps> = ({ id = 'methods' }
         </h3>
         <div className="space-y-2 text-sm font-body text-muted leading-relaxed">
           <p>
-            Given a medical image <em>I</em> and an initial segmentation mask{' '}
-            <em>M&#x2080;</em> produced by a frozen U-Net, the objective is to find a
-            refined mask <em>M*</em> that maximises the Dice coefficient with respect to
-            the ground-truth annotation <em>G</em>.
+            Given a medical image <em>I</em> and an initial contour <em>C&#x2080;</em>{' '}
+            produced by a frozen U-Net backbone, the objective is to find a refined
+            contour <em>C*</em> that maximises the Dice coefficient with respect to the
+            ground-truth annotation <em>G</em>.
           </p>
           <p>
-            Boundary refinement is modelled as a fixed-horizon Markov Decision Process
-            with horizon <em>T</em> = 50 steps. The agent operates on a local patch
-            centred at each contour vertex and emits actions that displace vertices in
-            either a discrete 8-direction grid (DQN / DDQN / Dueling DQN) or a
-            continuous 2-D offset vector (DDPG).
+            Contour refinement is modelled as a fixed-horizon Markov Decision Process.
+            Rather than acting on individual vertices directly, the contour is divided
+            into a fixed number of angular sectors around its centroid; each sector
+            defines an outward-normal direction along which the agent can push the
+            boundary points it contains. This angular (rather than per-index) binning
+            keeps the action-to-location mapping stable across samples, which is what
+            makes the action space learnable.
           </p>
         </div>
       </div>
@@ -88,25 +73,27 @@ export const MethodsSection: React.FC<MethodsSectionProps> = ({ id = 'methods' }
         </h3>
         <div className="space-y-2 text-sm font-body text-muted leading-relaxed">
           <p>
-            <strong className="text-text">State space</strong> — A 64 × 64 patch
-            centred at the current contour vertex, concatenated with a one-hot
-            structure ID and the current step normalised to [0, 1]. Encoded by a
-            lightweight CNN (3 × Conv + 2 × FC) to a 256-dimensional embedding.
+            <strong className="text-text">Environment</strong> — <code className="text-xs font-mono text-accent">ContourRefineEnv</code>,
+            operating on the U-Net-derived contour rather than the raw pixel mask. An
+            earlier paradigm used a global 3-D action (SDT-threshold morphology +
+            translation) applied to the whole mask; this is structurally capped at the
+            baseline, since the best response to an already near-perfect mask is the
+            identity action. It has been archived as an ablation only.
           </p>
           <p>
-            <strong className="text-text">Action space (discrete)</strong> — 8 cardinal
-            and diagonal unit displacements, each scaling a step size that decays
-            linearly from 4 px (step 0) to 1 px (step 49).
+            <strong className="text-text">Action space (discrete)</strong> — Dueling
+            Double DQN selects a sector and a displacement bucket per step.
           </p>
           <p>
-            <strong className="text-text">Action space (continuous)</strong> — DDPG
-            emits a 2-D continuous displacement vector clipped to [−4, 4] px.
+            <strong className="text-text">Action space (continuous)</strong> — TD3 emits
+            a continuous per-sector displacement vector, clipped double-Q targets, and
+            delayed policy updates for stability.
           </p>
           <p>
-            <strong className="text-text">Transition</strong> — Each action moves the
-            target vertex and triggers a full mask recompute via polygon fill; adjacent
-            vertices are smoothed with a Gaussian kernel (σ = 1.0) to prevent isolated
-            spikes.
+            <strong className="text-text">Backbones</strong> — Two U-Net variants
+            provide the initial contour: a compact <em>Lite U-Net</em> (deliberately
+            given headroom above the DRL floor) and an <em>Attention Residual U-Net</em>{' '}
+            (the deployed baseline and upper-bound competitor).
           </p>
         </div>
       </div>
@@ -118,18 +105,20 @@ export const MethodsSection: React.FC<MethodsSectionProps> = ({ id = 'methods' }
         </h3>
         <div className="space-y-2 text-sm font-body text-muted leading-relaxed">
           <p>
-            All discrete agents share a common replay-buffer (capacity 10<sup>5</sup>,
-            uniform sampling) and target-network update interval of 500 steps. DQN uses
-            single-network Q-evaluation. DDQN decouples action selection (online) from
-            value estimation (target) to reduce overestimation bias. Dueling DQN adds
-            separate value and advantage streams recombined as{' '}
-            <em>Q = V + A − mean(A)</em>.
+            Only two algorithms are carried forward to full evaluation, both on the
+            contour environment: <strong className="text-text">Dueling DDQN</strong>{' '}
+            (discrete sectors, value/advantage stream decomposition,{' '}
+            <em>Q = V + A − mean(A)</em>) and <strong className="text-text">TD3</strong>{' '}
+            (continuous sectors). Earlier global-action variants (DQN, DDQN, DDPG) are
+            kept only as archived ablations to demonstrate the global-action ceiling.
           </p>
           <p>
-            DDPG uses an Ornstein–Uhlenbeck exploration process (θ = 0.15, σ = 0.2)
-            and soft target updates (τ = 0.005). The actor and critic each have two
-            hidden layers of 256 units. Batch normalisation is applied after the first
-            hidden layer of the critic.
+            Exact hyperparameters (learning rates, replay buffer size, target-update
+            interval, TD3-specific behaviour-cloning / hard-mining / curriculum
+            settings) are tracked per-run in the training configs rather than restated
+            here, since they are still being tuned during active training — see the
+            repository's <code className="text-xs font-mono text-accent">configs/</code>{' '}
+            directory for the values used in any given run.
           </p>
         </div>
       </div>
@@ -140,7 +129,11 @@ export const MethodsSection: React.FC<MethodsSectionProps> = ({ id = 'methods' }
           4. Reward Structure
         </h3>
         <p className="text-sm font-body text-muted mb-4">
-          The composite reward at step <em>t</em> is a weighted sum of five components:
+          The reward is potential-based shaping (PBRS) centred on the baseline Dice,
+          rather than raw Dice — this was a deliberate fix, not the original design.
+          An un-centred Φ = Dice at a ~0.94 baseline made <em>holding position</em> pay
+          (γ − 1)·Φ ≈ −0.009 per step, which collapsed every agent to a stop-at-baseline
+          policy regardless of algorithm:
         </p>
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-sm font-body" aria-label="Reward components">
@@ -197,8 +190,15 @@ export const MethodsSection: React.FC<MethodsSectionProps> = ({ id = 'methods' }
           </li>
           <li>
             <strong className="text-text">Statistical significance</strong> — paired Wilcoxon
-            signed-rank test (α = 0.05) for each agent vs U-Net baseline. Reported as p-values
-            in the results table.
+            signed-rank test per agent vs the U-Net baseline, with a Bonferroni correction
+            across the set of comparisons. Reported as p-values in the Results section once
+            evaluation runs complete.
+          </li>
+          <li>
+            <strong className="text-text">Headroom check</strong> — before a full training
+            run, an oracle-contour-ceiling diagnostic compares the best achievable Dice under
+            the current contour representation against the baseline, as a cheap go/no-go
+            signal for whether the representation has room to improve on.
           </li>
         </ul>
       </div>
