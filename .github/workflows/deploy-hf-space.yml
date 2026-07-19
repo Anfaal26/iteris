@@ -1,0 +1,77 @@
+name: Deploy — HF Space (inference backend)
+
+# Pushes server/ (the FastAPI inference backend) to the Hugging Face Space on
+# every push to main that touches it, once ci-python.yml's inference-server
+# job has passed. This is the piece that was previously undefined: Vercel
+# auto-deploys iteris_ui via its own GitHub integration, but nothing updated
+# the live HF Space when server/ changed — it required a manual push to the
+# Space's separate git remote. See docs/CI_CD.md for the full picture.
+#
+# Uses huggingface_hub's upload_folder (not a git-remote push) so there's no
+# need to check out or maintain the Space's own git history separately — the
+# Space's file tree is simply replaced with server/'s contents on every run,
+# matching the layout HF Spaces expect at the repo root (Dockerfile,
+# README.md, requirements.txt, app/).
+#
+# Required repository configuration (Settings → Secrets and variables →
+# Actions), not committed here:
+#   Secrets   HF_TOKEN     — a Hugging Face access token with WRITE access to
+#                            the Space (User Settings → Access Tokens on
+#                            huggingface.co).
+#   Variables HF_SPACE_ID  — "<hf-username>/<space-name>", e.g.
+#                            "Anfaal26/iteris-api" (the same Space
+#                            iteris_ui/api/infer.ts's ITERIS_SPACE_URL points
+#                            at — see that file's docstring for the URL form).
+# Until both are set, this workflow will fail at the upload step with a clear
+# authentication/not-found error rather than silently no-op.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/deploy-hf-space.yml'
+  workflow_dispatch: {}   # manual re-deploy button in the Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface_hub
+        run: pip install -U huggingface_hub
+
+      - name: Upload server/ to the HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ vars.HF_SPACE_ID }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          from huggingface_hub import HfApi
+
+          space_id = os.environ.get('HF_SPACE_ID')
+          token = os.environ.get('HF_TOKEN')
+          if not space_id or not token:
+              sys.exit(
+                  'HF_SPACE_ID (repo variable) and/or HF_TOKEN (secret) are not '
+                  'set on this GitHub repository — see this workflow file\'s '
+                  'header comment for what to add and where.'
+              )
+
+          api = HfApi(token=token)
+          commit = api.upload_folder(
+              folder_path='server',
+              repo_id=space_id,
+              repo_type='space',
+              commit_message=f'Deploy from GitHub {os.environ.get("GITHUB_SHA", "")[:7]}',
+          )
+          print('Uploaded to Space:', commit)
+          PY

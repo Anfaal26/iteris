@@ -1,0 +1,80 @@
+name: CI — Python (research package + inference server)
+
+# Sanity-checks the two Python codebases on every push/PR that touches them:
+#   1. iteris/    — the research/DRL package (trained on Kaggle, no test suite
+#      exists yet, so this is import + byte-compile sanity, not unit tests).
+#   2. server/    — the FastAPI inference backend deployed to the HF Space.
+# Neither codebase has a pytest suite today; this catches import-time errors,
+# syntax errors, and missing/renamed dependencies before they reach Kaggle or
+# the deployed Space. Add real pytest jobs here once tests exist — the steps
+# below are intentionally the minimum bar, not a ceiling.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'iteris/**'
+      - 'server/**'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/ci-python.yml'
+  pull_request:
+    paths:
+      - 'iteris/**'
+      - 'server/**'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/ci-python.yml'
+
+jobs:
+  research-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        # Kaggle pre-installs torch/numpy/scipy/pandas/matplotlib/tqdm (see
+        # requirements.txt's own comment on why they're unpinned there); CI has
+        # none of that, so install the CPU torch wheel + the full runtime set
+        # explicitly here.
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy pandas matplotlib tqdm scikit-image pyyaml monai nibabel SimpleITK
+          pip install -e .
+
+      - name: Byte-compile (syntax check)
+        run: python -m compileall -q iteris
+
+      - name: Import sanity
+        run: python -c "import iteris; print('iteris', iteris.__version__, 'imports OK')"
+
+  inference-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        # Mirrors server/Dockerfile: CPU torch wheel first, then requirements.txt.
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Byte-compile (syntax check)
+        run: python -m compileall -q app
+
+      - name: Import sanity
+        # Importing app.main constructs the FastAPI app (routes, CORS, schemas)
+        # without needing network access to HF Hub or an ANTHROPIC_API_KEY —
+        # those are only touched inside request handlers / at first-request time.
+        run: python -c "from app.main import app; print('server app imports OK,', len(app.routes), 'routes')"

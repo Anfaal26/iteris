@@ -12,7 +12,7 @@ import { fileURLToPath, URL } from 'node:url';
  * - The dev server proxies `/api` to the FastAPI backend whose URL is supplied via env,
  *   so no backend host is ever hardcoded in the bundle.
  */
-export default defineConfig(({ mode }) => {
+export default defineConfig(() => {
   const apiTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8000';
   return {
     plugins: [react(), ViteYaml()],

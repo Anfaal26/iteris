@@ -138,6 +138,9 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
  * Hook to imperatively add toasts from any component inside `ToastProvider`.
  * @throws if used outside `ToastProvider`.
  */
+// Hook intentionally colocated with ToastProvider; only affects dev Fast
+// Refresh, not runtime behaviour.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast(): Pick<ToastContextValue, 'addToast'> {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error('useToast must be used within ToastProvider');
