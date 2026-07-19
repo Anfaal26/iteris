@@ -23,6 +23,8 @@ export interface NavbarProps {
   onSearch?: () => void;
   onSettings?: () => void;
   className?: string;
+  /** Show the theme toggle. @default true */
+  showThemeToggle?: boolean;
 }
 
 const SCROLL_THRESHOLD = 80;
@@ -33,6 +35,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSearch,
   onSettings,
   className,
+  showThemeToggle = true,
 }) => {
   const [scrolled, setScrolled] = useState(false);
   const isDark = variant === 'dark';
@@ -55,8 +58,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       }
     : {
         height: '56px',
-        background: 'var(--color-surface)',
-        borderBottom: '1px solid var(--color-border)',
+        background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)',
       };
 
   const linkCls = isDark
@@ -108,7 +111,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right — icons + CTA */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          <ThemeToggle className={isDark ? 'text-landing-text/50 hover:text-landing-text' : ''} />
+          {showThemeToggle && (
+            <ThemeToggle className={isDark ? 'text-landing-text/50 hover:text-landing-text' : ''} />
+          )}
 
           {onSearch && (
             <button type="button" onClick={onSearch} aria-label="Open search" className={iconCls}>

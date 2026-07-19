@@ -248,6 +248,7 @@ export default function Landing() {
         navItems={NAV_ITEMS}
         onSearch={() => {}}
         onSettings={() => {}}
+        showThemeToggle={false}
       />
 
       <main data-theme="dark" className="bg-landing-bg text-landing-text font-body">
