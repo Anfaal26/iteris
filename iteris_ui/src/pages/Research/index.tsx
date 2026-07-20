@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Navbar } from '@/components';
 import { ROUTES } from '@/routes';
 import { AbstractSection } from './sections/AbstractSection';
+import { BackgroundSection } from './sections/BackgroundSection';
 import { DatasetsSection } from './sections/DatasetsSection';
 import { MethodsSection } from './sections/MethodsSection';
 import { ModelsSection } from './sections/ModelsSection';
@@ -29,6 +30,7 @@ interface TocEntry {
 
 const TOC: TocEntry[] = [
   { id: 'abstract', label: 'Abstract' },
+  { id: 'background', label: 'Background' },
   { id: 'datasets', label: 'Datasets' },
   { id: 'methods', label: 'Methods' },
   { id: 'models', label: 'Models' },
@@ -121,6 +123,7 @@ export default function Research() {
 
         <div className="min-w-0 flex-1 max-w-3xl divide-y divide-border">
           <AbstractSection />
+          <BackgroundSection />
           <DatasetsSection />
           <MethodsSection />
           <ModelsSection />

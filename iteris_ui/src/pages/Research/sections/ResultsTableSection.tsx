@@ -118,14 +118,26 @@ export const ResultsTableSection: React.FC<ResultsTableSectionProps> = ({ id = '
 
   return (
     <section id={id} aria-labelledby="results-heading" className="py-12 scroll-mt-16">
-      <h2 id="results-heading" className="font-heading text-xl font-bold text-text mb-2">
-        Results
-      </h2>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
+        <h2 id="results-heading" className="font-heading text-xl font-bold text-text">
+          Results
+        </h2>
+        <a
+          href="/reports/result_evaluation.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-accent/40 bg-accent/10 text-accent text-xs font-heading font-semibold hover:bg-accent/20 transition-colors duration-panel ease-out no-underline"
+        >
+          ↓ Download evaluation report (PDF)
+        </a>
+      </div>
       <p className="text-sm font-body text-muted mb-6">
         Full evaluation run, 2026-07-20. Two phases compare the DRL agents against a different
         U-Net backbone: Phase A against the deployed Attention U-Net (the stronger, low-headroom
         baseline), Phase B against the Lite U-Net (weaker, more headroom). Same agents, same
-        contour environment — only the initial contour differs.
+        contour environment — only the initial contour differs. The report above is a
+        plain-language version of everything on this page — what went well, what went wrong, why,
+        and what was/wasn't learned.
       </p>
 
       {/* Phase tabs */}

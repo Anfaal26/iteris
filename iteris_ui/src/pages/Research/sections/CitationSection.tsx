@@ -29,6 +29,11 @@ interface ExternalLink {
 
 const LINKS: ExternalLink[] = [
   {
+    label: 'Evaluation Report (PDF)',
+    href: '/reports/result_evaluation.pdf',
+    description: 'Plain-language summary of the 2026-07-20 evaluation — what went well, what went wrong, and why.',
+  },
+  {
     label: 'GitHub Repository',
     href: 'https://github.com/Anfaal26/iteris',
     description: 'Source code, training scripts, and model checkpoints.',
