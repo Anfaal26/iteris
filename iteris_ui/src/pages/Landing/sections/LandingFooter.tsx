@@ -18,7 +18,7 @@ export const LandingFooter: React.FC = () => (
         {/* Brand */}
         <div className="col-span-2 sm:col-span-1 flex flex-col gap-4">
           <a href="/" className="flex items-center gap-2 no-underline w-fit" aria-label="Iteris home">
-            <LogoMark size={22} className="text-grad-b" ariaLabel="" />
+            <LogoMark size={30} className="text-grad-b" ariaLabel="" />
             <span className="font-heading font-semibold text-sm tracking-wide text-landing-text">ITERIS</span>
           </a>
           <p className="text-[12px] leading-relaxed" style={{ color: 'rgba(240,249,255,0.3)', maxWidth: 160 }}>

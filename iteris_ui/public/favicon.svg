@@ -1,78 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
   <defs>
-    <!-- Sophisticated Tech Gradients -->
-    <linearGradient id="outerLoopGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00F2FE" stop-opacity="0.85"/>
-      <stop offset="100%" stop-color="#0072ff" stop-opacity="0.85"/>
-    </linearGradient>
+    <radialGradient id="badgeGrad" cx="35%" cy="28%" r="80%">
+      <stop offset="0%" stop-color="#c8f4ff"/>
+      <stop offset="30%" stop-color="#38bdf8"/>
+      <stop offset="65%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0a3d67"/>
+    </radialGradient>
 
-    <linearGradient id="innerLoopGrad" x1="100%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#38ef7d" stop-opacity="0.2"/>
-      <stop offset="50%" stop-color="#00f2fe" stop-opacity="0.6"/>
-      <stop offset="100%" stop-color="#4facfe" stop-opacity="0.7"/>
-    </linearGradient>
-
-    <linearGradient id="geminiCore" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="40%" stop-color="#d4f1f9"/>
-      <stop offset="100%" stop-color="#00c6ff"/>
-    </linearGradient>
-
-    <!-- Interlocking ribbon piece (ChatGPT / Claude reference) -->
-    <g id="geometric-petal">
-      <path d="M 400,400 C 460,240 590,230 590,360 C 590,470 470,440 400,400 Z" fill="url(#outerLoopGrad)" />
-      <path d="M 400,400 C 440,280 530,270 530,360 C 530,420 450,420 400,400 Z" fill="url(#innerLoopGrad)" />
-    </g>
-
-    <!-- Sharp geometric ray (Gemini sharpness reference) -->
-    <g id="sharp-ray">
-      <path d="M 400,400 L 415,260 L 400,160 L 385,260 Z" fill="#00F2FE" opacity="0.4"/>
-    </g>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
   </defs>
 
-  <!-- Layer 1: Claude-inspired symmetrical rotation matrix -->
-  <g transform="rotate(0 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(45 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(90 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(135 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(180 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(225 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(270 400 400)"><use href="#geometric-petal"/></g>
-  <g transform="rotate(315 400 400)"><use href="#geometric-petal"/></g>
+  <!-- Ambient bloom behind the badge -->
+  <circle cx="100" cy="100" r="90" fill="#38bdf8" opacity="0.45" filter="url(#glow)"/>
 
-  <!-- Layer 2: Intersections to build complexity -->
-  <g transform="rotate(22.5 400 400)" opacity="0.5">
-    <use href="#geometric-petal"/>
-  </g>
-  <g transform="rotate(112.5 400 400)" opacity="0.5">
-    <use href="#geometric-petal"/>
-  </g>
-  <g transform="rotate(202.5 400 400)" opacity="0.5">
-    <use href="#geometric-petal"/>
-  </g>
-  <g transform="rotate(292.5 400 400)" opacity="0.5">
-    <use href="#geometric-petal"/>
-  </g>
+  <!-- Badge -->
+  <circle cx="100" cy="100" r="82" fill="url(#badgeGrad)"/>
+  <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
 
-  <!-- Layer 3: Sharp Linear Accents -->
-  <g transform="rotate(0 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(45 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(90 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(135 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(180 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(225 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(270 400 400)"><use href="#sharp-ray"/></g>
-  <g transform="rotate(315 400 400)"><use href="#sharp-ray"/></g>
-
-  <!-- Layer 4: Central Gemini-style Core Sparkle -->
-  <path d="M 400,260
-           Q 400,400 260,400
-           Q 400,400 400,540
-           Q 400,400 540,400
-           Q 400,400 400,260 Z"
-        fill="url(#geminiCore)" />
-
-  <!-- Layer 5: Concentric Precision Geometric Rings -->
-  <circle cx="400" cy="400" r="40" fill="none" stroke="#ffffff" stroke-width="3" opacity="0.7"/>
-  <circle cx="400" cy="400" r="15" fill="#ffffff"/>
+  <!-- Equaliser bars -->
+  <rect x="53" y="68" width="22" height="64" rx="11" fill="#ffffff"/>
+  <rect x="89" y="48" width="22" height="104" rx="11" fill="#ffffff"/>
+  <rect x="125" y="60" width="22" height="80" rx="11" fill="#ffffff"/>
 </svg>

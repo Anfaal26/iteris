@@ -87,7 +87,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       >
         {/* Left — logo + wordmark */}
         <a href="/" className="flex items-center gap-2.5 no-underline flex-shrink-0" aria-label="Iteris home">
-          <LogoMark size={26} className={isDark ? 'text-grad-b' : 'text-accent'} ariaLabel="" />
+          <LogoMark size={36} className={isDark ? 'text-grad-b' : 'text-accent'} ariaLabel="" />
           <span className={[
             'font-heading font-semibold tracking-[0.06em] text-sm',
             isDark ? 'text-landing-text' : 'text-text',
