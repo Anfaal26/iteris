@@ -76,6 +76,20 @@ export const motion = {
   easeOut: 'cubic-bezier(0.16, 1, 0.3, 1)',
 } as const;
 
+/**
+ * Structure → raw hex mask colour. Same mapping as `structureColor`, but with
+ * literal values for contexts that cannot resolve a CSS variable — notably
+ * `CanvasRenderingContext2D.fillStyle`, which silently ignores `var(--x)`.
+ */
+export const structureColorHex: Record<string, string> = {
+  lv_endo: maskColorsHex.lvEndo,
+  lv_epi: maskColorsHex.lvEpi,
+  la: maskColorsHex.la,
+  glioma: maskColorsHex.glioma,
+  meningioma: maskColorsHex.meningioma,
+  pituitary: maskColorsHex.pituitary,
+};
+
 /** Structure → mask colour map keyed by the structure ids used in the API contract. */
 export const structureColor: Record<string, string> = {
   lv_endo: maskColors.lvEndo,

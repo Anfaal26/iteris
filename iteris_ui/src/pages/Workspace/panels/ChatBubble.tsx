@@ -15,6 +15,9 @@ export interface ChatBubbleProps {
   disabled: boolean;
   suggestions: string[];
   onSend: (text: string) => void;
+  /** Failure from the last turn, surfaced inline with a retry. */
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -23,6 +26,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   disabled,
   suggestions,
   onSend,
+  error,
+  onRetry,
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -56,6 +61,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               suggestions={suggestions}
               onSend={onSend}
               variant="popover"
+              error={error}
+              onRetry={onRetry}
             />
           </div>
         </div>

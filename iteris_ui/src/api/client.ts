@@ -164,20 +164,36 @@ export const api = {
 
   /**
    * Streamed answer to a workspace chat turn, grounded in the current result.
-   * Same event-stream transport as interpret().
+   *
+   * Goes to the same-origin `/api/chat` Vercel function (NOT appConfig.apiBaseUrl,
+   * which may point straight at the HF Space) — exactly like inferViaDrlRoute.
+   * That function is the only thing holding GROQ_API_KEY, so it never reaches the
+   * browser. Errors carry the upstream detail so the UI can distinguish a
+   * free-tier rate limit from an unconfigured key.
    */
   async *chat(body: ChatRequest): AsyncGenerator<string> {
     if (appConfig.useMocks) {
       yield* mock.chat(body);
       return;
     }
-    const res = await fetch(`${appConfig.apiBaseUrl}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (cause) {
+      throw new ApiError(`Network error calling /api/chat: ${(cause as Error).message}`);
+    }
     if (!res.ok || !res.body) {
-      throw new ApiError('Chat request failed', res.status);
+      const detail = await res.json().catch(() => null);
+      throw new ApiError(
+        detail?.error === 'rate_limited'
+          ? 'Rate limit reached on the free tier — wait a moment and retry.'
+          : (detail?.detail ?? `Chat request failed (${res.status})`),
+        res.status,
+      );
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();

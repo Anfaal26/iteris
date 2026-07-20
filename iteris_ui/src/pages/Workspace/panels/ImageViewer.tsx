@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { IterationPlaybackTimeline, ExportButtonGroup } from '@/components';
 import type { MaskLayer, ViewMode, IterationStep, CompareResult, WipeSource } from '@/api/contract';
 import { structureColor } from '@/tokens';
+import type { MaskEditor } from '../hooks/useMaskEditor';
 import { SingleMode } from '../modes/SingleMode';
 import { WipeMode, type WipeSide } from '../modes/WipeMode';
 import { SideBySideMode } from '../modes/SideBySideMode';
@@ -26,6 +27,14 @@ export interface ImageViewerProps {
   stepSequence?: IterationStep[];
   compareResults?: CompareResult[];
   hasResult: boolean;
+  /**
+   * Manual mask-editing state. Owns window/level and overlay opacity too — those
+   * controls moved to the right-hand toolkit panel, so the viewer only consumes
+   * them here rather than holding its own copies.
+   */
+  editor: MaskEditor;
+  /** Export the current metrics JSON (kept reachable from the viewer toolbar). */
+  onExportJson?: () => void;
 }
 
 const WIPE_SOURCE_LABEL: Record<WipeSource, string> = {
@@ -46,10 +55,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   stepSequence,
   compareResults,
   hasResult,
+  editor,
+  onExportJson,
 }) => {
-  const [windowLevel, setWindowLevel] = useState(200);
-  const [windowWidth, setWindowWidth] = useState(200);
-  const [overlayOpacity, setOverlayOpacity] = useState(0.75);
+  const { windowLevel, windowWidth, opacity: overlayOpacity } = editor;
   const [currentStep, setCurrentStep] = useState(0);
   const [visibleStructures, setVisibleStructures] = useState<Set<string>>(
     () => new Set(masks.map((m) => m.structure)),
@@ -102,6 +111,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             overlayOpacity={overlayOpacity}
             windowLevel={windowLevel}
             windowWidth={windowWidth}
+            editor={editor}
+            editing={hasResult}
           />
         )}
         {viewMode === 'wipe' && (
@@ -124,18 +135,14 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
         )}
       </div>
 
-      {/* Floating toolbar */}
+      {/* Floating toolbar — only once there is something to put in it */}
+      {hasResult && (
       <div
         className="absolute bottom-4 inset-x-4 bg-surface border border-border rounded-xl px-4 py-3 flex flex-wrap items-center gap-4 shadow-float"
         aria-label="Viewer toolbar"
       >
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-body text-muted whitespace-nowrap">W/L</label>
-          <input type="range" min="0" max="400" value={windowWidth} onChange={(e) => setWindowWidth(Number(e.target.value))} aria-label="Window width" className="w-20 accent-accent" />
-          <input type="range" min="0" max="400" value={windowLevel} onChange={(e) => setWindowLevel(Number(e.target.value))} aria-label="Window level" className="w-20 accent-accent" />
-        </div>
-
-        {hasResult && masks.length > 0 && (
+        {/* Window/level and overlay opacity live in the right-hand mask toolkit */}
+        {viewMode !== 'single' && hasResult && masks.length > 0 && (
           <div className="flex items-center gap-1.5" role="group" aria-label="Structure visibility">
             {masks.map((mask) => (
               <button
@@ -157,17 +164,11 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-body text-muted whitespace-nowrap">Opacity</label>
-          <input type="range" min="0" max="1" step="0.05" value={overlayOpacity} onChange={(e) => setOverlayOpacity(Number(e.target.value))} aria-label="Overlay opacity" className="w-20 accent-accent" />
+        <div className="ml-auto">
+          <ExportButtonGroup onExportJson={onExportJson} />
         </div>
-
-        {hasResult && (
-          <div className="ml-auto">
-            <ExportButtonGroup />
-          </div>
-        )}
       </div>
+      )}
 
       {playbackEnabled && stepSequence && stepSequence.length > 0 && (
         <div className="border-t border-border p-3">

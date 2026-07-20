@@ -1,10 +1,15 @@
 /**
  * Workspace — clinical workstation (redesign).
  *
- * Layout: a collapsible ControlPanel (left), a single continuous-scroll centre
- * column (viewer ≈ 60vh → detailed stats on a lighter surface → "Ask about this
- * result" chat below the fold), and a collapsible ResultsPanel summary (right).
- * A persistent chat bubble opens the same thread from any scroll position.
+ * Layout: a collapsible ControlPanel (left), a centre column, and a collapsible
+ * MaskEditorPanel (right). Both side panels are ABSOLUTELY positioned over
+ * permanently-reserved rails, so collapsing or expanding either one never
+ * resizes or reflows the centre — its width is a function of the viewport only.
+ *
+ * The centre column's scroll is state-driven: locked (`overflow-hidden`) until
+ * inference completes, then `overflow-y-auto`, revealing the detailed stats and
+ * the "Ask about this result" chat below the fold. A persistent chat bubble
+ * opens the same thread from any scroll position.
  *
  * Dataset/modality are auto-detected from the uploaded scan (no manual toggle);
  * the data regime default flips with the model family (DRL → low, U-Net → high).
@@ -29,12 +34,13 @@ import {
   isCombinationAvailable,
   AVAILABLE_COMBINATIONS,
 } from '@/api/contract';
-import { api } from '@/api/client';
+import { api, ApiError } from '@/api/client';
 import { detectDataset, type DetectionResult } from '@/lib/detectDataset';
 import { ROUTES } from '@/routes';
+import { useMaskEditor, NO_MASKS } from './hooks/useMaskEditor';
 import { ControlPanel } from './panels/ControlPanel';
 import { ImageViewer } from './panels/ImageViewer';
-import { ResultsPanel } from './panels/ResultsPanel';
+import { MaskEditorPanel } from './panels/MaskEditorPanel';
 import { StatsSection } from './panels/StatsSection';
 import { ChatThread } from './panels/ChatThread';
 import { ChatBubble } from './panels/ChatBubble';
@@ -85,8 +91,20 @@ export default function Workspace() {
   // Shared chat thread (inline section + floating bubble render the same state).
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  /** Last question asked, so a failed turn can be retried verbatim. */
+  const lastQuestionRef = useRef<string | null>(null);
 
   const statsRef = useRef<HTMLDivElement>(null);
+
+  // Manual mask-correction state, shared by the centre canvas and the right
+  // panel toolkit. NO_MASKS is a module constant so the hook's mask-loading
+  // effect doesn't re-fire on every render before a result exists.
+  const editor = useMaskEditor(
+    result?.masks ?? NO_MASKS,
+    result?.imageWidth ?? 256,
+    result?.imageHeight ?? 256,
+  );
 
   // Dataset used for availability gating: detected, else the DRL default target.
   const dataset: DatasetId = detection?.dataset ?? 'camus';
@@ -113,6 +131,7 @@ export default function Workspace() {
     setBaselineResult(null);
     setCompareResponse(null);
     setChatMessages([]);
+    setChatError(null);
   };
 
   const handleSampleSelect = (sample: SampleImage) => {
@@ -150,6 +169,7 @@ export default function Workspace() {
     if (!activeImage) return;
     setLoading(true);
     setChatMessages([]);
+    setChatError(null);
     try {
       const predictResult = await api.predict({
         imageB64: activeImage.b64,
@@ -210,10 +230,27 @@ export default function Workspace() {
     URL.revokeObjectURL(url);
   };
 
-  /** Send a chat turn and stream the grounded answer into the thread. */
-  const sendChat = async (text: string) => {
+  /**
+   * Save the manually-corrected mask. There is no backend endpoint for
+   * persisting an edited mask (the API exposes /predict, /compare, /infer,
+   * /interpret, /chat only), so this downloads the composited PNG locally
+   * rather than inventing a server contract. See MaskEditorPanel's TODO.
+   */
+  const handleSaveMask = () => {
+    if (!result) return;
+    editor.exportPng(`iteris-mask-${result.sessionId}.png`);
+  };
+
+  /**
+   * Send a chat turn and stream the grounded answer into the thread.
+   * `base` is the thread the turn is appended to — retry passes the thread with
+   * the failed user turn already removed, so a retry doesn't duplicate it.
+   */
+  const runChat = async (text: string, base: ChatMessage[]) => {
     if (!result || chatStreaming) return;
-    const thread: ChatMessage[] = [...chatMessages, { role: 'user', content: text }];
+    setChatError(null);
+    lastQuestionRef.current = text;
+    const thread: ChatMessage[] = [...base, { role: 'user', content: text }];
     setChatMessages([...thread, { role: 'assistant', content: '' }]);
     setChatStreaming(true);
     try {
@@ -232,14 +269,27 @@ export default function Workspace() {
         acc += chunk;
         setChatMessages([...thread, { role: 'assistant', content: acc }]);
       }
-    } catch {
-      setChatMessages([
-        ...thread,
-        { role: 'assistant', content: 'Sorry — I could not reach the analysis service.' },
-      ]);
+    } catch (cause) {
+      // Drop the empty assistant placeholder; the error renders inline instead.
+      setChatMessages(thread);
+      setChatError(
+        cause instanceof ApiError
+          ? cause.message
+          : 'Could not reach the analysis service. Check your connection and retry.',
+      );
     } finally {
       setChatStreaming(false);
     }
+  };
+
+  const sendChat = (text: string) => runChat(text, chatMessages);
+
+  /** Re-send the last question after a failure. */
+  const retryChat = () => {
+    const question = lastQuestionRef.current;
+    if (!question || chatStreaming) return;
+    const last = chatMessages[chatMessages.length - 1];
+    runChat(question, last?.role === 'user' ? chatMessages.slice(0, -1) : chatMessages);
   };
 
   return (
@@ -247,9 +297,17 @@ export default function Workspace() {
       <Navbar variant="light" navItems={NAV_ITEMS} />
 
       <div
-        className="flex flex-row flex-1 overflow-hidden"
+        className="relative flex flex-row flex-1 overflow-hidden"
         style={{ marginTop: 'var(--navbar-height)' }}
       >
+        {/* Left rail — reserved track. The panel itself overlays this (and the
+            centre when expanded), so the centre column's box never changes. */}
+        <div
+          aria-hidden="true"
+          className="flex-shrink-0"
+          style={{ width: 'var(--control-panel-collapsed)' }}
+        />
+
         <ControlPanel
           samples={samples}
           selectedModel={selectedModel}
@@ -273,10 +331,21 @@ export default function Workspace() {
           onRunInference={handleRunInference}
         />
 
-        {/* Centre — single continuous scroll: viewer → stats → chat */}
-        <main className="flex-1 min-w-0 overflow-y-auto bg-bg">
-          {/* Viewer: dominant, ~60% of the first screenful, next section peeks in */}
-          <div className="h-[60vh] min-h-[360px] flex flex-col">
+        {/* Centre — scroll unlocks only once inference has produced a result */}
+        <main
+          className={[
+            'flex-1 min-w-0 bg-bg',
+            result ? 'overflow-y-auto' : 'overflow-hidden',
+          ].join(' ')}
+        >
+          {/* Viewer: fills the locked first screen, then yields to ~60vh so the
+              stats section peeks in and invites the (now unlocked) scroll. */}
+          <div
+            className={[
+              'flex flex-col',
+              result ? 'h-[60vh] min-h-[360px]' : 'h-full',
+            ].join(' ')}
+          >
             <ImageViewer
               anatomyLabel={activeImage?.label ?? 'Upload a scan to begin'}
               imageB64={activeImage?.previewUrl}
@@ -289,6 +358,8 @@ export default function Workspace() {
               stepSequence={result?.stepSequence}
               compareResults={compareResponse?.results}
               hasResult={!!result}
+              editor={editor}
+              onExportJson={handleExportJson}
             />
           </div>
 
@@ -314,16 +385,36 @@ export default function Workspace() {
                 suggestions={CHAT_SUGGESTIONS}
                 onSend={sendChat}
                 variant="inline"
+                error={chatError}
+                onRetry={retryChat}
               />
             </section>
           </div>
         </main>
 
-        <ResultsPanel
-          result={result}
+        {/* Right rail — reserved track, mirroring the left */}
+        <div
+          aria-hidden="true"
+          className="flex-shrink-0"
+          style={{ width: 'var(--control-panel-collapsed)' }}
+        />
+
+        <MaskEditorPanel
+          editor={editor}
           collapsed={resultsCollapsed}
           onToggleCollapse={() => setResultsCollapsed((v) => !v)}
-          onExportJson={handleExportJson}
+          hasResult={!!result}
+          editingAvailable={viewMode === 'single'}
+          summary={
+            result
+              ? {
+                  modelId: result.modelId,
+                  sessionId: result.sessionId,
+                  dimensions: `${result.imageWidth}×${result.imageHeight}`,
+                }
+              : undefined
+          }
+          onSaveMask={handleSaveMask}
         />
       </div>
 
@@ -334,6 +425,8 @@ export default function Workspace() {
         disabled={!result}
         suggestions={CHAT_SUGGESTIONS}
         onSend={sendChat}
+        error={chatError}
+        onRetry={retryChat}
       />
     </div>
   );

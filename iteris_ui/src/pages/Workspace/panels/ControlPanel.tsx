@@ -4,11 +4,15 @@
  * Restructured, not re-skinned: same dark tokens, mono micro-labels, pill
  * controls and rounded-xl cards as the rest of the app. Sections top→bottom:
  *   • Image      — side-by-side Scan / GT-mask dropzones + read-only detection chip
- *   • Model      — Attention Res U-Net · Lite U-Net · DRL (expanded: DuelingDDQN / TD3)
+ *   • (untitled) — Attention Res U-Net · DRL (always expanded: DuelingDDQN / TD3)
  *   • Data regime — Low / High segmented control, default flips with the model
  *   • View mode  — Single / Wipe (+ source chips) / Side-by-Side
  *   • ▷ run       — circular play button pinned to the bottom
  * The whole rail collapses to an icon strip via the chevron at its top edge.
+ *
+ * The panel is absolutely positioned over the workspace's left rail: collapsed it
+ * exactly fills the permanently-reserved --control-panel-collapsed track, expanded
+ * it overlays the centre column. Either way the centre never resizes or reflows.
  */
 
 import React, { useState, useCallback, useRef } from 'react';
@@ -61,9 +65,13 @@ type PickerNode =
       children: { id: ModelId; name: string; sub: string }[];
     };
 
+/**
+ * Lite U-Net is deliberately absent: it exists in the research code as an
+ * architecture-headroom reference but is not a deployed checkpoint, so it is
+ * not offered here. DRL is a permanently-expanded group, never collapsible.
+ */
 const PICKER: PickerNode[] = [
   { kind: 'model', id: 'unet-baseline', name: 'Attention Res U-Net' },
-  { kind: 'model', id: 'lite-unet', name: 'Lite U-Net' },
   {
     kind: 'group',
     label: 'DRL',
@@ -213,7 +221,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     return (
       <aside
         aria-label="Control panel (collapsed)"
-        className="flex flex-col items-center justify-between h-full bg-surface border-r border-border py-4 w-12 flex-shrink-0"
+        className="absolute inset-y-0 left-0 z-20 flex flex-col items-center justify-between bg-surface border-r border-border py-4"
+        style={{ width: 'var(--control-panel-collapsed)' }}
       >
         <button
           type="button"
@@ -233,7 +242,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   return (
     <aside
       aria-label="Control panel"
-      className="flex flex-col h-full overflow-hidden bg-surface border-r border-border flex-shrink-0"
+      className="absolute inset-y-0 left-0 z-20 flex flex-col overflow-hidden bg-surface border-r border-border shadow-float"
       style={{ width: 'var(--control-panel-width)', minWidth: 'var(--control-panel-width)' }}
     >
       {/* Scrollable body */}
@@ -309,9 +318,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           )}
         </section>
 
-        {/* Model picker */}
+        {/* Model picker — no section title; the options speak for themselves */}
         <section aria-label="Model selection">
-          <SectionLabel>Model</SectionLabel>
           <div className="flex flex-col gap-1.5">
             {PICKER.map((node) => {
               if (node.kind === 'model') {
@@ -349,11 +357,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                     groupActive ? 'border-accent' : 'border-border',
                   ].join(' ')}
                 >
-                  <div className="flex items-center justify-between px-0.5 pb-1.5">
+                  {/* No collapse affordance — the children are always visible */}
+                  <div className="px-0.5 pb-1.5">
                     <span className="text-sm font-body font-medium text-text">{node.label}</span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent" aria-hidden="true">
-                      <path d="M6 15l6-6 6 6" />
-                    </svg>
                   </div>
                   <div className="flex flex-col gap-1">
                     {node.children.map((c) => {

@@ -20,6 +20,10 @@ export interface ChatThreadProps {
   onSend: (text: string) => void;
   /** 'inline' fills its container; 'popover' is the compact bubble variant. */
   variant?: 'inline' | 'popover';
+  /** Message from the last failed turn (free-tier rate limits, outages, …). */
+  error?: string | null;
+  /** Re-sends the failed question. */
+  onRetry?: () => void;
 }
 
 export const ChatThread: React.FC<ChatThreadProps> = ({
@@ -29,6 +33,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   suggestions,
   onSend,
   variant = 'inline',
+  error,
+  onRetry,
 }) => {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -84,6 +90,26 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
           </div>
         ))}
       </div>
+
+      {/* Inline failure + retry — the chat backend is a free tier, so a 429 or a
+          cold outage is an expected outcome, not an exceptional one. */}
+      {error && (
+        <div
+          role="alert"
+          className="mt-3 flex items-start gap-2 rounded-lg border border-error/40 bg-error/10 px-3 py-2"
+        >
+          <span className="flex-1 text-[11px] font-body text-text">{error}</span>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="text-[11px] font-body font-semibold text-accent hover:underline flex-shrink-0"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Suggested-question chips (shown until the thread gets going) */}
       {!disabled && messages.length < 2 && (
