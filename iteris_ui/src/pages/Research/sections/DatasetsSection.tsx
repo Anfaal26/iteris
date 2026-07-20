@@ -173,6 +173,18 @@ export const DatasetsSection: React.FC<DatasetsSectionProps> = ({ id = 'datasets
           </ul>
         </div>
       </div>
+
+      <figure className="mt-8 bg-surface border border-border rounded-lg p-3">
+        <img
+          src="/research/figures/unet_per_patient_violin.png"
+          alt="U-Net per-patient Dice distribution violin plot, both backbones, all classes"
+          className="w-full rounded"
+        />
+        <figcaption className="text-xs font-body text-muted mt-2">
+          Per-patient Dice distribution, both backbones — the long lower tails on both are
+          why mean Dice alone understates how variable baseline quality is per case.
+        </figcaption>
+      </figure>
     </section>
   );
 };

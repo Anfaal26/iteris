@@ -45,7 +45,7 @@ export const AbstractSection: React.FC<AbstractSectionProps> = ({ id = 'abstract
         </p>
         <p className="font-body text-sm text-muted mb-6">
           <span className="px-2 py-0.5 rounded-full border border-border text-xs mr-2">
-            In progress
+            Evaluated 2026-07-20
           </span>
           Academic year 2025/2026
         </p>
@@ -76,14 +76,24 @@ export const AbstractSection: React.FC<AbstractSectionProps> = ({ id = 'abstract
             reward formulations collapse to a do-nothing policy at the baseline.
           </p>
           <p>
-            Evaluation is not yet complete — the discrete and continuous agents are
-            currently in training against the Lite U-Net baseline, with the Attention U-Net
-            serving as the upper-bound competitor. Result, convergence, and ablation figures
-            on this page will populate as evaluation runs finish; see the{' '}
+            Across 16 evaluation runs (2 agents × 2 backbones × 4 classes), the pattern is
+            consistent: against the strong Attention U-Net (Phase A), neither agent
+            reliably exceeds it — mean CAMUS Dice 0.896 (DuelingDDQN) / 0.885 (TD3) vs. 0.900
+            baseline; BRISC 0.867 / 0.874 vs. 0.870. Against the weaker Lite U-Net (Phase B),
+            DuelingDDQN edges past on CAMUS (0.860 vs. 0.847, +1.3&nbsp;pp) but not on BRISC
+            (0.753 vs. 0.819, −6.6&nbsp;pp). Discrete and continuous action spaces perform
+            near-identically head-to-head, and deployed Dice correlates 0.98–1.00 with the
+            backbone's own Dice across every run — evidence the agents are not yet adding an
+            independent, structure-aware signal beyond what the backbone already provides.
+            See{' '}
             <a href="#results" className="text-accent hover:underline">
               Results
             </a>{' '}
-            section for current status.
+            for the full breakdown and{' '}
+            <a href="#ablations" className="text-accent hover:underline">
+              Ablations
+            </a>{' '}
+            for the diagnosis.
           </p>
         </div>
       </div>
