@@ -13,6 +13,8 @@ export interface SideBySideModeProps {
   results: CompareResult[];
   visibleStructures: Set<string>;
   overlayOpacity: number;
+  /** Overlay compositing mode; CAMUS speckle needs `normal`, MRI reads well on `screen`. */
+  overlayBlend?: 'normal' | 'screen';
 }
 
 /** Three-column side-by-side comparison view. */
@@ -22,6 +24,7 @@ export const SideBySideMode: React.FC<SideBySideModeProps> = ({
   results,
   visibleStructures,
   overlayOpacity,
+  overlayBlend = 'screen',
 }) => {
   const bestIdx = results.reduce(
     (best, r, i) => (r.metrics.dice > results[best].metrics.dice ? i : best),
@@ -95,7 +98,7 @@ export const SideBySideMode: React.FC<SideBySideModeProps> = ({
                   src={mask.imageB64}
                   alt={`${mask.label} mask for ${r.modelId}`}
                   className="absolute inset-0 w-full h-full rounded-lg"
-                  style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
+                  style={{ opacity: overlayOpacity, mixBlendMode: overlayBlend }}
                 />
               ) : null,
             )}

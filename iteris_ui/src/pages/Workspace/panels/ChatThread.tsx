@@ -3,8 +3,8 @@
  *
  * A real threaded exchange (not a one-shot generated paragraph): suggested
  * question chips above a text input, messages rendered as bubbles, the
- * assistant's latest turn streaming in live. Rendered both inline at the bottom
- * of the page and inside the floating chat bubble, sharing one lifted thread.
+ * assistant's latest turn streaming in live. Rendered inline at the bottom of the
+ * workspace's scrollable section; the thread state itself is lifted into Workspace.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -18,8 +18,6 @@ export interface ChatThreadProps {
   disabled: boolean;
   suggestions: string[];
   onSend: (text: string) => void;
-  /** 'inline' fills its container; 'popover' is the compact bubble variant. */
-  variant?: 'inline' | 'popover';
   /** Message from the last failed turn (free-tier rate limits, outages, …). */
   error?: string | null;
   /** Re-sends the failed question. */
@@ -32,7 +30,6 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   disabled,
   suggestions,
   onSend,
-  variant = 'inline',
   error,
   onRetry,
 }) => {
@@ -53,14 +50,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   const empty = messages.length === 0;
 
   return (
-    <div className={['flex flex-col', variant === 'popover' ? 'h-full' : ''].join(' ')}>
+    <div className="flex flex-col">
       {/* Message list */}
       <div
         ref={scrollRef}
-        className={[
-          'flex flex-col gap-3 overflow-y-auto',
-          variant === 'popover' ? 'flex-1 pr-1' : 'max-h-[420px]',
-        ].join(' ')}
+        className="flex flex-col gap-3 overflow-y-auto max-h-[420px]"
       >
         {empty && (
           <p className="text-sm font-body text-muted">
@@ -127,32 +121,53 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         </div>
       )}
 
-      {/* Composer */}
-      <form
-        className="flex items-center gap-2 mt-3"
-        onSubmit={(e) => { e.preventDefault(); submit(draft); }}
-      >
-        <input
-          type="text"
-          value={draft}
-          disabled={disabled}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={disabled ? 'Run inference to ask…' : 'Ask a question…'}
-          aria-label="Ask about this result"
-          className="flex-1 rounded-lg bg-surface-2 border border-border px-3 py-2 text-sm font-body text-text placeholder:text-muted/60 focus:outline-none focus:border-accent/50 disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={disabled || streaming || !draft.trim()}
-          aria-label="Send message"
-          className="w-9 h-9 rounded-lg bg-accent text-white flex items-center justify-center flex-shrink-0 disabled:bg-accent/40 disabled:cursor-not-allowed transition-colors duration-panel ease-out"
+      {/* Composer — sits in its own stacking context so the teal bloom can be
+          painted behind it without escaping into the surrounding layout. */}
+      <div className="relative isolate mt-3">
+        {/* Ambient glow cast by the composer. Purely decorative and
+            pointer-transparent; two offset radials read as light spilling out
+            rather than a uniform halo. Suppressed while the input is disabled —
+            nothing is glowing before there's a result to ask about. */}
+        {!disabled && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -inset-x-10 -inset-y-8 -z-10"
+            style={{
+              background: [
+                'radial-gradient(60% 120% at 22% 50%, rgb(var(--color-chat-glow-rgb) / 0.20), transparent 70%)',
+                'radial-gradient(55% 120% at 78% 50%, rgb(var(--color-chat-glow-rgb) / 0.14), transparent 70%)',
+                'radial-gradient(90% 140% at 50% 50%, rgb(var(--color-chat-glow-rgb) / 0.10), transparent 75%)',
+              ].join(', '),
+              filter: 'blur(26px)',
+            }}
+          />
+        )}
+        <form
+          className="relative flex items-center gap-2"
+          onSubmit={(e) => { e.preventDefault(); submit(draft); }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <line x1="22" y1="2" x2="11" y2="13" />
-            <polygon points="22 2 15 22 11 13 2 9 22 2" fill="currentColor" stroke="none" />
-          </svg>
-        </button>
-      </form>
+          <input
+            type="text"
+            value={draft}
+            disabled={disabled}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={disabled ? 'Run inference to ask…' : 'Ask a question…'}
+            aria-label="Ask about this result"
+            className="flex-1 rounded-full bg-surface-2 border border-border px-4 py-2.5 text-sm font-body text-text placeholder:text-muted/60 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={disabled || streaming || !draft.trim()}
+            aria-label="Send message"
+            className="w-10 h-10 rounded-full bg-accent text-white flex items-center justify-center flex-shrink-0 disabled:bg-accent/40 disabled:cursor-not-allowed transition-colors duration-panel ease-out"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+        </form>
+      </div>
     </div>
   );
 };

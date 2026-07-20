@@ -23,6 +23,8 @@ export interface SingleModeProps {
   masks: MaskLayer[];
   visibleStructures: Set<string>;
   overlayOpacity: number;
+  /** Overlay compositing mode; CAMUS speckle needs `normal`, MRI reads well on `screen`. */
+  overlayBlend?: 'normal' | 'screen';
   windowLevel: number;
   windowWidth: number;
   /** Manual mask-editing state; when `editing` is true the canvas path is used. */
@@ -49,6 +51,7 @@ export const SingleMode: React.FC<SingleModeProps> = ({
   masks,
   visibleStructures,
   overlayOpacity,
+  overlayBlend = 'screen',
   windowLevel,
   windowWidth,
   editor,
@@ -228,7 +231,7 @@ export const SingleMode: React.FC<SingleModeProps> = ({
               className="absolute inset-0 w-full h-full rounded-lg touch-none"
               style={{
                 opacity: editor?.maskVisible ? editor.opacity : 0,
-                mixBlendMode: 'screen',
+                mixBlendMode: editor?.blendMode ?? 'screen',
                 cursor: TOOL_CURSOR[editor?.tool ?? 'brush'] ?? 'crosshair',
               }}
               onPointerDown={handlePointerDown}
@@ -275,7 +278,7 @@ export const SingleMode: React.FC<SingleModeProps> = ({
                 src={mask.imageB64}
                 alt={`${mask.label} segmentation mask`}
                 className="absolute inset-0 w-full h-full rounded-lg"
-                style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
+                style={{ opacity: overlayOpacity, mixBlendMode: overlayBlend }}
               />
             ) : null,
           )

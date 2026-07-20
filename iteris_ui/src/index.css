@@ -73,6 +73,12 @@
   /* DICOM crosshair scan-grid texture */
   --scan-grid:         rgba(56, 189, 248, 0.028);
 
+  /* ---- Workspace chat glow ----
+   * A faint teal bloom cast by the chat composer. Its own token (not the accent,
+   * not a --mask-* colour) so the effect can be retuned without touching either.
+   */
+  --color-chat-glow-rgb: 45 212 191;
+
   /* ---- Mask colours — RESERVED. Never reused in UI chrome. ---- */
   --mask-lv-endo: #00c9a7;
   --mask-lv-epi: #f59e0b;

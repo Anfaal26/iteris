@@ -1,6 +1,13 @@
 /**
- * LogoMark — glowing blue badge with a 3-bar equaliser glyph, as inline SVG.
- * Uses its own gradient fills, so it renders identically regardless of theme.
+ * LogoMark — the Iteris glyph: three rounded bars of staggered height in a
+ * vertical scanner-blue gradient, on a transparent ground.
+ *
+ * Deliberately badge-less. The earlier mark set white bars inside a glowing
+ * circular badge, which read as hollow at navbar and favicon sizes — the bars
+ * themselves are the mark, so they carry the gradient directly.
+ *
+ * Keep this in sync with public/favicon.svg: same geometry, standalone file
+ * (a browser tab can't render a React component).
  */
 
 import React, { useId } from 'react';
@@ -15,11 +22,17 @@ export interface LogoMarkProps {
   className?: string;
 }
 
+/** Bar geometry in the 200×200 viewBox: [x, y, height]. Width/radius shared. */
+const BARS: [number, number, number][] = [
+  [50, 50, 118],
+  [88, 49, 91],
+  [126, 24, 130],
+];
+const BAR_W = 24;
+
 /**
- * Inline SVG logomark: a glowing scanner-blue circular badge with three
- * white rounded bars (an equaliser/pulse glyph). Gradient and filter ids are
- * namespaced per-instance via useId so multiple copies (navbar + footer)
- * don't collide.
+ * Inline SVG logomark. The gradient id is namespaced per-instance via useId so
+ * multiple copies (navbar + footer) don't collide in the same document.
  */
 export const LogoMark: React.FC<LogoMarkProps> = ({
   size = 32,
@@ -27,8 +40,7 @@ export const LogoMark: React.FC<LogoMarkProps> = ({
   className,
 }) => {
   const uid = useId().replace(/:/g, '');
-  const badgeGrad = `badgeGrad-${uid}`;
-  const glowFilter = `glow-${uid}`;
+  const barGrad = `barGrad-${uid}`;
 
   return (
     <svg
@@ -41,29 +53,23 @@ export const LogoMark: React.FC<LogoMarkProps> = ({
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
-        <radialGradient id={badgeGrad} cx="35%" cy="28%" r="80%">
-          <stop offset="0%" stopColor="#c8f4ff" />
-          <stop offset="30%" stopColor="#38bdf8" />
-          <stop offset="65%" stopColor="#0ea5e9" />
-          <stop offset="100%" stopColor="#0a3d67" />
-        </radialGradient>
-
-        <filter id={glowFilter} x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="9" />
-        </filter>
+        <linearGradient id={barGrad} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#00b5f2" />
+          <stop offset="100%" stopColor="#0a7cf0" />
+        </linearGradient>
       </defs>
 
-      {/* Ambient bloom behind the badge */}
-      <circle cx="100" cy="100" r="90" fill="#38bdf8" opacity="0.45" filter={`url(#${glowFilter})`} />
-
-      {/* Badge */}
-      <circle cx="100" cy="100" r="82" fill={`url(#${badgeGrad})`} />
-      <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="2" />
-
-      {/* Equaliser bars */}
-      <rect x="53" y="68" width="22" height="64" rx="11" fill="#ffffff" />
-      <rect x="89" y="48" width="22" height="104" rx="11" fill="#ffffff" />
-      <rect x="125" y="60" width="22" height="80" rx="11" fill="#ffffff" />
+      {BARS.map(([x, y, h]) => (
+        <rect
+          key={x}
+          x={x}
+          y={y}
+          width={BAR_W}
+          height={h}
+          rx={BAR_W / 2}
+          fill={`url(#${barGrad})`}
+        />
+      ))}
     </svg>
   );
 };

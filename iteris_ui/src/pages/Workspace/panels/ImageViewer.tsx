@@ -58,7 +58,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   editor,
   onExportJson,
 }) => {
-  const { windowLevel, windowWidth, opacity: overlayOpacity } = editor;
+  const { windowLevel, windowWidth, opacity: overlayOpacity, blendMode } = editor;
   const [currentStep, setCurrentStep] = useState(0);
   const [visibleStructures, setVisibleStructures] = useState<Set<string>>(
     () => new Set(masks.map((m) => m.structure)),
@@ -109,6 +109,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             masks={displayMasks}
             visibleStructures={visibleStructures}
             overlayOpacity={overlayOpacity}
+            overlayBlend={blendMode}
             windowLevel={windowLevel}
             windowWidth={windowWidth}
             editor={editor}
@@ -122,6 +123,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             left={resolveSide(wipeSources[0])}
             right={resolveSide(wipeSources[1])}
             overlayOpacity={overlayOpacity}
+            overlayBlend={blendMode}
           />
         )}
         {viewMode === 'side-by-side' && (
@@ -131,6 +133,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             results={compareResults ?? []}
             visibleStructures={visibleStructures}
             overlayOpacity={overlayOpacity}
+            overlayBlend={blendMode}
           />
         )}
       </div>

@@ -1,26 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
+  <!-- Keep in sync with src/components/LogoMark/LogoMark.tsx -->
   <defs>
-    <radialGradient id="badgeGrad" cx="35%" cy="28%" r="80%">
-      <stop offset="0%" stop-color="#c8f4ff"/>
-      <stop offset="30%" stop-color="#38bdf8"/>
-      <stop offset="65%" stop-color="#0ea5e9"/>
-      <stop offset="100%" stop-color="#0a3d67"/>
-    </radialGradient>
-
-    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="9"/>
-    </filter>
+    <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#00b5f2"/>
+      <stop offset="100%" stop-color="#0a7cf0"/>
+    </linearGradient>
   </defs>
 
-  <!-- Ambient bloom behind the badge -->
-  <circle cx="100" cy="100" r="90" fill="#38bdf8" opacity="0.45" filter="url(#glow)"/>
-
-  <!-- Badge -->
-  <circle cx="100" cy="100" r="82" fill="url(#badgeGrad)"/>
-  <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
-
-  <!-- Equaliser bars -->
-  <rect x="53" y="68" width="22" height="64" rx="11" fill="#ffffff"/>
-  <rect x="89" y="48" width="22" height="104" rx="11" fill="#ffffff"/>
-  <rect x="125" y="60" width="22" height="80" rx="11" fill="#ffffff"/>
+  <rect x="50" y="50" width="24" height="118" rx="12" fill="url(#barGrad)"/>
+  <rect x="88" y="49" width="24" height="91" rx="12" fill="url(#barGrad)"/>
+  <rect x="126" y="24" width="24" height="130" rx="12" fill="url(#barGrad)"/>
 </svg>

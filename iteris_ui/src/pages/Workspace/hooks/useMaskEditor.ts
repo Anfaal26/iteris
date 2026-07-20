@@ -4,11 +4,14 @@
  *
  * Design notes
  * ------------
- * • The authoritative bitmap is an OFFSCREEN canvas held in a ref, not the
- *   canvas the user sees. The visible canvas is unmounted whenever the viewer
- *   switches modes (single / wipe / side-by-side), and edits must survive that;
- *   keeping the document offscreen decouples the pixels from the DOM. The
- *   visible canvas simply blits from it whenever `version` bumps.
+ * • The authoritative bitmap is an OFFSCREEN canvas, not the canvas the user
+ *   sees. The visible canvas is unmounted whenever the viewer switches modes
+ *   (single / wipe / side-by-side), and edits must survive that; keeping the
+ *   document offscreen decouples the pixels from the DOM. The visible canvas
+ *   simply blits from it whenever `version` bumps.
+ * • One such document per `sessionKey` (a batch case id), cached in a Map, so
+ *   switching result tabs preserves each case's edits and undo stack instead of
+ *   silently discarding them.
  * • The mask predicted by the backend arrives as one PNG/SVG data-URI per
  *   structure. They are composited onto that single document canvas on load, so
  *   the editor is a painting surface rather than a per-class stack — painting
@@ -23,7 +26,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { MaskLayer } from '@/api/contract';
+import type { DatasetId, MaskLayer } from '@/api/contract';
 import { structureColorHex } from '@/tokens';
 
 /** Active editing tool. */
@@ -45,7 +48,7 @@ export interface Point {
   y: number;
 }
 
-/** How many undo steps are retained. */
+/** How many undo steps are retained per case. */
 const HISTORY_DEPTH = 30;
 
 /** Flood-fill colour-match tolerance, per channel (0-255). */
@@ -54,13 +57,39 @@ const FILL_TOLERANCE = 32;
 /** Stable empty default so a caller passing `result?.masks ?? EMPTY` is referentially stable. */
 export const NO_MASKS: MaskLayer[] = [];
 
+/**
+ * Per-dataset overlay defaults.
+ *
+ * CAMUS is B-mode ultrasound: dense bright speckle across the whole frame. A
+ * `screen`-blended overlay lightens toward white wherever the base is already
+ * bright, so on speckle the mask washes out into the noise and its boundary
+ * stops reading. CAMUS therefore composites normally at high opacity. BRISC
+ * (T1 MRI) has large dark regions where `screen` reads cleanly, and its tumour
+ * masks are already legible, so it keeps the original treatment.
+ */
+const DATASET_OVERLAY: Record<DatasetId, { opacity: number; blend: 'normal' | 'screen' }> = {
+  camus: { opacity: 0.95, blend: 'normal' },
+  brisc: { opacity: 0.75, blend: 'screen' },
+};
+
+/** One case's editing document, cached so tab switches don't lose work. */
+interface EditorSession {
+  canvas: HTMLCanvasElement;
+  /** The AI prediction, for "reset to AI prediction". */
+  baseline: ImageData | null;
+  history: ImageData[];
+  index: number;
+  /** False until the predicted masks have been composited in. */
+  loaded: boolean;
+}
+
 /** Everything the toolkit panel and the canvas need. */
 export interface MaskEditor {
   /** True once a mask has been loaded and the canvas can be edited. */
   ready: boolean;
   /** Bumps on every pixel change — consumers redraw when it changes. */
   version: number;
-  /** The offscreen document canvas (null before the first mask loads). */
+  /** The offscreen document canvas for the active session (null before load). */
   document: HTMLCanvasElement | null;
 
   tool: EditorTool;
@@ -81,6 +110,8 @@ export interface MaskEditor {
 
   opacity: number;
   setOpacity: (n: number) => void;
+  /** CSS mix-blend-mode for the overlay, chosen per dataset (see DATASET_OVERLAY). */
+  blendMode: 'normal' | 'screen';
   maskVisible: boolean;
   setMaskVisible: (v: boolean) => void;
 
@@ -117,6 +148,8 @@ export interface MaskEditor {
 
   /** Download the edited mask as a PNG. */
   exportPng: (filename: string) => void;
+  /** The edited mask as a PNG data-URI, for a given session (defaults to active). */
+  toDataUrl: (sessionKey?: string) => string | null;
 }
 
 /** Loads a data-URI / URL into an HTMLImageElement. */
@@ -142,17 +175,23 @@ function hexToRgb(hex: string): [number, number, number] {
 }
 
 /**
- * Manual mask-editing state machine over an offscreen canvas.
+ * Manual mask-editing state machine over a per-case offscreen canvas.
  *
- * @param masks  Predicted mask layers (pass a referentially stable array).
- * @param width  Mask bitmap width in px.
- * @param height Mask bitmap height in px.
+ * @param masks      Predicted mask layers (pass a referentially stable array).
+ * @param width      Mask bitmap width in px.
+ * @param height     Mask bitmap height in px.
+ * @param dataset    Drives the overlay opacity/blend defaults (see DATASET_OVERLAY).
+ * @param sessionKey Identifies the case being edited; each key keeps its own
+ *                   bitmap and undo stack, so switching batch tabs is lossless.
  */
-export function useMaskEditor(masks: MaskLayer[], width: number, height: number): MaskEditor {
-  const docRef = useRef<HTMLCanvasElement | null>(null);
-  const baselineRef = useRef<ImageData | null>(null);
-  const historyRef = useRef<ImageData[]>([]);
-  const indexRef = useRef(-1);
+export function useMaskEditor(
+  masks: MaskLayer[],
+  width: number,
+  height: number,
+  dataset: DatasetId,
+  sessionKey: string,
+): MaskEditor {
+  const sessionsRef = useRef<Map<string, EditorSession>>(new Map());
 
   const [version, bump] = useReducer((n: number) => n + 1, 0);
   const [ready, setReady] = useState(false);
@@ -163,12 +202,18 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
   const [brushSize, setBrushSize] = useState(12);
   const [eraserSize, setEraserSize] = useState(18);
   const [lassoMode, setLassoMode] = useState<LassoMode>('add');
-  const [opacity, setOpacity] = useState(0.75);
+  const [opacity, setOpacity] = useState(DATASET_OVERLAY[dataset].opacity);
   const [maskVisible, setMaskVisible] = useState(true);
   const [windowLevel, setWindowLevel] = useState(200);
   const [windowWidth, setWindowWidth] = useState(200);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+
+  // Snap the overlay back to the new dataset's default when it changes — a
+  // value dialled in for MRI is wrong for ultrasound speckle and vice versa.
+  useEffect(() => {
+    setOpacity(DATASET_OVERLAY[dataset].opacity);
+  }, [dataset]);
 
   const palette = useMemo<PaletteEntry[]>(
     () =>
@@ -189,44 +234,70 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
     );
   }, [palette]);
 
-  /** The offscreen document canvas, created/resized on demand. */
-  const getDoc = useCallback((): HTMLCanvasElement => {
-    let canvas = docRef.current;
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      docRef.current = canvas;
-    }
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-    }
-    return canvas;
-  }, [width, height]);
+  /** The cached editing session for a key, created/resized on demand. */
+  const getSession = useCallback(
+    (key: string): EditorSession => {
+      let session = sessionsRef.current.get(key);
+      if (!session) {
+        session = {
+          canvas: document.createElement('canvas'),
+          baseline: null,
+          history: [],
+          index: -1,
+          loaded: false,
+        };
+        sessionsRef.current.set(key, session);
+      }
+      if (session.canvas.width !== width || session.canvas.height !== height) {
+        session.canvas.width = width;
+        session.canvas.height = height;
+      }
+      return session;
+    },
+    [width, height],
+  );
 
-  const getCtx = useCallback((): CanvasRenderingContext2D | null => getDoc().getContext('2d'), [getDoc]);
+  const active = useCallback(() => getSession(sessionKey), [getSession, sessionKey]);
 
-  /** Snapshot the current bitmap as one undo step. */
+  const getCtx = useCallback(
+    (): CanvasRenderingContext2D | null => active().canvas.getContext('2d'),
+    [active],
+  );
+
+  /** Snapshot the active session's bitmap as one undo step. */
   const pushHistory = useCallback(() => {
-    const ctx = getCtx();
+    const session = active();
+    const ctx = session.canvas.getContext('2d');
     if (!ctx) return;
-    const snap = ctx.getImageData(0, 0, width, height);
-    const next = historyRef.current.slice(0, indexRef.current + 1);
+    const snap = ctx.getImageData(0, 0, session.canvas.width, session.canvas.height);
+    const next = session.history.slice(0, session.index + 1);
     next.push(snap);
     while (next.length > HISTORY_DEPTH) next.shift();
-    historyRef.current = next;
-    indexRef.current = next.length - 1;
+    session.history = next;
+    session.index = next.length - 1;
     setHistory({ canUndo: next.length > 1, canRedo: false });
-  }, [getCtx, width, height]);
+  }, [active]);
 
-  // Load the predicted masks onto the document canvas whenever they change.
+  // Load the predicted masks into this session, or re-attach to a session that
+  // already has them (switching back to a tab must not discard its edits).
   useEffect(() => {
     let cancelled = false;
-    const ctx = getCtx();
+    const session = getSession(sessionKey);
+    const ctx = session.canvas.getContext('2d');
     if (!ctx) return;
+
+    if (session.loaded) {
+      setReady(true);
+      setHistory({
+        canUndo: session.index > 0,
+        canRedo: session.index < session.history.length - 1,
+      });
+      setDirty(session.index > 0);
+      bump();
+      return;
+    }
+
     ctx.clearRect(0, 0, width, height);
-    historyRef.current = [];
-    indexRef.current = -1;
-    baselineRef.current = null;
     setHistory({ canUndo: false, canRedo: false });
     setDirty(false);
 
@@ -240,7 +311,8 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
       .then((images) => {
         if (cancelled) return;
         images.forEach((img) => ctx.drawImage(img, 0, 0, width, height));
-        baselineRef.current = ctx.getImageData(0, 0, width, height);
+        session.baseline = ctx.getImageData(0, 0, width, height);
+        session.loaded = true;
         setReady(true);
         pushHistory();
         bump();
@@ -252,7 +324,7 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
     return () => {
       cancelled = true;
     };
-  }, [masks, width, height, getCtx, pushHistory]);
+  }, [masks, width, height, sessionKey, getSession, pushHistory]);
 
   const drawSegment = useCallback(
     (from: Point, to: Point) => {
@@ -322,8 +394,8 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
         Math.abs(data[i + 2] - target[2]) <= FILL_TOLERANCE &&
         Math.abs(data[i + 3] - target[3]) <= FILL_TOLERANCE;
 
-      // Iterative scanline-free flood fill; an explicit stack avoids blowing the
-      // JS call stack on large enclosed regions.
+      // Iterative flood fill; an explicit stack avoids blowing the JS call
+      // stack on large enclosed regions.
       const stack: number[] = [x0, y0];
       const seen = new Uint8Array(width * height);
       seen[y0 * width + x0] = 1;
@@ -361,35 +433,38 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
   /** Restore a history snapshot at `index`. */
   const restore = useCallback(
     (index: number) => {
-      const ctx = getCtx();
-      const snap = historyRef.current[index];
+      const session = active();
+      const ctx = session.canvas.getContext('2d');
+      const snap = session.history[index];
       if (!ctx || !snap) return;
       ctx.putImageData(snap, 0, 0);
-      indexRef.current = index;
-      setHistory({ canUndo: index > 0, canRedo: index < historyRef.current.length - 1 });
+      session.index = index;
+      setHistory({ canUndo: index > 0, canRedo: index < session.history.length - 1 });
       setDirty(index > 0);
       bump();
     },
-    [getCtx],
+    [active],
   );
 
   const undo = useCallback(() => {
-    if (indexRef.current > 0) restore(indexRef.current - 1);
-  }, [restore]);
+    const session = active();
+    if (session.index > 0) restore(session.index - 1);
+  }, [active, restore]);
 
   const redo = useCallback(() => {
-    if (indexRef.current < historyRef.current.length - 1) restore(indexRef.current + 1);
-  }, [restore]);
+    const session = active();
+    if (session.index < session.history.length - 1) restore(session.index + 1);
+  }, [active, restore]);
 
   const resetToPrediction = useCallback(() => {
-    const ctx = getCtx();
-    const base = baselineRef.current;
-    if (!ctx || !base) return;
-    ctx.putImageData(base, 0, 0);
+    const session = active();
+    const ctx = session.canvas.getContext('2d');
+    if (!ctx || !session.baseline) return;
+    ctx.putImageData(session.baseline, 0, 0);
     bump();
     pushHistory();
     setDirty(false);
-  }, [getCtx, pushHistory]);
+  }, [active, pushHistory]);
 
   const panBy = useCallback((dx: number, dy: number) => {
     setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
@@ -400,23 +475,30 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
     setPan({ x: 0, y: 0 });
   }, []);
 
+  const toDataUrl = useCallback(
+    (key?: string): string | null => {
+      const session = sessionsRef.current.get(key ?? sessionKey);
+      return session?.loaded ? session.canvas.toDataURL('image/png') : null;
+    },
+    [sessionKey],
+  );
+
   const exportPng = useCallback(
     (filename: string) => {
-      const canvas = docRef.current;
-      if (!canvas) return;
-      const url = canvas.toDataURL('image/png');
+      const url = toDataUrl();
+      if (!url) return;
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
       a.click();
     },
-    [],
+    [toDataUrl],
   );
 
   return {
     ready,
     version,
-    document: docRef.current,
+    document: sessionsRef.current.get(sessionKey)?.canvas ?? null,
     tool,
     setTool,
     brushSize,
@@ -431,6 +513,7 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
     setLassoMode,
     opacity,
     setOpacity,
+    blendMode: DATASET_OVERLAY[dataset].blend,
     maskVisible,
     setMaskVisible,
     windowLevel,
@@ -454,5 +537,6 @@ export function useMaskEditor(masks: MaskLayer[], width: number, height: number)
     fillAt,
     applyLasso,
     exportPng,
+    toDataUrl,
   };
 }

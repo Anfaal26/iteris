@@ -4,6 +4,7 @@
  * Restructured, not re-skinned: same dark tokens, mono micro-labels, pill
  * controls and rounded-xl cards as the rest of the app. Sections top→bottom:
  *   • Image      — side-by-side Scan / GT-mask dropzones + read-only detection chip
+ *   • Batch      — collapsed by default; a multi-file picker for batch runs
  *   • (untitled) — Attention Res U-Net · DRL (always expanded: DuelingDDQN / TD3)
  *   • Data regime — Low / High segmented control, default flips with the model
  *   • View mode  — Single / Wipe (+ source chips) / Side-by-Side
@@ -54,7 +55,18 @@ export interface ControlPanelProps {
   onScanUpload: (dataUrl: string, file: File) => void;
   onGtMaskUpload: (dataUrl: string, file: File) => void;
   onRunInference: () => void;
+
+  /* --- batch segmentation --- */
+  /** Hard cap on files per batch run (half the backend's safe concurrent load). */
+  maxBatchFiles: number;
+  /** Queued/queued-and-run batch cases, for the in-panel progress list. */
+  batchItems: { id: string; label: string; status: BatchItemStatus }[];
+  onBatchUpload: (files: File[]) => void;
+  onClearBatch: () => void;
 }
+
+/** Lifecycle of one queued batch image. */
+export type BatchItemStatus = 'queued' | 'running' | 'done' | 'error';
 
 /** Top-level model picker structure. DRL is a group; the rest are leaves. */
 type PickerNode =
@@ -188,8 +200,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onScanUpload,
   onGtMaskUpload,
   onRunInference,
+  maxBatchFiles,
+  batchItems,
+  onBatchUpload,
+  onClearBatch,
 }) => {
-  const canRun = !!scanLabel && !loading;
+  const [batchOpen, setBatchOpen] = useState(false);
+  const batchInputRef = useRef<HTMLInputElement>(null);
+  const canRun = (!!scanLabel || batchItems.length > 0) && !loading;
 
   const runButton = (
     <button
@@ -315,6 +333,120 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 ))}
               </div>
             </>
+          )}
+        </section>
+
+        {/* Batch segmentation — collapsed by default so the single-scan flow
+            stays the obvious one. Runs are driven by the same ▷ button below. */}
+        <section aria-label="Batch segmentation">
+          <button
+            type="button"
+            aria-expanded={batchOpen}
+            onClick={() => setBatchOpen((v) => !v)}
+            className="w-full flex items-center justify-between text-xs font-heading font-semibold text-muted uppercase tracking-wider hover:text-text transition-colors duration-panel ease-out"
+          >
+            <span>Batch segmentation</span>
+            <span className="flex items-center gap-1.5">
+              {batchItems.length > 0 && (
+                <span className="text-[10px] font-mono text-accent normal-case tracking-normal">
+                  {batchItems.length}/{maxBatchFiles}
+                </span>
+              )}
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className={['transition-transform duration-panel ease-out', batchOpen ? 'rotate-180' : ''].join(' ')}
+                aria-hidden="true"
+              >
+                <polyline points="2 4 6 8 10 4" />
+              </svg>
+            </span>
+          </button>
+
+          {batchOpen && (
+            <div className="mt-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => batchInputRef.current?.click()}
+                className={[
+                  'w-full flex flex-col items-center gap-1 rounded-lg border border-dashed px-2 py-3 text-center',
+                  'transition-colors duration-panel ease-out',
+                  loading
+                    ? 'border-border/50 opacity-50 cursor-not-allowed'
+                    : 'border-border hover:border-accent/50 cursor-pointer',
+                ].join(' ')}
+              >
+                <span className="text-muted" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                    <path d="M12 11v5M9.5 13.5 12 11l2.5 2.5" />
+                  </svg>
+                </span>
+                <span className="text-[11px] font-body text-muted">Choose scans</span>
+              </button>
+              <input
+                ref={batchInputRef}
+                type="file"
+                multiple
+                accept=".dcm,.nii,.nii.gz,.png,.jpg,.jpeg"
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) onBatchUpload(files);
+                  // Reset so re-picking the same files fires change again.
+                  e.target.value = '';
+                }}
+              />
+              <p className="text-[11px] font-body text-muted mt-1.5">
+                Maximum {maxBatchFiles} files per run. Press ▷ to start; results open as tabs.
+              </p>
+
+              {batchItems.length > 0 && (
+                <>
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {batchItems.map((item) => (
+                      <li
+                        key={item.id}
+                        className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5"
+                      >
+                        <span
+                          className={[
+                            'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                            item.status === 'done'
+                              ? 'bg-success'
+                              : item.status === 'error'
+                                ? 'bg-error'
+                                : item.status === 'running'
+                                  ? 'bg-accent animate-pulse'
+                                  : 'bg-muted/50',
+                          ].join(' ')}
+                          aria-hidden="true"
+                        />
+                        <span className="text-[11px] font-body text-muted truncate flex-1">
+                          {item.label}
+                        </span>
+                        <span className="text-[10px] font-mono text-muted/70 flex-shrink-0">
+                          {item.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={onClearBatch}
+                    className="mt-1.5 text-[11px] font-body text-muted hover:text-text disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-panel ease-out"
+                  >
+                    Clear queue
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </section>
 

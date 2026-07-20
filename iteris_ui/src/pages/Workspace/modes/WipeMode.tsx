@@ -26,6 +26,8 @@ export interface WipeModeProps {
   left: WipeSide;
   right: WipeSide;
   overlayOpacity: number;
+  /** Overlay compositing mode; CAMUS speckle needs `normal`, MRI reads well on `screen`. */
+  overlayBlend?: 'normal' | 'screen';
 }
 
 export const WipeMode: React.FC<WipeModeProps> = ({
@@ -34,6 +36,7 @@ export const WipeMode: React.FC<WipeModeProps> = ({
   left,
   right,
   overlayOpacity,
+  overlayBlend = 'screen',
 }) => {
   const [wipeValue, setWipeValue] = useState(50);
 
@@ -44,7 +47,7 @@ export const WipeMode: React.FC<WipeModeProps> = ({
         src={o.imageB64}
         alt={`${side} ${o.id}`}
         className="absolute inset-0 w-full h-full object-fill"
-        style={{ opacity: overlayOpacity, mixBlendMode: 'screen' }}
+        style={{ opacity: overlayOpacity, mixBlendMode: overlayBlend }}
       />
     ));
 
