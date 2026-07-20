@@ -110,73 +110,59 @@ _BRISC_TUMOR_TD3_ENV = dict(_SHARED, spline_smooth=0.0, cont_sectors=12)
 _CAMUS_REPO = os.environ.get('HF_REPO_CAMUS_DRL', 'Anfaal26/iteris-drl-camus')
 _BRISC_REPO = os.environ.get('HF_REPO_BRISC_DRL', 'Anfaal26/iteris-drl-brisc')
 
-# Colors mirror iteris_ui maskColorsHex / inference.STRUCTURE_DEFS.
-REGISTRY: dict[tuple[str, str, str, str], DrlEntry] = {
-    ('camus', 'lv', 'high', 'duelingddqn'): DrlEntry(
-        dataset='camus', klass='lv', regime='high', algo='duelingddqn',
-        structure_id='lv_endo', label='LV Endocardium', color='#00c9a7',
-        unet_class_index=1, hf_repo=_CAMUS_REPO,
-        hf_filename=os.environ.get('HF_FILE_CAMUS_LV_HIGH_DUELINGDDQN', 'duelingddqn/lv/high.pt'),
-        num_actions=18, in_channels=5, action_type='discrete',
-        env_cfg=_CAMUS_LV_DUELING_ENV,
-    ),
-    ('camus', 'myo', 'high', 'duelingddqn'): DrlEntry(
-        dataset='camus', klass='myo', regime='high', algo='duelingddqn',
-        structure_id='lv_epi', label='LV Epicardium', color='#f59e0b',
-        unet_class_index=2, hf_repo=_CAMUS_REPO,
-        hf_filename=os.environ.get('HF_FILE_CAMUS_MYO_HIGH_DUELINGDDQN', 'duelingddqn/myo/high.pt'),
-        num_actions=18, in_channels=5, action_type='discrete',
-        env_cfg=_CAMUS_MYO_DUELING_ENV,
-    ),
-    ('camus', 'la', 'high', 'duelingddqn'): DrlEntry(
-        dataset='camus', klass='la', regime='high', algo='duelingddqn',
-        structure_id='la', label='Left Atrium', color='#f87171',
-        unet_class_index=3, hf_repo=_CAMUS_REPO,
-        hf_filename=os.environ.get('HF_FILE_CAMUS_LA_HIGH_DUELINGDDQN', 'duelingddqn/la/high.pt'),
-        num_actions=18, in_channels=5, action_type='discrete',
-        env_cfg=_CAMUS_LA_DUELING_ENV,
-    ),
-    ('camus', 'lv', 'high', 'td3'): DrlEntry(
-        dataset='camus', klass='lv', regime='high', algo='td3',
-        structure_id='lv_endo', label='LV Endocardium', color='#00c9a7',
-        unet_class_index=1, hf_repo=_CAMUS_REPO,
-        hf_filename=os.environ.get('HF_FILE_CAMUS_LV_HIGH_TD3', 'td3/lv/high.pt'),
-        num_actions=16, in_channels=5, action_type='continuous',
-        env_cfg=_CAMUS_LV_TD3_ENV,
-    ),
-    ('camus', 'myo', 'high', 'td3'): DrlEntry(
-        dataset='camus', klass='myo', regime='high', algo='td3',
-        structure_id='lv_epi', label='LV Epicardium', color='#f59e0b',
-        unet_class_index=2, hf_repo=_CAMUS_REPO,
-        hf_filename=os.environ.get('HF_FILE_CAMUS_MYO_HIGH_TD3', 'td3/myo/high.pt'),
-        num_actions=16, in_channels=5, action_type='continuous',
-        env_cfg=_CAMUS_MYO_TD3_ENV,
-    ),
-    ('camus', 'la', 'high', 'td3'): DrlEntry(
-        dataset='camus', klass='la', regime='high', algo='td3',
-        structure_id='la', label='Left Atrium', color='#f87171',
-        unet_class_index=3, hf_repo=_CAMUS_REPO,
-        hf_filename=os.environ.get('HF_FILE_CAMUS_LA_HIGH_TD3', 'td3/la/high.pt'),
-        num_actions=16, in_channels=5, action_type='continuous',
-        env_cfg=_CAMUS_LA_TD3_ENV,
-    ),
-    ('brisc', 'tumor', 'high', 'duelingddqn'): DrlEntry(
-        dataset='brisc', klass='tumor', regime='high', algo='duelingddqn',
-        structure_id='glioma', label='Tumor (unclassified)', color='#818cf8',
-        unet_class_index=1, hf_repo=_BRISC_REPO,
-        hf_filename=os.environ.get('HF_FILE_BRISC_TUMOR_HIGH_DUELINGDDQN', 'duelingddqn/tumor/high.pt'),
-        num_actions=18, in_channels=5, action_type='discrete',
-        env_cfg=_BRISC_TUMOR_DUELING_ENV,
-    ),
-    ('brisc', 'tumor', 'high', 'td3'): DrlEntry(
-        dataset='brisc', klass='tumor', regime='high', algo='td3',
-        structure_id='glioma', label='Tumor (unclassified)', color='#818cf8',
-        unet_class_index=1, hf_repo=_BRISC_REPO,
-        hf_filename=os.environ.get('HF_FILE_BRISC_TUMOR_HIGH_TD3', 'td3/tumor/high.pt'),
-        num_actions=12, in_channels=5, action_type='continuous',
-        env_cfg=_BRISC_TUMOR_TD3_ENV,
-    ),
+# Per-class metadata (structure identity + env hyperparameters), independent of
+# regime — Phase A (high) and Phase B (low) checkpoints for the same class use
+# the SAME contour-env geometry/action-space; only the training data volume
+# differed. No per-regime config files exist in configs/{CAMUS,BRISC}/DRL/,
+# which confirms this — regime is purely a checkpoint-selection axis.
+_CAMUS_CLASSES = {
+    'lv': dict(structure_id='lv_endo', label='LV Endocardium', color='#00c9a7',
+              unet_class_index=1, dueling_env=_CAMUS_LV_DUELING_ENV,
+              td3_env=_CAMUS_LV_TD3_ENV, td3_action_dim=16),
+    'myo': dict(structure_id='lv_epi', label='LV Epicardium', color='#f59e0b',
+               unet_class_index=2, dueling_env=_CAMUS_MYO_DUELING_ENV,
+               td3_env=_CAMUS_MYO_TD3_ENV, td3_action_dim=16),
+    'la': dict(structure_id='la', label='Left Atrium', color='#f87171',
+              unet_class_index=3, dueling_env=_CAMUS_LA_DUELING_ENV,
+              td3_env=_CAMUS_LA_TD3_ENV, td3_action_dim=16),
 }
+_BRISC_CLASSES = {
+    'tumor': dict(structure_id='glioma', label='Tumor (unclassified)', color='#818cf8',
+                 unet_class_index=1, dueling_env=_BRISC_TUMOR_DUELING_ENV,
+                 td3_env=_BRISC_TUMOR_TD3_ENV, td3_action_dim=12),
+}
+
+# Generated over {dataset} x {class} x {regime} x {algo} rather than 16+
+# hand-copied blocks — the copy-paste surface is exactly where a Phase-A bug
+# already happened once (wrong wrapper key silently mis-loading a checkpoint).
+# Default hf_filename/env-var names are unchanged from the original Phase-A-
+# only hand-written entries, so already-uploaded checkpoints keep resolving.
+REGISTRY: dict[tuple[str, str, str, str], DrlEntry] = {}
+for _dataset, _repo, _classes in (
+    ('camus', _CAMUS_REPO, _CAMUS_CLASSES),
+    ('brisc', _BRISC_REPO, _BRISC_CLASSES),
+):
+    for _klass, _meta in _classes.items():
+        for _regime in ('high', 'low'):
+            _env_prefix = f'HF_FILE_{_dataset.upper()}_{_klass.upper()}_{_regime.upper()}'
+            REGISTRY[(_dataset, _klass, _regime, 'duelingddqn')] = DrlEntry(
+                dataset=_dataset, klass=_klass, regime=_regime, algo='duelingddqn',
+                structure_id=_meta['structure_id'], label=_meta['label'], color=_meta['color'],
+                unet_class_index=_meta['unet_class_index'], hf_repo=_repo,
+                hf_filename=os.environ.get(
+                    f'{_env_prefix}_DUELINGDDQN', f'duelingddqn/{_klass}/{_regime}.pt',
+                ),
+                num_actions=18, in_channels=5, action_type='discrete',
+                env_cfg=_meta['dueling_env'],
+            )
+            REGISTRY[(_dataset, _klass, _regime, 'td3')] = DrlEntry(
+                dataset=_dataset, klass=_klass, regime=_regime, algo='td3',
+                structure_id=_meta['structure_id'], label=_meta['label'], color=_meta['color'],
+                unet_class_index=_meta['unet_class_index'], hf_repo=_repo,
+                hf_filename=os.environ.get(f'{_env_prefix}_TD3', f'td3/{_klass}/{_regime}.pt'),
+                num_actions=_meta['td3_action_dim'], in_channels=5, action_type='continuous',
+                env_cfg=_meta['td3_env'],
+            )
 
 # Fixed z-order when combining CAMUS class masks into one label map: innermost
 # structure wins overlapping pixels (LV endo ⊂ myo, LA separate).

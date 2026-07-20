@@ -46,21 +46,32 @@ credentials or downloads happen on this Space at all. Weights get into those
 repos via a Kaggle notebook (`hf-link.ipynb`) that uploads training-output
 datasets to HF Hub; this Space only ever reads from HF Hub.
 
-**Phase A registry (high regime, both algorithms, both datasets)** — 8 entries
-in `app/drl.py`'s `REGISTRY`, each an env-overridable `(HF_REPO_*, HF_FILE_*)`
-pair with a default already pointing at the canonical path, so no Space
-secrets are required unless a repo/path ever changes:
+**Registry** — `app/drl.py`'s `REGISTRY` is generated over
+`{dataset} x {class} x {regime} x {algo}` (Phase A = high regime, Phase B =
+low regime; both use the identical per-class contour-env hyperparameters —
+regime only selects which checkpoint to load, see `_CAMUS_CLASSES` /
+`_BRISC_CLASSES` in `drl.py`), 16 entries total. Each is an env-overridable
+`(HF_REPO_*, HF_FILE_*)` pair with a default already pointing at the
+canonical path, so no Space secrets are required unless a repo/path changes:
 
-| Dataset | Class | Algo | HF repo | Path | Kaggle source |
-|---|---|---|---|---|---|
-| CAMUS | LV endo | DuelingDDQN | iteris-drl-camus | `duelingddqn/lv/high.pt` | `junkit1688/pa-camus-dueling-1-outputs` |
-| CAMUS | LV epi/myo | DuelingDDQN | iteris-drl-camus | `duelingddqn/myo/high.pt` | `junkit1688/pa-camus-dueling-2-outputs` |
-| CAMUS | LA | DuelingDDQN | iteris-drl-camus | `duelingddqn/la/high.pt` | `anfaalhossain/pa-camus-dueling-3-outputs` |
-| CAMUS | LV endo | TD3 | iteris-drl-camus | `td3/lv/high.pt` | `chuachongeu/pa-camus-td3-c1-outputs` |
-| CAMUS | LV epi/myo | TD3 | iteris-drl-camus | `td3/myo/high.pt` | `chuachongeu/pa-camus-td3-c2-outputs` |
-| CAMUS | LA | TD3 | iteris-drl-camus | `td3/la/high.pt` | `chuachongeu/pa-camus-td3-c3-outputs` |
-| BRISC | tumor | DuelingDDQN | iteris-drl-brisc | `duelingddqn/tumor/high.pt` | `junkit1688/pa-brisc-dueling-1-outputs` |
-| BRISC | tumor | TD3 | iteris-drl-brisc | `td3/tumor/high.pt` | `anfaalhossain/pa-brisc-td3-outputs` |
+| Dataset | Class | Regime | Algo | HF repo | Path | Kaggle source |
+|---|---|---|---|---|---|---|
+| CAMUS | LV endo | High | DuelingDDQN | iteris-drl-camus | `duelingddqn/lv/high.pt` | `junkit1688/pa-camus-dueling-1-outputs` |
+| CAMUS | LV epi/myo | High | DuelingDDQN | iteris-drl-camus | `duelingddqn/myo/high.pt` | `junkit1688/pa-camus-dueling-2-outputs` |
+| CAMUS | LA | High | DuelingDDQN | iteris-drl-camus | `duelingddqn/la/high.pt` | `anfaalhossain/pa-camus-dueling-3-outputs` |
+| CAMUS | LV endo | High | TD3 | iteris-drl-camus | `td3/lv/high.pt` | `chuachongeu/pa-camus-td3-c1-outputs` |
+| CAMUS | LV epi/myo | High | TD3 | iteris-drl-camus | `td3/myo/high.pt` | `chuachongeu/pa-camus-td3-c2-outputs` |
+| CAMUS | LA | High | TD3 | iteris-drl-camus | `td3/la/high.pt` | `chuachongeu/pa-camus-td3-c3-outputs` |
+| BRISC | tumor | High | DuelingDDQN | iteris-drl-brisc | `duelingddqn/tumor/high.pt` | `junkit1688/pa-brisc-dueling-1-outputs` |
+| BRISC | tumor | High | TD3 | iteris-drl-brisc | `td3/tumor/high.pt` | `anfaalhossain/pa-brisc-td3-outputs` |
+| CAMUS | LV endo | Low | DuelingDDQN | iteris-drl-camus | `duelingddqn/lv/low.pt` | `mahfuza02/pb-camus-dueling-1-outputs` |
+| CAMUS | LV epi/myo | Low | DuelingDDQN | iteris-drl-camus | `duelingddqn/myo/low.pt` | `mahfuza02/pb-camus-dueling-2-outputs` |
+| CAMUS | LA | Low | DuelingDDQN | iteris-drl-camus | `duelingddqn/la/low.pt` | `mahfuza02/pb-camus-dueling-3-outputs` |
+| CAMUS | LV endo | Low | TD3 | iteris-drl-camus | `td3/lv/low.pt` | `anfaalhossain/pb-camus-td3-1-outputs` |
+| CAMUS | LV epi/myo | Low | TD3 | iteris-drl-camus | `td3/myo/low.pt` | `junkit1688/pb-camus-td3-2-outputs` |
+| CAMUS | LA | Low | TD3 | iteris-drl-camus | `td3/la/low.pt` | `mahfuza02/pb-camus-td3-3-outputs` |
+| BRISC | tumor | Low | DuelingDDQN | iteris-drl-brisc | `duelingddqn/tumor/low.pt` | `anfaalhossain/pb-brisc-dueling-outputs` |
+| BRISC | tumor | Low | TD3 | iteris-drl-brisc | `td3/tumor/low.pt` | `anfaalhossain/pb-brisc-td3-outputs` |
 
 CAMUS's 3 classes are trained as **separate agents**; a single CAMUS+algo
 request fans out to all 3 registered class-agents and combines their masks
@@ -74,9 +85,10 @@ per-checkpoint and MUST match the exact training config — see the `_CAMUS_*`
 across classes/datasets — CAMUS-LA and BRISC use a different `spline_smooth`,
 and BRISC's TD3 uses 12 continuous sectors vs. 16 for CAMUS.
 
-Adding the low regime later is a matter of: (1) upload the new checkpoint at
-its own `algo/class/low.pt` path via the same notebook pattern, (2) add one
-`DrlEntry` to `REGISTRY` — no changes to the loading or request-handling logic.
+Adding a future phase/class is a matter of: (1) upload the new checkpoint at
+its own `algo/class/regime.pt` path via the same notebook pattern, (2) add it
+to `_CAMUS_CLASSES` / `_BRISC_CLASSES` (a new class) or the regime tuple in
+the generator loop (a new regime) — no changes to the loading logic.
 
 **Frontend wiring**: the Vercel app never talks to this Space's `/infer`
 directly — it calls its own same-origin `/api/infer` serverless function
