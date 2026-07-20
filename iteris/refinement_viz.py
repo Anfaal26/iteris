@@ -232,11 +232,17 @@ def plot_comparison(replays, baseline_cfg, cfg, class_idx=1, class_name='',
         cells = [('U-Net init (contour)', r['masks'][0], r['init_dice']),
                  (f'{cfg.get("agent_type","?")} refined', r['final_mask'], r['final_dice']),
                  ('Ground Truth', s['gt_mask'], 1.0)]
+        # Patient ID in the tag makes it possible to match "this same patient" across
+        # different models'/agents' comparison plots later (e.g. in a cross-model
+        # qualitative review) -- previously only "BEST/MEDIAN/WORST gain" was shown,
+        # which doesn't identify WHICH patient that was to a downstream comparison.
+        patient_id = s.get('patient', '')
         for col, (title, mask, d) in enumerate(cells):
             ax = axes[row, col]
             ax.imshow(s['image'], cmap='gray')
             ax.imshow(np.ma.masked_where(mask == 0, mask), cmap=cmap, alpha=0.5)
-            tag = '' if col != 1 else f"  [{label}] {'stopped' if r['stopped'] else 'max-steps'}, {r['n_steps']} steps"
+            tag = '' if col != 1 else (f"  [{label}{f' — {patient_id}' if patient_id else ''}] "
+                                       f"{'stopped' if r['stopped'] else 'max-steps'}, {r['n_steps']} steps")
             ax.set_title(f'{title}\nDice {d:.3f}{tag}', fontsize=10)
             ax.axis('off')
     plt.suptitle(f'{cfg.get("dataset","")} {cfg.get("agent_type","")} — {class_name}', fontsize=13)
@@ -267,7 +273,8 @@ def plot_playback(replay, cfg, class_name='', out_path=None):
         ax.axis('off')
     for t in range(n, len(axes)):
         axes[t].axis('off')
-    plt.suptitle(f'{cfg.get("agent_type","")} refinement playback — {class_name} '
+    patient_tag = f' — patient {s["patient"]}' if s.get('patient') else ''
+    plt.suptitle(f'{cfg.get("agent_type","")} refinement playback — {class_name}{patient_tag} '
                  f'({replay["n_steps"]} steps, init {replay["init_dice"]:.3f} → '
                  f'final {replay["final_dice"]:.3f})', fontsize=12)
     plt.tight_layout()
