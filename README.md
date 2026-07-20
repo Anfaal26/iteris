@@ -1,38 +1,42 @@
 # Iteris — DRL Contour Refinement for Medical Image Segmentation
 
 Deep-reinforcement-learning refinement of U-Net segmentation masks via **boundary-contour
-deformation**, on cardiac ultrasound (CAMUS) and brain-tumour MRI (BRISC). Taylor's University
-capstone (PRJ63504); targeting IEEE JBHI / a MICCAI 2026 workshop.
+deformation**, on cardiac ultrasound (CAMUS) and brain-tumour MRI (BRISC) — the only two
+datasets in scope. Taylor's University capstone (PRJ63504); targeting IEEE JBHI / a MICCAI
+2026 workshop.
 
-> **Research question.** Starting from a lightweight U-Net's mask, can a DRL agent recover the gap
-> toward a strong attention-U-Net baseline by deforming the contour — and does a **discrete**
-> (DuelingDDQN) or **continuous** (TD3) agent do it better, especially as labelled data gets scarce?
+> **Research question.** Starting from an Attention U-Net's mask, can a DRL agent recover
+> additional Dice by deforming the contour — and does a **discrete** (DuelingDDQN) or
+> **continuous** (TD3) agent do it better, especially as labelled data gets scarce?
 
 ---
 
 ## The idea in one picture
 
 ```
-                 (frozen, never refined by RL)
-  image ──► Attention U-Net ─────────────────────────► strong baseline  ── competitor ─┐
-    │                                                                                   │ compare
-    └─────► Lite U-Net ──► coarse mask ──► contour ──► DRL agent ──► refined contour ───┘
-              (weak, has         (control points + spline)   (DuelingDDQN / TD3,
-               real headroom)                                 angular-sector pushes)
+  image ──► Attention U-Net ──► coarse mask ──► contour ──► DRL agent ──► refined contour
+                                  (control points + spline)   (DuelingDDQN / TD3,
+                                                                angular-sector pushes)
 ```
 
-The lite U-Net is *intentionally* weak so its errors are **systematic** (smooth over/under-segmentation)
-— exactly what local contour deformation can correct. The agent pushes contiguous **angular sectors**
-of the boundary along their outward normals; reward is baseline-centred potential-based shaping
-(`Φ = K·(Dice − Dice₀)`) so holding at baseline is reward-neutral, not punished.
+RL refines the **Attention U-Net** baseline directly (single-baseline design — see
+[docs/CONTEXT.md](docs/CONTEXT.md) §4/§9). A separate, deliberately lighter **LiteUNet** is
+trained alongside it purely as a weaker comparison point (architecture-headroom reference),
+not an RL warm-start target. The agent pushes contiguous **angular sectors** of the boundary
+along their outward normals; reward is a dense per-control-point distance-to-boundary signal
+(`contour_boundary`, see CONTEXT.md §6).
 
-## Experimental design (three phases)
+## Experimental design (two phases)
 
 | Phase | Data | Asks |
 |---|---|---|
-| **A** | Full dataset | Does contour-refinement DRL close the lite→attention gap when data is abundant? |
-| **B** | Low-data subset (~150 imgs) | Does DRL's advantage over supervised DL *grow* when labels are scarce? |
-| **C** | Smaller subset + MSA backbone | Does self-attention spatial reasoning help most in the most data-starved regime? |
+| **A** | Full dataset | What does contour-refinement DRL recover over the Attention U-Net baseline when data is abundant? |
+| **B** | Low-data subset (~150 imgs) | Does DRL's advantage over the supervised baseline *grow* when labels are scarce? |
+
+A third phase (**Phase C** — swap in an archived MSA/self-attention backbone) was designed but
+**formally abandoned, never implemented** — see [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) and
+[docs/CONTEXT.md](docs/CONTEXT.md) §3 for the historical record. Only Phase A and Phase B are
+real, current, and used anywhere in this repo, the evaluation notebook, or the results.
 
 Full sizing, sources, and methodology: **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)**.
 
@@ -40,17 +44,17 @@ Full sizing, sources, and methodology: **[docs/EXPERIMENTS.md](docs/EXPERIMENTS.
 
 ```
 iteris/            Python package — all reusable logic (env, agents, training, models, metrics)
-  archive/         retired paradigms kept as ablations / negative controls (+ MSA backbone for Phase C)
+  archive/         retired paradigms kept as ablations / negative controls (+ the abandoned-Phase-C MSA backbone, never wired in)
 configs/           YAML hyperparameters, nested by dataset
-  CAMUS/  BRISC/   baseline (lite + attention) configs; DRL/ subfolder = per-class agent configs
+  CAMUS/  BRISC/   baseline (LiteUNet + AttentionResUNet) configs; DRL/ subfolder = per-class agent configs, all refining AttentionResUNet
 notebooks/         thin Kaggle notebooks (import → configure → call → display)
-  unet/            train the lite + attention baselines, and the diagnostics report
-  camus/drl/  brisc/drl/   DRL training, per class
-  local/           local-GPU / Colab variants
+  phaseA/, phaseB/   full-data / low-data mirror of the same notebook set: unet/ (both baselines), camus/drl/, brisc/drl/
+  evaluation/      cross-run evaluation notebook — ingests every phase's output, phase-aware, never pools Phase A/B
+  local/           local-GPU variants
 scripts/           CLI utilities (multi-GPU runner, validation, export)
 docs/              design docs — see below
 server/            optional demo backend (FastAPI, self-contained — not needed to reproduce results)
-iteris_ui/         optional demo frontend (React, dormant)
+iteris_ui/         optional demo frontend (React) — deployed, wired to real Phase A/B results
 ```
 
 > The research core is `iteris/` + `configs/` + `notebooks/` + `scripts/`. `server/` and `iteris_ui/`
@@ -62,7 +66,7 @@ iteris_ui/         optional demo frontend (React, dormant)
 | Doc | What it is |
 |---|---|
 | [docs/CONTEXT.md](docs/CONTEXT.md) | Single source of truth — what the project is, the paradigm, datasets, decisions |
-| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | Phase A/B/C protocol — data sizes, methodology, why |
+| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | Phase A/B protocol — data sizes, methodology, why (+ the abandoned Phase C record) |
 | [docs/PLAN.md](docs/PLAN.md) | Strategic plan / roadmap / module responsibilities |
 | [docs/SKILLS.md](docs/SKILLS.md) | Operational playbook — how it's wired, the landmines, what's open |
 | [docs/TRANSCRIPT.md](docs/TRANSCRIPT.md) | Chronological engineering log |
@@ -82,6 +86,8 @@ The agents are CPU-bound on contour rasterisation, not GPU-bound — see [docs/S
 
 ## Status
 
-Week ~11 of 14. Both agents (DuelingDDQN, TD3) implemented and fixed across CAMUS + BRISC; Phase A
-runs in progress; Phases B/C designed and enabled (config-flip via `label_frac`), MSA wiring pending.
-Live detail in [docs/CONTEXT.md](docs/CONTEXT.md) §8 and [docs/SKILLS.md](docs/SKILLS.md) §4.
+Week ~14 of 14 (final week). Both agents (DuelingDDQN, TD3) implemented and run across CAMUS + BRISC,
+**Phase A and Phase B both complete** and wired into the deployed demo UI; Phase C (MSA backbone) was
+**formally abandoned**, never implemented. A phase-aware cross-run evaluation notebook
+(`notebooks/evaluation/`) now ingests every run's output and is the source for the Research page's
+real results. Live detail in [docs/CONTEXT.md](docs/CONTEXT.md) §8 and [docs/SKILLS.md](docs/SKILLS.md) §4.

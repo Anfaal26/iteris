@@ -1,16 +1,16 @@
 # Iteris — Project Skill
 
-> The operational playbook for working on this codebase: how it's wired, where the landmines are, and what's currently open. Complements [CONTEXT.md](CONTEXT.md) (what/why, incl. the Phase A/B/C experimental design), [EXPERIMENTS.md](EXPERIMENTS.md) (Phase A/B/C data sizes + methodology), and [PLAN.md](PLAN.md) (roadmap) — this file is "how to not break it" + "what I already learned the hard way." All design docs now live in `docs/`; the front-door `README.md` stays at repo root.
+> The operational playbook for working on this codebase: how it's wired, where the landmines are, and what's currently open. Complements [CONTEXT.md](CONTEXT.md) (what/why, incl. the Phase A/B experimental design — Phase C was abandoned, see CONTEXT.md §3), [EXPERIMENTS.md](EXPERIMENTS.md) (Phase A/B data sizes + methodology), and [PLAN.md](PLAN.md) (roadmap) — this file is "how to not break it" + "what I already learned the hard way." All design docs now live in `docs/`; the front-door `README.md` stays at repo root.
 >
 > **Maintenance rule (this is the main skill of this file — apply it every time):** whenever a new architectural decision, fix, gotcha, or piece of standing knowledge is produced, update the relevant section below *in the same turn*, and add a matching dated entry to [TRANSCRIPT.md](TRANSCRIPT.md). TRANSCRIPT.md is the chronological "what happened, when" log; this file is the always-current "what you need to know" summary — the same fact often belongs in both, phrased differently (transcript = past tense event, skill = standing rule). Never let this file silently drift out of date relative to the transcript.
 >
-> **Naming note:** this file uses "**Stage 1–4**" for the project timeline (build → train → evaluate → write paper). CONTEXT.md separately defines "**Phase A/B/C**" for the experimental design (full data vs low-data vs MSA backbone). Don't conflate the two — they're different axes that happen to both use letters/numbers for "phase."
+> **Naming note:** this file uses "**Stage 1–4**" for the project timeline (build → train → evaluate → write paper). CONTEXT.md separately defines "**Phase A/B**" for the experimental design (full data vs low-data). A third phase (**Phase C**, an MSA-backbone ablation) was designed but **formally abandoned 2026-07-21** — never implemented, not part of the active design; see CONTEXT.md §3. Don't conflate Stage and Phase — they're different axes that happen to both use letters/numbers for "phase."
 
 ---
 
 ## 1. What this project is (one paragraph)
 
-DRL agent (`DuelingDDQN` discrete or `TD3` continuous) refines a **lite U-Net** segmentation mask toward ground truth by deforming its boundary contour in angular sectors, on CAMUS (cardiac ultrasound: LV-endo/epi/LA) and BRISC (brain tumour MRI: glioma/meningioma/pituitary/tumour-generic). A separate **attention U-Net** is the fixed upper-bound competitor — RL never touches it. Reward is baseline-centred PBRS (`Φ = K·(Dice − Dice_0)`) so holding steady at baseline is reward-neutral, not penalized. The research design runs this comparison at three data/architecture scales — see CONTEXT.md §3 (Phase A: full data, Phase B: low-data regime via `label_frac`, Phase C: archived MSA backbone on the best Phase A/B agent, smallest data regime).
+DRL agent (`DuelingDDQN` discrete or `TD3` continuous) refines the **AttentionResUNet** segmentation mask toward ground truth by deforming its boundary contour in angular sectors, on CAMUS (cardiac ultrasound: LV-endo/epi/LA) and BRISC (brain tumour MRI: glioma/meningioma/pituitary/tumour-generic) — the only two datasets in scope. This is the **single-baseline design**, confirmed current since 2026-07-14 (`61097d0`) — a separate, deliberately weaker **LiteUNet** is trained per phase alongside it purely as an architecture-comparison baseline, not an RL target (this reverses the project's original 2026-06-21 decision, where RL refined the lite net and the attention net was the untouched competitor — see CONTEXT.md §9 for the full history). Reward is the dense `contour_boundary` signal (superseded PBRS 2026-07-08 — see CONTEXT.md §6) plus an optimal-stopping bonus (discrete) / action-magnitude auto-stop (TD3). The research design runs this comparison at two data scales — see CONTEXT.md §3 (Phase A: full data, Phase B: low-data regime via `label_frac`, both complete). A third phase (Phase C: archived MSA backbone) was scoped but abandoned — see CONTEXT.md §3/EXPERIMENTS.md §4.
 
 ## 2. Key files — where to make changes
 
@@ -20,7 +20,7 @@ DRL agent (`DuelingDDQN` discrete or `TD3` continuous) refines a **lite U-Net** 
 | Shared geometry helpers + eval-only metrics (IoU/Precision/Sensitivity/BIoU/MSD) | `iteris/geometry.py` |
 | Agents (DuelingDQN, TD3 active; DQN/DDPG archived-use) | `iteris/agents.py` |
 | Networks incl. optional spatial head | `iteris/drl_networks.py` |
-| Archived MSA backbone (Phase C target) | `iteris/archive/msa.py`, `iteris/archive/agents_legacy.py::MSADuelingDQNAgent` |
+| Archived MSA backbone (was scoped for the now-**abandoned** Phase C) | `iteris/archive/msa.py`, `iteris/archive/agents_legacy.py::MSADuelingDQNAgent` |
 | Training loop / config resolution / curriculum / checkpointing | `iteris/drl_training.py` |
 | Offline diagnostics (headroom, pillar4 prob_map informativeness) | `iteris/diagnostics.py` |
 | BC warm-start demos | `iteris/bc_demo.py` |
@@ -64,7 +64,7 @@ Config resolution: `resolve_agent_config(load_drl_class_config(path), AGENT_NAME
 - **Kaggle runs use the pushed `iteris-pkg` dataset + uploaded notebook, NOT your working tree, NOT each other.** Three *separate* staleness failure modes, all seen this session: (1) the `iteris-pkg` dataset version pinned to a notebook can predate a repo push — re-attach/bump explicitly, don't assume a re-upload auto-propagates; (2) a dataset re-upload can be incomplete (e.g. the `iteris/` package folder silently missing while `configs/`+`requirements.txt` made it) — verify via the Kaggle file browser, not just "it ran without an attach error"; (3) the **notebook file itself** is a separate artifact from the dataset — re-uploading/version-bumping `iteris-pkg` does NOT update an already-imported `.ipynb`'s saved cell code. Before trusting any Kaggle result: confirm fixes are committed+pushed (`git status`/`git log` clean, 0 ahead/behind origin), the dataset is bumped to a version that actually contains them (spot-check the file browser), and the notebook itself reflects current cell code.
 - **The training-log `final`/`Δ` is the RAW number, not the deployable one.** `evaluate_agent` reports raw final Dice with no value floor. `best-seen > baseline` while `final < baseline` means the agent reaches good masks but overshoots; the value-floored deploy (Pillar 1, `refinement_viz.evaluate_testset`) is closer to the honest number. Judge a run by `evaluate_testset`'s `value_floored_dice_mean`, not the training log's `final` — though note the value/Dice correlation itself should also be checked (a weak correlation, e.g. r≈0.12 seen on an early post-fix c3 run, means even the value-floored selector isn't fully trustworthy).
 - **Windows console is cp1252.** Always set `PYTHONIOENCODING=utf-8`, or any print with `→`/`Φ`/non-ASCII crashes the run mid-training and looks like a silent hang.
-- **`oracle_greedy()` in `diagnostics.py` is GT-privileged.** Its "headroom" numbers are an upper bound only — always report the honest non-GT-privileged variant (attention Dice − lite baseline Dice) as the real target, not the oracle one.
+- **`oracle_greedy()` in `diagnostics.py` is GT-privileged.** Its "headroom" numbers are an upper bound only — always report the honest non-GT-privileged variant (attention Dice − lite baseline Dice) as the architecture-comparison reference, not the oracle one. Note this is now a secondary diagnostic, not "the real target DRL is chasing" — DRL refines the attention net directly (single-baseline design), so its actual target is Dice gained over the attention baseline itself, not the lite→attention gap.
 - **`reward_clip` must stay ≥4.0, not 1.0.** At 1.0 a catastrophic move and a mildly-bad move both floor to −1.0, erasing the gradient that tells the agent which mistakes are worse.
 - **`spline_smooth` must be near-zero for BRISC.** Smoothing destroys irregular tumour boundaries; CAMUS (smooth anatomical structures) tolerates more (LA uses a *stronger* smoothing, 2.5, specifically to curb ballooning).
 - **`max_steps` should stay capped (≈8–10), not 20.** Past ~10 steps agents wander past their Dice peak and degrade. Curriculum gives hard samples a *higher* cap during training only (§ above) — that's not the same as raising the base eval/deploy cap.
@@ -76,26 +76,31 @@ Config resolution: `resolve_agent_config(load_drl_class_config(path), AGENT_NAME
 
 ## 4. Current state (keep this section current — see maintenance rule)
 
-- **HEAD:** `fd9befa` on `main`, pushed to `origin/main` (2026-06-30).
-- **Landed this session (2026-06-29 → 2026-06-30):**
-  - Config reorg: flat `configs/*.yaml` → nested `configs/{CAMUS,BRISC}/{,DRL/}...`. All notebooks/scripts updated to match.
-  - DuelingDDQN STOP-learning diagnosis + fix (`reward_step_penalty: 0.05` + `curriculum_max_steps`), landed on CAMUS c1/c2/c3 **and** all 4 BRISC classes (tumor/glioma/meningioma/pituitary).
-  - TD3 brought to the same standard: `curriculum_max_steps` (per-class hard-step caps), `fail_thresh`/`fail_n` safety net (was missing entirely on BRISC), step budget (50k/5k/12500) — CAMUS first, then ported to BRISC.
-  - Literature-standard metrics added: IoU, Precision, Sensitivity, Boundary IoU, Mean Surface Distance — both `init_*` and `final_*`, in `evaluate_agent` (training-time) and `replay_one`/`evaluate_testset` (deploy-time).
-  - Milestone checkpointing (`checkpoint_every: 12500`) — distinct step-stamped snapshots independent of best/last.
-  - Re-diagnosed CAMUS LV_endo/LA prob_map after a 0.25-smoothing retrain — **still INERT**; gate re-disabled (was briefly re-enabled, then reverted same day once the diagnostic came back).
-  - Fixed the `refinement_env_kwargs` action_type bug (TD3/DDPG-only crash in post-training replay/eval).
-  - Defined the Phase A/B/C experimental design (CONTEXT.md §3) — full data, low-data regime (`label_frac`), MSA backbone adaptation.
-- **BRISC tumor (pooled, general class): confirmed no realistic headroom** (−0.0501) — train for near-zero-regression as the success criterion, not improvement. BRISC subtypes (glioma/meningioma/pituitary): not individually diagnosed, genuinely unknown either direction.
-- **CAMUS: all 3 classes have confirmed real headroom** (LV_endo +0.050, LV_epi +0.073, LA +0.052) as of the 2026-06-29 full diagnostic run (real data, not synthetic).
+> This section was frozen at 2026-06-30 for three weeks (~90 commits) until a 2026-07-21
+> documentation audit caught it. Rewritten to reflect current reality; see CONTEXT.md §10 for
+> the full dated decision log this summarizes.
+
+- **HEAD:** well past `fd9befa` — see `git log` for the exact commit; this doc tracks milestones, not a pinned SHA (the previous approach of naming one HEAD commit is exactly what let this section go stale for three weeks).
+- **Major milestones since 2026-06-30 (see CONTEXT.md §10 for the full dated chain):**
+  - **Reward-system rewrite (2026-07-08–11):** `contour_boundary` (dense per-control-point distance-to-GT-boundary) superseded PBRS as the active default; optimal-stopping STOP bonus added for the discrete agent. See CONTEXT.md §6.
+  - **Two state-representation bugs fixed (2026-07-09):** debris-channel leak + SectorPool centroid-binning — invalidated any pre-fix `spatial_head=true` checkpoint.
+  - **Eval consistency fix (2026-07-13):** TD3 now returns/evaluates the best-val checkpoint, not the final-step agent; `reeval_checkpoint()` added to re-score pre-fix checkpoints without retraining.
+  - **Continuous auto-stop (2026-07-16):** GT-free action-magnitude auto-stop for TD3 (no learned STOP action, unlike the discrete agent).
+  - **Single-baseline design confirmed current (2026-07-14, `61097d0`):** RL refines `AttentionResUNet` directly; `LiteUNet` is comparison-only. This reverses the 2026-06-21 decision (§1) — see CONTEXT.md §9 for the full history. **This doc's own §1 had drifted out of sync with that until the 2026-07-21 audit.**
+  - **Phase A and Phase B both completed and wired end-to-end** — training (all 8 dataset×class×algo runs, both phases) → server registry (`5118e27` 2026-07-15 for Phase A, `4825754` 2026-07-20 for Phase B, 16 entries total) → deployed UI.
+  - **Phase C (MSA backbone) formally abandoned (2026-07-21)** — a project decision, not a delay. Not pursued, not planned. See CONTEXT.md §3.
+  - **Cross-run evaluation notebook added (2026-07-20):** `notebooks/evaluation/comprehensive_model_evaluation.ipynb` — ingests every run's output, phase-aware (Phase A/B never pooled), Plotly-based, feeds the Research page's real results (`91fbcc4`).
+  - **CI/CD + Research page + rebrand (2026-07-19–20):** GitHub Actions for the HF Space deploy; Research page wired to real project state (dropped fabricated results); new logo/favicon.
+- **BRISC tumor (pooled, general class): confirmed no realistic architecture-comparison headroom** (−0.0501, LiteUNet vs AttentionResUNet) — this is now a secondary diagnostic, not a go/no-go gate for DRL (which refines AttentionResUNet directly regardless). BRISC subtypes (glioma/meningioma/pituitary): not individually diagnosed on this metric.
+- **CAMUS: all 3 classes have confirmed real architecture-comparison headroom** (LV_endo +0.050, LV_epi +0.073, LA +0.052), same caveat as above.
 - **Open / not yet implemented:**
-  1. **Pillar 2** — TD3 *learned* stop/commit head (the `fail_thresh` net is still an interim backstop, not the real fix).
-  2. **Pillar 3** — strip HD95 out of training reward (`dice_hd_pbrs` → `dice_pbrs` for training configs; compute HD95 only in eval/diagnostics).
-  3. **Gate fix for CAMUS LV_endo/LA** — CE label smoothing alone (tried at 0.1 and 0.25) hasn't worked; needs a different lever (loss rebalancing or post-hoc calibration) before the gate can be re-tried there.
-  4. **Phase B** (low-data regime, `label_frac` ablation) — not started, infra (`label_frac` config field, patient-level splitting) already exists.
-  5. **Phase C** (MSA backbone) — not started; requires un-archiving `msa.py`/`agents_legacy.py::MSADuelingDQNAgent` and a new `AGENT_REGISTRY` entry + config/notebook selector.
-  6. **mm-based metrics** — no `pixel_spacing`/`voxel_spacing` helper exists yet; would be new plumbing.
-- **Timeline (project stages, not to be confused with CONTEXT.md's Phase A/B/C):** Stage 1 (build/validate) → Stage 2 (full training, Phase A in progress) → Stage 3 (eval, Wilcoxon + Bonferroni, ~Week 12) → Stage 4 (paper, Weeks 13–14).
+  1. **Pillar 2** — TD3 *learned* stop/commit head (the action-magnitude auto-stop, landed 2026-07-16, is a GT-free heuristic, not a learned head — still the eventual real fix).
+  2. **Pillar 3** — strip HD95 out of any training reward variant that still includes it; compute HD95 only in eval/diagnostics.
+  3. **Gate fix for CAMUS LV_endo/LA** — CE label smoothing alone (tried at 0.1 and 0.25) hasn't worked; needs a different lever (loss rebalancing or post-hoc calibration) before the uncertainty gate can be re-tried there.
+  4. **mm-based metrics** — no `pixel_spacing`/`voxel_spacing` helper exists yet; would be new plumbing.
+  5. **Evaluation-notebook phase-detection gap** (found 2026-07-20 by a downstream consumer, not yet root-caused): a real Kaggle run's U-Net baseline rows came out phase=`Unknown` in `master_comparison.csv` (their `label_frac` apparently didn't reach that run's summary JSON, and the U-Net dataset slugs don't follow the DRL runs' `pa-`/`pb-` convention the path-fallback relies on) — had to be disambiguated by hand in the frontend. Worth revisiting.
+  6. **Phase C (MSA backbone)** — **abandoned, not open.** Do not pick this up without a fresh decision; see CONTEXT.md §3.
+- **Timeline (project stages, not to be confused with CONTEXT.md's Phase A/B):** Stage 1 (build/validate) → Stage 2 (full training, **both phases done**) → Stage 3 (eval, **done** — the evaluation notebook) → Stage 4 (paper, current stage, Weeks 13–14).
 
 ## 5. Local environment
 

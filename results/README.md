@@ -24,10 +24,24 @@ Drop the whole `checkpoint_dir` output for each run — everything
   recognized by a `patient` column + `dice_<class>` columns. This is what makes
   Section 10's real (non-fabricated) Wilcoxon significance test possible — dropping
   the CSV alongside its sibling `_summary.json` (same folder, matching filename stem)
-  lets LiteUNet vs AttentionResUNet be paired by patient ID and tested per class.
+  lets LiteUNet vs AttentionResUNet be paired by patient ID and tested per class
+  (within the same phase — see below).
 - `<dataset><suffix>_learning_curves.png` (`plot_learning_curves`) and
   `<dataset><suffix>_qualitative.png` (`plot_qualitative_grid`) — displayed in the
-  qualitative gallery (Section 7).
+  qualitative gallery (Section 9).
+
+## Phase (data regime)
+
+Every U-Net/DRL/classifier record is tagged **Phase A** (full-data) or **Phase B**
+(~150-sample low-data regime) and never pooled across the two in any comparison.
+Detection: `label_frac` in the summary JSON where present (U-Net/classifier always
+have it — `>=1.0` is Phase A, `<1.0` is Phase B); DRL reeval JSON has no `label_frac`
+at all, so those fall back to a `pa`/`pb` (or `phaseA`/`phaseB`) token anywhere in
+the file's path — matching both this repo's `notebooks/phaseA`/`phaseB` layout and
+a `pa-`/`pb-` Kaggle-dataset-slug naming convention. **Phase C is never used** —
+if a file's path or label_frac implies Phase C, it's dropped and the count is
+printed, not silently included. Anything with neither signal is tagged `Unknown`
+and reported rather than guessed.
 
 ## DRL agents (DuelingDDQN / TD3)
 
@@ -39,9 +53,9 @@ Drop the whole `out_dir` output from `iteris.drl_reeval.reeval_checkpoint`:
   checkpoint a different way (the shape `iteris.refinement_viz.evaluate_testset`
   returns, with those three fields added).
 - `..._reeval_comparison.png` / `..._reeval_behaviour.png` — displayed in the
-  qualitative gallery (Section 7).
+  qualitative gallery (Section 9).
 - Checkpoints (`*_best.pt`, `*_stepN.pt`) — optional; if `torch` is importable in
-  whatever runs the notebook, Section 9 reads scalar fields (`step`, `best_dice`)
+  whatever runs the notebook, Section 11 reads scalar fields (`step`, `best_dice`)
   straight out of them with plain `torch.load` (never rebuilds a model, so this
   never needs `iteris`/`monai`). Skipped gracefully if `torch` isn't available.
 
@@ -62,5 +76,5 @@ Drop the classifier eval output:
 - `brisc_tumor_classifier_summary.json` (`iteris.classifier.save_classifier_summary_json`)
   — recognized by `accuracy` + `per_class` keys inside `test_metrics`.
 - `brisc_tumor_classifier_learning_curves.png` / `..._confusion_matrix.png` — displayed
-  in Section 8.
+  in Section 10.
 - `brisc_tumor_classifier_best.pt` — optional, same lightweight metadata read as above.
