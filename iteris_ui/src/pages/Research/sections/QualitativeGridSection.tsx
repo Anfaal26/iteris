@@ -28,6 +28,16 @@ const GRIDS: CaseGrid[] = [
     label: 'CAMUS / LV_endo — TD3',
   },
   {
+    src: '/research/qualitative/camus-la-dueling-phaseA-comparison.png',
+    alt: 'CAMUS LA DuelingDDQN best/median/worst refinement cases',
+    label: 'CAMUS / LA — DuelingDDQN',
+  },
+  {
+    src: '/research/qualitative/camus-la-td3-phaseA-comparison.png',
+    alt: 'CAMUS LA TD3 best/median/worst refinement cases',
+    label: 'CAMUS / LA — TD3',
+  },
+  {
     src: '/research/qualitative/brisc-tumor-dueling-phaseA-comparison.png',
     alt: 'BRISC tumor DuelingDDQN best/median/worst refinement cases',
     label: 'BRISC / tumor — DuelingDDQN',
