@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 DatasetId = Literal['camus', 'brisc']
 ModelFamily = Literal['baseline', 'discrete-drl', 'continuous-drl']
-ModelId = Literal['unet-baseline', 'lite-unet', 'dqn', 'ddqn', 'dueling-dqn', 'ddpg', 'td3']
+ModelId = Literal['unet-baseline', 'dueling-dqn', 'td3']
 Regime = Literal['low', 'high']
 ViewMode = Literal['single', 'wipe', 'side-by-side']
 Difficulty = Literal['easy', 'medium', 'hard']
@@ -93,7 +93,7 @@ class CompareRequest(BaseModel):
 
 
 ModelFamilyArg = Literal['baseline', 'drl']
-AlgoId = Literal['duelingddqn', 'td3', 'dqn', 'ddqn', 'ddpg']
+AlgoId = Literal['duelingddqn', 'td3']
 
 
 class InferRequest(BaseModel):
@@ -134,6 +134,11 @@ class CompareResponse(BaseModel):
 class SampleImage(BaseModel):
     id: str
     thumbnailB64: str
+    # Root-relative path resolved against the frontend's own origin (Vercel
+    # serves iteris_ui/public/samples/** there) — preferred over thumbnailB64
+    # by the UI when present. See iteris_ui/src/api/contract.ts.
+    thumbnailUrl: Optional[str] = None
+    maskUrl: Optional[str] = None
     modality: Literal['ultrasound', 'mri']
     anatomy: str
     difficulty: Difficulty
