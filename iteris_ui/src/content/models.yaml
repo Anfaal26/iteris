@@ -1,6 +1,10 @@
 # Model registry — single source of truth for model metadata shown across the UI.
-# diceCamus / diceBrisc = best Dice per dataset; null = evaluation pending.
-# Update with real numbers from test_scores.csv once available.
+# diceCamus / diceBrisc are real Phase A evaluation means per dataset (CAMUS across
+# its 3 classes, BRISC's single tumor class); iou / hd are real Phase A means across
+# all 4 class rows (both datasets combined), transcribed from
+# evaluation_outputs/master_comparison.csv (2026-07-20 run) — see
+# src/pages/Research/data/evaluationResults.ts for the full per-class breakdown.
+# All three models below are deployed and interactively selectable in the workspace.
 
 - id: unet-baseline
   name: Attention U-Net
@@ -9,39 +13,25 @@
     Attention Residual U-Net (Oktay et al. 2018 attention gates, ResNet-style
     encoder/decoder). Deployed baseline — serves as the reference segmentation
     against which DRL refinement is evaluated.
-  diceCamus: null
-  diceBrisc: null
+  diceCamus: 0.900
+  diceBrisc: 0.870
   iou: null
-  hd: null
+  hd: 6.793
   deployed: true
   selectable: true
 
-- id: lite-unet
-  name: Lite U-Net
-  family: baseline
-  description: >-
-    Compact U-Net with a reduced encoder/decoder for lower-compute environments.
-    Evaluation pending — not yet deployed.
-  diceCamus: null
-  diceBrisc: null
-  iou: null
-  hd: null
-  deployed: false
-  selectable: false
-
 - id: dueling-dqn
-  name: Dueling DQN
+  name: DuelingDDQN
   family: discrete-drl
   description: >-
     Dueling Double DQN with value/advantage stream decomposition and an
     8-direction discrete action space for boundary refinement.
-    Evaluation in progress — deployment pending results.
-  diceCamus: null
-  diceBrisc: null
-  iou: null
-  hd: null
-  deployed: false
-  selectable: false
+  diceCamus: 0.896
+  diceBrisc: 0.867
+  iou: 0.788
+  hd: 7.460
+  deployed: true
+  selectable: true
 
 - id: td3
   name: TD3
@@ -49,10 +39,9 @@
   description: >-
     Twin Delayed Deep Deterministic Policy Gradient with continuous vertex-
     displacement actions and clipped double-Q targets for stable policy learning.
-    Evaluation in progress — deployment pending results.
-  diceCamus: null
-  diceBrisc: null
-  iou: null
-  hd: null
-  deployed: false
-  selectable: false
+  diceCamus: 0.885
+  diceBrisc: 0.874
+  iou: 0.784
+  hd: 7.595
+  deployed: true
+  selectable: true

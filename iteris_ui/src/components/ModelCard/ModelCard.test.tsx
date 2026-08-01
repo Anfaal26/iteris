@@ -4,21 +4,21 @@ import type { ModelRecord } from '@/api/contract';
 
 const mockModel: ModelRecord = {
   id: 'dueling-dqn',
-  name: 'Dueling DQN',
+  name: 'DuelingDDQN',
   family: 'discrete-drl',
   description: 'Dueling DQN with value/advantage streams for cardiac segmentation.',
   diceCamus: null,
   diceBrisc: null,
   iou: null,
   hd: null,
-  deployed: false,
-  selectable: false,
+  deployed: true,
+  selectable: true,
 };
 
 describe('ModelCard', () => {
   it('renders model name and family badge', () => {
     render(<ModelCard model={mockModel} />);
-    expect(screen.getByText('Dueling DQN')).toBeInTheDocument();
+    expect(screen.getByText('DuelingDDQN')).toBeInTheDocument();
     expect(screen.getByText('Discrete DRL')).toBeInTheDocument();
   });
 

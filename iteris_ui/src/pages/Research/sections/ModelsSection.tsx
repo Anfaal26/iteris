@@ -1,8 +1,9 @@
 /**
- * ModelsSection — model registry (src/content/models.yaml) enriched, for
- * display on this page only, with the real 2026-07-20 evaluation numbers
- * (the registry itself still reads null pending a site-wide update outside
- * the scope of the Research page). (spec §5)
+ * ModelsSection — model registry (src/content/models.yaml), which already
+ * carries the real 2026-07-20 evaluation numbers site-wide. The enrichment
+ * below re-derives the same figures directly from the evaluation rows so
+ * this page's numbers stay traceable to evaluationResults.ts independent of
+ * the registry (spec §5).
  */
 import React from 'react';
 import { ModelCard } from '@/components';
@@ -19,7 +20,6 @@ const models = modelsRaw as ModelRecord[];
 
 const ARCH: Partial<Record<ModelRecord['id'], string>> = {
   'unet-baseline': 'Attention Residual U-Net (Oktay et al. 2018 attention gates)',
-  'lite-unet': 'Compact encoder/decoder, reduced channel width',
   'dueling-dqn': 'ContourRefineEnv · discrete angular sectors · V + A − mean(A)',
   td3: 'ContourRefineEnv · continuous per-sector displacement · clipped double-Q, delayed policy updates',
 };
@@ -29,7 +29,6 @@ const ARCH: Partial<Record<ModelRecord['id'], string>> = {
 // (paired with the actually-deployed Attention U-Net baseline).
 const EVAL_LOOKUP: Partial<Record<ModelRecord['id'], { name: string; phase: Phase }>> = {
   'unet-baseline': { name: 'AttentionResUNet', phase: 'Phase A' },
-  'lite-unet': { name: 'LiteUNet', phase: 'Phase B' },
   'dueling-dqn': { name: 'DuelingDDQN', phase: 'Phase A' },
   td3: { name: 'TD3', phase: 'Phase A' },
 };
@@ -57,11 +56,9 @@ function evalMetricsFor(id: ModelRecord['id']): Pick<ModelRecord, 'diceCamus' | 
 const DESCRIPTION_OVERRIDE: Partial<Record<ModelRecord['id'], string>> = {
   'unet-baseline':
     'Attention Residual U-Net (Oktay et al. 2018 attention gates, ResNet-style encoder/decoder). Deployed baseline — evaluated 2026-07-20 as the Phase A reference.',
-  'lite-unet':
-    'Compact U-Net with a reduced encoder/decoder. Not deployed for inference, but evaluated as the Phase B (lower-headroom) baseline the DRL agents were designed to have room to improve on.',
   'dueling-dqn':
-    'Dueling Double DQN with value/advantage stream decomposition over discrete angular sectors. Evaluated 2026-07-20; not yet deployed for interactive inference — see Results for the full breakdown.',
-  td3: 'Twin Delayed DDPG with continuous per-sector displacement actions and clipped double-Q targets. Evaluated 2026-07-20; not yet deployed for interactive inference — see Results for the full breakdown.',
+    'Dueling Double DQN with value/advantage stream decomposition over discrete angular sectors. Deployed — evaluated 2026-07-20; see Results for the full breakdown.',
+  td3: 'Twin Delayed DDPG with continuous per-sector displacement actions and clipped double-Q targets. Deployed — evaluated 2026-07-20; see Results for the full breakdown.',
 };
 
 /**
@@ -101,10 +98,9 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({ id = 'models' }) =
         <a href="/models" className="text-accent hover:underline">
           Model Library
         </a>
-        , with metric pills enriched here from the real 2026-07-20 evaluation (mean Dice
-        across classes; DRL agents shown at Phase A, paired with the deployed baseline).
-        The Model Library itself still shows "evaluation pending" until the registry is
-        updated site-wide.
+        , with metric pills computed here directly from the real 2026-07-20 evaluation
+        (mean Dice across classes; DRL agents shown at Phase A, paired with the deployed
+        baseline) — the same numbers the Model Library shows.
       </p>
 
       <div className="mb-8">

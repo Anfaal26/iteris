@@ -15,8 +15,7 @@ export type Modality = 'ultrasound' | 'mri';
 export type ModelFamily = 'baseline' | 'discrete-drl' | 'continuous-drl';
 export type ModelId =
   | 'unet-baseline'  // Attention Res U-Net
-  | 'lite-unet'      // Lite U-Net (compact baseline)
-  | 'dueling-dqn'   // Dueling DQN — discrete DRL refinement
+  | 'dueling-dqn'   // DuelingDDQN — discrete DRL refinement
   | 'td3';           // TD3 — continuous DRL refinement
 
 /**
@@ -194,6 +193,10 @@ export interface ChatRequest {
 export interface SampleImage {
   id: string;
   thumbnailB64: string;
+  /** Root-relative URL to a real preview image under public/samples/, if bundled. Preferred over thumbnailB64 when present. */
+  thumbnailUrl?: string;
+  /** Root-relative URL to the real ground-truth mask paired with thumbnailUrl, if bundled. */
+  maskUrl?: string;
   modality: Modality;
   anatomy: string;
   difficulty: Difficulty;
@@ -215,7 +218,7 @@ export interface SampleImage {
 export type AlgoId = 'duelingddqn' | 'td3';
 
 /** Maps a frontend ModelId to the backend's algo id, or null for
- * non-DRL models (unet-baseline / lite-unet), which stay on /predict. */
+ * non-DRL models (unet-baseline), which stay on /predict. */
 export function drlBackend(modelId: ModelId): { algo: AlgoId } | null {
   switch (modelId) {
     case 'dueling-dqn': return { algo: 'duelingddqn' };
@@ -288,9 +291,9 @@ export const AVAILABLE_COMBINATIONS: ReadonlyArray<{
   { dataset: 'brisc', modelId: 'td3', regime: 'low' },
 ];
 
-/** Default regime for a model family: DRL → low, U-Net baselines → high. */
+/** Default regime for a model family: DRL → low, U-Net baseline → high. */
 export function defaultRegime(modelId: ModelId): Regime {
-  return modelId === 'unet-baseline' || modelId === 'lite-unet' ? 'high' : 'low';
+  return modelId === 'unet-baseline' ? 'high' : 'low';
 }
 
 /** True when a live checkpoint exists for this exact (dataset, model, regime). */

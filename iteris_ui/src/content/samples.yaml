@@ -1,46 +1,63 @@
 # Curated sample images (spec §6 sample tiles, §9 dataset explorer).
-# thumbnailB64 is left empty here; the mock API / tiles render a procedural
-# placeholder when empty so the UI works before real thumbnails are wired in.
+# thumbnailUrl/maskUrl point at real CAMUS/BRISC image+ground-truth-mask pairs
+# bundled under public/samples/ (sourced from a small local held-out set). Where
+# no real pair exists yet, thumbnailB64 is left empty and tiles fall back to a
+# procedural placeholder. bestDice is the real Phase A mean Dice (see
+# src/pages/Research/data/evaluationResults.ts) for the closest-matching
+# structure/class across the three deployed models — not a per-image score,
+# since per-sample scoring requires running inference.
 
 - id: camus-a2c
   thumbnailB64: ''
+  thumbnailUrl: /samples/camus/camus-a2c-image.png
+  maskUrl: /samples/camus/camus-a2c-mask.png
   modality: ultrasound
-  anatomy: A2C (apical 2-chamber)
+  anatomy: A2C (apical 2-chamber, ED)
   difficulty: easy
-  bestDice: 0.93
+  bestDice: 0.936
   dataset: camus
 - id: camus-a4c
   thumbnailB64: ''
+  thumbnailUrl: /samples/camus/camus-a4c-image.png
+  maskUrl: /samples/camus/camus-a4c-mask.png
   modality: ultrasound
-  anatomy: A4C (apical 4-chamber)
+  anatomy: A4C (apical 4-chamber, ED)
   difficulty: medium
-  bestDice: 0.91
+  bestDice: 0.894
   dataset: camus
 - id: camus-edes
   thumbnailB64: ''
+  thumbnailUrl: /samples/camus/camus-2ch-es-image.png
+  maskUrl: /samples/camus/camus-2ch-es-mask.png
   modality: ultrasound
-  anatomy: ED/ES frame
+  anatomy: 2CH (End-Systole frame)
   difficulty: hard
-  bestDice: 0.86
+  bestDice: 0.869
   dataset: camus
 - id: brisc-glioma
   thumbnailB64: ''
+  thumbnailUrl: /samples/brisc/brisc-glioma-image.jpg
+  maskUrl: /samples/brisc/brisc-glioma-mask.png
   modality: mri
   anatomy: Glioma
   difficulty: hard
-  bestDice: 0.84
+  bestDice: 0.867
   dataset: brisc
-- id: brisc-meningioma
+- id: brisc-notumor
   thumbnailB64: ''
+  thumbnailUrl: /samples/brisc/brisc-notumor-image.jpg
+  maskUrl: /samples/brisc/brisc-notumor-mask.png
   modality: mri
-  anatomy: Meningioma
+  anatomy: Non-tumorous (no lesion)
   difficulty: medium
-  bestDice: 0.88
+  bestDice: 0.870
   dataset: brisc
 - id: brisc-pituitary
   thumbnailB64: ''
+  thumbnailUrl: /samples/brisc/brisc-pituitary-image.jpg
+  maskUrl: /samples/brisc/brisc-pituitary-mask.png
   modality: mri
   anatomy: Pituitary Tumor
   difficulty: easy
-  bestDice: 0.90
+  bestDice: 0.874
   dataset: brisc

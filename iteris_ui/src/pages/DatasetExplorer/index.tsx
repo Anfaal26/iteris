@@ -27,7 +27,7 @@ const CAMUS_HIGHLIGHTS: { id: string; label: string; note?: string }[] = [
 
 const BRISC_HIGHLIGHTS: { id: string; label: string; note?: string }[] = [
   { id: 'brisc-glioma', label: 'Best glioma result', note: 'Highest Dice for diffuse glioma' },
-  { id: 'brisc-meningioma', label: 'Meningioma boundary refinement', note: 'Sharp capsule → precise contour' },
+  { id: 'brisc-notumor', label: 'Non-tumorous case', note: 'Clean negative — tests false-positive avoidance' },
   { id: 'brisc-pituitary', label: 'Pituitary — most precise', note: 'Smallest structure, tightest HD' },
   { id: 'brisc-glioma', label: 'Honest glioma challenge', note: 'Diffuse infiltration — inherent uncertainty' },
 ];

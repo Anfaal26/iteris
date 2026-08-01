@@ -103,16 +103,16 @@ export const ModelPreview: React.FC<ModelPreviewProps> = ({ models }) => (
           className="font-heading font-bold text-3xl sm:text-4xl lg:text-[3.25rem] text-landing-text leading-tight"
           style={{ letterSpacing: '-0.02em' }}
         >
-          Four Models.<br />Two Datasets. Full Benchmark.
+          Three Models.<br />Two Datasets. Full Benchmark.
         </h2>
         <p className="text-[14px] leading-relaxed" style={{ color: 'rgba(240,249,255,0.45)' }}>
-          Two baselines (Attention U-Net, Lite U-Net) evaluated against Dueling DQN (discrete)
-          and TD3 (continuous) on CAMUS cardiac ultrasound and BRISC brain MRI. Dice, IoU,
-          and Hausdorff distance reported across both datasets.
+          The Attention U-Net baseline evaluated against DuelingDDQN (discrete) and TD3
+          (continuous) DRL refinement on CAMUS cardiac ultrasound and BRISC brain MRI. Dice,
+          IoU, and Hausdorff distance reported across both datasets.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {models.map((m) => <ModelTag key={m.id} model={m} />)}
       </div>
 

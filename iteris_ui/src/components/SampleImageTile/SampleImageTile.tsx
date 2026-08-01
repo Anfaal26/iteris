@@ -35,7 +35,8 @@ export const SampleImageTile: React.FC<SampleImageTileProps> = ({
   selected = false,
   className,
 }) => {
-  const hasThumbnail = image.thumbnailB64.length > 0;
+  const hasThumbnail = !!image.thumbnailUrl || image.thumbnailB64.length > 0;
+  const thumbnailSrc = image.thumbnailUrl ?? `data:image/png;base64,${image.thumbnailB64}`;
 
   const handleClick = () => onSelect?.(image.id);
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -61,7 +62,7 @@ export const SampleImageTile: React.FC<SampleImageTileProps> = ({
       <div className="aspect-square bg-bg">
         {hasThumbnail ? (
           <img
-            src={`data:image/png;base64,${image.thumbnailB64}`}
+            src={thumbnailSrc}
             alt={`${image.anatomy} ${image.modality} scan`}
             className="w-full h-full object-cover"
           />

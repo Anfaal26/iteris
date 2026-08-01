@@ -102,6 +102,24 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
+/** Fetches a same-origin static asset (e.g. public/samples/**) and reads it as a data URL. */
+function fetchAsDataUrl(url: string): Promise<string> {
+  return fetch(url)
+    .then((res) => {
+      if (!res.ok) throw new Error(`Could not load ${url}`);
+      return res.blob();
+    })
+    .then(
+      (blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error(`Could not read ${url}`));
+          reader.readAsDataURL(blob);
+        }),
+    );
+}
+
 let caseSeq = 0;
 /** Monotonic case id — also the mask editor's session key. */
 function nextCaseId(): string {
@@ -202,6 +220,45 @@ export default function Workspace() {
         baselineResult: null,
       },
     ]);
+  };
+
+  /**
+   * Load a curated local image+ground-truth-mask pair (public/samples/**) as
+   * the active case, with the real mask auto-attached — unlike
+   * `handleSampleSelect`, which only has a placeholder preview and no mask.
+   */
+  const handleWorkWithSample = async (sample: SampleImage) => {
+    if (!sample.thumbnailUrl) return;
+    const id = nextCaseId();
+    try {
+      const [imageDataUrl, maskDataUrl] = await Promise.all([
+        fetchAsDataUrl(sample.thumbnailUrl),
+        sample.maskUrl ? fetchAsDataUrl(sample.maskUrl) : Promise.resolve(null),
+      ]);
+      loadCases([
+        {
+          id,
+          label: `${sample.anatomy} (${sample.modality})`,
+          imageB64: toBareB64(imageDataUrl),
+          previewUrl: imageDataUrl,
+          detection: {
+            dataset: sample.dataset,
+            modality: sample.modality,
+            label: sample.dataset === 'camus' ? 'cardiac echo (CAMUS)' : 'brain MRI (BRISC)',
+            source: 'filename',
+            confidence: 'high',
+          },
+          status: 'queued',
+          result: null,
+          baselineResult: null,
+        },
+      ]);
+      setGtMask(
+        maskDataUrl ? { b64: toBareB64(maskDataUrl), previewUrl: maskDataUrl, label: `${sample.id}-mask.png` } : null,
+      );
+    } catch {
+      // Best-effort — leave prior state untouched if the static asset can't be fetched.
+    }
   };
 
   const handleScanUpload = async (dataUrl: string, file: File) => {
@@ -470,6 +527,7 @@ export default function Workspace() {
           onViewModeChange={setViewMode}
           onWipeSourcesChange={setWipeSources}
           onSampleSelect={handleSampleSelect}
+          onWorkWithSample={handleWorkWithSample}
           onScanUpload={handleScanUpload}
           onGtMaskUpload={(dataUrl, file) =>
             setGtMask({ b64: toBareB64(dataUrl), previewUrl: dataUrl, label: file.name })

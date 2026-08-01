@@ -168,7 +168,7 @@ const HeroSection = () => (
         style={{ animationDelay: '240ms' }}
       >
         A research workstation for deep reinforcement learning boundary
-        refinement. Compare Dueling DQN (discrete) and TD3 (continuous) against
+        refinement. Compare DuelingDDQN (discrete) and TD3 (continuous) against
         the Attention U-Net baseline on cardiac ultrasound and brain MRI.
       </p>
 

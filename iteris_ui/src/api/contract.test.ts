@@ -8,10 +8,10 @@ import { api } from './client';
 describe('mock api', () => {
   it('returns the full model registry', async () => {
     const models = await api.models();
-    // Attention U-Net, Lite U-Net, Dueling DQN, TD3
-    expect(models).toHaveLength(4);
+    // Attention U-Net, DuelingDDQN, TD3 — all deployed and selectable.
+    expect(models).toHaveLength(3);
     expect(models.find((m) => m.id === 'unet-baseline')?.selectable).toBe(true);
-    expect(models.find((m) => m.id === 'dueling-dqn')?.deployed).toBe(false);
+    expect(models.find((m) => m.id === 'dueling-dqn')?.deployed).toBe(true);
   });
 
   it('predicts with per-structure metrics for CAMUS', async () => {

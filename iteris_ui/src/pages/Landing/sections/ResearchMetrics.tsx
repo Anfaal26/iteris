@@ -2,7 +2,7 @@
 import React from 'react';
 
 const METRICS = [
-  { value: '4',  label: 'Models Evaluated',  sub: 'U-Net · Lite U-Net · Dueling DQN · TD3' },
+  { value: '3',  label: 'Models Deployed',   sub: 'Attention U-Net · DuelingDDQN · TD3' },
   { value: '2',  label: 'Datasets',          sub: 'CAMUS · BRISC'                           },
   { value: '20', label: 'Refinement Steps',  sub: 'Per episode · DRL boundary agent'        },
 ];

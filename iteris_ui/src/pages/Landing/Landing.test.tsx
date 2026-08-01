@@ -42,28 +42,28 @@ vi.mock('three', () => ({
 vi.mock('@/content/models.yaml', () => ({
   default: [
     {
-      id: 'ddpg',
-      name: 'DDPG',
+      id: 'td3',
+      name: 'TD3',
       family: 'continuous-drl',
       description: 'Test',
-      diceCamus: 0.912,
-      diceBrisc: 0.840,
-      iou: 0.85,
-      hd: 3.9,
+      diceCamus: 0.885,
+      diceBrisc: 0.874,
+      iou: 0.784,
+      hd: 7.595,
       deployed: true,
       selectable: true,
     },
     {
       id: 'unet-baseline',
-      name: 'U-Net Baseline',
+      name: 'Attention U-Net',
       family: 'baseline',
       description: 'Test',
-      diceCamus: 0.89,
-      diceBrisc: 0.81,
-      iou: 0.80,
-      hd: 5.6,
+      diceCamus: 0.900,
+      diceBrisc: 0.870,
+      iou: null,
+      hd: 6.793,
       deployed: true,
-      selectable: false,
+      selectable: true,
     },
   ],
 }));
@@ -111,12 +111,10 @@ describe('Landing page', () => {
     expect(links[0]).toHaveAttribute('href', '/research');
   });
 
-  it('renders the stat pill with best Dice score', () => {
+  it('renders the sub-headline naming the deployed models', () => {
     render(<Landing />);
-    // "0.912" and "Best Dice" are in separate spans — check both are present
-    const diceValues = screen.getAllByText('0.912');
-    expect(diceValues.length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Best Dice/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/DuelingDDQN/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/TD3/i).length).toBeGreaterThan(0);
   });
 
   it('renders Feature Strip section', () => {
@@ -136,14 +134,16 @@ describe('Landing page', () => {
   it('renders Research Metrics section', () => {
     render(<Landing />);
     expect(screen.getByRole('region', { name: /research metrics/i })).toBeInTheDocument();
-    // 0.912 appears in both the stat pill and the metrics strip — just check it's present
-    expect(screen.getAllByText('0.912').length).toBeGreaterThan(0);
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText(/Models Deployed/i)).toBeInTheDocument();
   });
 
-  it('renders Model Preview with DDPG BEST badge', () => {
+  it('renders Model Preview with a card per model', () => {
     render(<Landing />);
     expect(screen.getByRole('region', { name: /model preview/i })).toBeInTheDocument();
-    expect(screen.getByText('BEST')).toBeInTheDocument();
+    expect(screen.getByText('TD3')).toBeInTheDocument();
+    expect(screen.getByText('Attention U-Net')).toBeInTheDocument();
+    expect(screen.getAllByText('● Deployed').length).toBe(2);
   });
 
   it('renders Research Context pull quote', () => {

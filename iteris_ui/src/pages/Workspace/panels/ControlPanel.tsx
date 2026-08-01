@@ -51,6 +51,8 @@ export interface ControlPanelProps {
   onViewModeChange: (m: ViewMode) => void;
   onWipeSourcesChange: (s: [WipeSource, WipeSource]) => void;
   onSampleSelect: (sample: SampleImage) => void;
+  /** Loads a curated local sample pair (image + real ground-truth mask) as the active case. */
+  onWorkWithSample: (sample: SampleImage) => void;
   /** dataUrl is the full `data:<mime>;base64,...` string; file is the raw File (for detection). */
   onScanUpload: (dataUrl: string, file: File) => void;
   onGtMaskUpload: (dataUrl: string, file: File) => void;
@@ -197,6 +199,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onViewModeChange,
   onWipeSourcesChange,
   onSampleSelect,
+  onWorkWithSample,
   onScanUpload,
   onGtMaskUpload,
   onRunInference,
@@ -449,6 +452,52 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             </div>
           )}
         </section>
+
+        {/* Work with samples — curated local image + ground-truth-mask pairs
+            (public/samples/**), distinct from the quick preview tiles above
+            (those have no mask, so no real Dice/IoU/HD can be computed).
+            Loading one attaches the real GT mask automatically. */}
+        {samples.some((s) => s.thumbnailUrl && s.maskUrl) && (
+          <section aria-label="Work with samples">
+            <SectionLabel>Work with samples</SectionLabel>
+            <p className="text-[11px] font-body text-muted mb-2">
+              Real scan + ground-truth mask pairs — run inference to see actual Dice, IoU and HD.
+            </p>
+            <div className="flex flex-col gap-3">
+              {(['camus', 'brisc'] as DatasetId[]).map((ds) => {
+                const pairs = samples.filter((s) => s.dataset === ds && s.thumbnailUrl && s.maskUrl);
+                if (pairs.length === 0) return null;
+                return (
+                  <div key={ds}>
+                    <p className="text-[10px] font-mono uppercase tracking-wider text-muted/70 mb-1">
+                      {ds === 'camus' ? 'CAMUS' : 'BRISC'}
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      {pairs.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          disabled={loading}
+                          onClick={() => onWorkWithSample(s)}
+                          className={[
+                            'w-full flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-left',
+                            'transition-colors duration-panel ease-out hover:border-accent/50',
+                            'disabled:opacity-50 disabled:cursor-not-allowed',
+                          ].join(' ')}
+                        >
+                          <span className="text-[12px] font-body text-text truncate">{s.anatomy}</span>
+                          <span className="text-[10px] font-mono text-muted capitalize flex-shrink-0 ml-2">
+                            {s.difficulty}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Model picker — no section title; the options speak for themselves */}
         <section aria-label="Model selection">

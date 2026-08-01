@@ -92,7 +92,7 @@ function buildMetrics(dataset: PredictRequest['dataset'], dice: number): Metrics
 export async function health(): Promise<HealthResponse> {
   return {
     status: 'ok',
-    modelsLoaded: 4,
+    modelsLoaded: 3,
     gpuAvailable: false,
     datasetsAvailable: ['camus', 'brisc'],
   };
