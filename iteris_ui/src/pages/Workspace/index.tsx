@@ -64,9 +64,6 @@ const NAV_ITEMS = [
  */
 const MAX_BATCH_FILES = 5;
 
-const PLACEHOLDER_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-
 const CHAT_SUGGESTIONS = [
   'Why did DRL improve the LV boundary?',
   'Compare to Attention U-Net',
@@ -201,33 +198,12 @@ export default function Workspace() {
     setChatError(null);
   };
 
-  const handleSampleSelect = (sample: SampleImage) => {
-    loadCases([
-      {
-        id: nextCaseId(),
-        label: `${sample.anatomy} (${sample.modality})`,
-        imageB64: PLACEHOLDER_B64,
-        previewUrl: `data:image/png;base64,${PLACEHOLDER_B64}`,
-        detection: {
-          dataset: sample.dataset,
-          modality: sample.modality,
-          label: sample.dataset === 'camus' ? 'cardiac echo (CAMUS)' : 'brain MRI (BRISC)',
-          source: 'filename',
-          confidence: 'high',
-        },
-        status: 'queued',
-        result: null,
-        baselineResult: null,
-      },
-    ]);
-  };
-
   /**
-   * Load a curated local image+ground-truth-mask pair (public/samples/**) as
-   * the active case, with the real mask auto-attached — unlike
-   * `handleSampleSelect`, which only has a placeholder preview and no mask.
+   * Load a real held-out test-set image+ground-truth-mask pair
+   * (public/samples/**) as the active case, with the real mask auto-attached
+   * so a run produces genuine Dice/IoU/HD, not just a preview.
    */
-  const handleWorkWithSample = async (sample: SampleImage) => {
+  const handleLoadTestSample = async (sample: SampleImage) => {
     if (!sample.thumbnailUrl) return;
     const id = nextCaseId();
     try {
@@ -313,6 +289,15 @@ export default function Workspace() {
   };
 
   const handleClearBatch = () => loadCases([]);
+
+  /** Clears the scan (and, since a mask without its scan is meaningless, the GT mask too). */
+  const handleClearScan = () => {
+    loadCases([]);
+    setGtMask(null);
+  };
+
+  /** Clears only the GT mask; the scan and any result stay. */
+  const handleClearGtMask = () => setGtMask(null);
 
   /** Patch one case in place by index. */
   const patchCase = (index: number, patch: Partial<WorkCase>) => {
@@ -526,12 +511,13 @@ export default function Workspace() {
           onRegimeChange={setSelectedRegime}
           onViewModeChange={setViewMode}
           onWipeSourcesChange={setWipeSources}
-          onSampleSelect={handleSampleSelect}
-          onWorkWithSample={handleWorkWithSample}
+          onLoadTestSample={handleLoadTestSample}
           onScanUpload={handleScanUpload}
           onGtMaskUpload={(dataUrl, file) =>
             setGtMask({ b64: toBareB64(dataUrl), previewUrl: dataUrl, label: file.name })
           }
+          onClearScan={handleClearScan}
+          onClearGtMask={handleClearGtMask}
           onRunInference={handleRunInference}
           maxBatchFiles={MAX_BATCH_FILES}
           batchItems={isBatch ? cases.map((c) => ({ id: c.id, label: c.label, status: c.status })) : []}

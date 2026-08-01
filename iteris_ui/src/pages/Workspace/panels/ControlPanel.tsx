@@ -3,8 +3,9 @@
  *
  * Restructured, not re-skinned: same dark tokens, mono micro-labels, pill
  * controls and rounded-xl cards as the rest of the app. Sections top→bottom:
- *   • Image      — side-by-side Scan / GT-mask dropzones + read-only detection chip
+ *   • Image      — side-by-side Scan / GT-mask dropzones (each clearable) + read-only detection chip
  *   • Batch      — collapsed by default; a multi-file picker for batch runs
+ *   • Test samples — collapsed by default; real held-out CAMUS/BRISC image+GT-mask pairs
  *   • (untitled) — Attention Res U-Net · DRL (always expanded: DuelingDDQN / TD3)
  *   • Data regime — Low / High segmented control, default flips with the model
  *   • View mode  — Single / Wipe (+ source chips) / Side-by-Side
@@ -17,7 +18,6 @@
  */
 
 import React, { useState, useCallback, useRef } from 'react';
-import { SampleImageTile } from '@/components';
 import type {
   SampleImage,
   ModelId,
@@ -50,12 +50,15 @@ export interface ControlPanelProps {
   onRegimeChange: (r: Regime) => void;
   onViewModeChange: (m: ViewMode) => void;
   onWipeSourcesChange: (s: [WipeSource, WipeSource]) => void;
-  onSampleSelect: (sample: SampleImage) => void;
-  /** Loads a curated local sample pair (image + real ground-truth mask) as the active case. */
-  onWorkWithSample: (sample: SampleImage) => void;
+  /** Loads a real held-out test-set pair (image + ground-truth mask) as the active case. */
+  onLoadTestSample: (sample: SampleImage) => void;
   /** dataUrl is the full `data:<mime>;base64,...` string; file is the raw File (for detection). */
   onScanUpload: (dataUrl: string, file: File) => void;
   onGtMaskUpload: (dataUrl: string, file: File) => void;
+  /** Clears the scan — also clears the GT mask, since a mask without its scan is meaningless. */
+  onClearScan: () => void;
+  /** Clears only the GT mask; the scan stays. */
+  onClearGtMask: () => void;
   onRunInference: () => void;
 
   /* --- batch segmentation --- */
@@ -116,8 +119,10 @@ const DropZone: React.FC<{
   /** GT is secondary until a scan exists. */
   disabled?: boolean;
   onFile: (dataUrl: string, file: File) => void;
+  /** Present once `filled` — shows a small clear (×) button on hover. */
+  onClear?: () => void;
   icon: React.ReactNode;
-}> = ({ label, filled, disabled, onFile, icon }) => {
+}> = ({ label, filled, disabled, onFile, onClear, icon }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const handleDrop = useCallback(
@@ -131,7 +136,7 @@ const DropZone: React.FC<{
     [disabled, onFile],
   );
   return (
-    <div className="flex-1 min-w-0">
+    <div className="relative group flex-1 min-w-0">
       <button
         type="button"
         disabled={disabled}
@@ -169,6 +174,26 @@ const DropZone: React.FC<{
           if (file) readFile(file, onFile);
         }}
       />
+      {filled && onClear && !disabled && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClear();
+          }}
+          aria-label={`Remove ${label}`}
+          className={[
+            'absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center',
+            'bg-accent text-white shadow-sm',
+            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+            'transition-opacity duration-panel ease-out',
+          ].join(' ')}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 };
@@ -198,10 +223,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onRegimeChange,
   onViewModeChange,
   onWipeSourcesChange,
-  onSampleSelect,
-  onWorkWithSample,
+  onLoadTestSample,
   onScanUpload,
   onGtMaskUpload,
+  onClearScan,
+  onClearGtMask,
   onRunInference,
   maxBatchFiles,
   batchItems,
@@ -209,6 +235,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onClearBatch,
 }) => {
   const [batchOpen, setBatchOpen] = useState(false);
+  const [testSamplesOpen, setTestSamplesOpen] = useState(false);
   const batchInputRef = useRef<HTMLInputElement>(null);
   const canRun = (!!scanLabel || batchItems.length > 0) && !loading;
 
@@ -291,6 +318,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               label="Scan"
               filled={scanLabel}
               onFile={onScanUpload}
+              onClear={onClearScan}
               icon={
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -304,6 +332,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               filled={gtMaskLabel}
               disabled={!scanLabel}
               onFile={onGtMaskUpload}
+              onClear={onClearGtMask}
               icon={
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                   <path d="M12 21s-7-4.35-7-10a7 7 0 0 1 14 0c0 5.65-7 10-7 10z" />
@@ -324,18 +353,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 {detection.confidence === 'low' ? 'Looks like' : 'Detected'}: {detection.label}
               </span>
             </div>
-          )}
-
-          {/* Samples */}
-          {samples.length > 0 && (
-            <>
-              <p className="text-[11px] font-body text-muted mt-3 mb-1.5">Or choose a sample:</p>
-              <div className="grid grid-cols-2 gap-2">
-                {samples.slice(0, 4).map((s) => (
-                  <SampleImageTile key={s.id} image={s} onSelect={() => onSampleSelect(s)} />
-                ))}
-              </div>
-            </>
           )}
         </section>
 
@@ -453,49 +470,74 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           )}
         </section>
 
-        {/* Work with samples — curated local image + ground-truth-mask pairs
-            (public/samples/**), distinct from the quick preview tiles above
-            (those have no mask, so no real Dice/IoU/HD can be computed).
-            Loading one attaches the real GT mask automatically. */}
+        {/* Test samples — real held-out CAMUS/BRISC image + ground-truth-mask
+            pairs (public/samples/**), completely unseen during training.
+            Collapsed by default to keep the panel from front-loading too much;
+            loading one attaches the real GT mask automatically so inference
+            produces actual Dice/IoU/HD, not just a preview. */}
         {samples.some((s) => s.thumbnailUrl && s.maskUrl) && (
-          <section aria-label="Work with samples">
-            <SectionLabel>Work with samples</SectionLabel>
-            <p className="text-[11px] font-body text-muted mb-2">
-              Real scan + ground-truth mask pairs — run inference to see actual Dice, IoU and HD.
-            </p>
-            <div className="flex flex-col gap-3">
-              {(['camus', 'brisc'] as DatasetId[]).map((ds) => {
-                const pairs = samples.filter((s) => s.dataset === ds && s.thumbnailUrl && s.maskUrl);
-                if (pairs.length === 0) return null;
-                return (
-                  <div key={ds}>
-                    <p className="text-[10px] font-mono uppercase tracking-wider text-muted/70 mb-1">
-                      {ds === 'camus' ? 'CAMUS' : 'BRISC'}
-                    </p>
-                    <div className="flex flex-col gap-1">
-                      {pairs.map((s) => (
-                        <button
-                          key={s.id}
-                          type="button"
-                          disabled={loading}
-                          onClick={() => onWorkWithSample(s)}
-                          className={[
-                            'w-full flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-left',
-                            'transition-colors duration-panel ease-out hover:border-accent/50',
-                            'disabled:opacity-50 disabled:cursor-not-allowed',
-                          ].join(' ')}
-                        >
-                          <span className="text-[12px] font-body text-text truncate">{s.anatomy}</span>
-                          <span className="text-[10px] font-mono text-muted capitalize flex-shrink-0 ml-2">
-                            {s.difficulty}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <section aria-label="Test samples">
+            <button
+              type="button"
+              aria-expanded={testSamplesOpen}
+              onClick={() => setTestSamplesOpen((v) => !v)}
+              className="w-full flex items-center justify-between text-xs font-heading font-semibold text-muted uppercase tracking-wider hover:text-text transition-colors duration-panel ease-out"
+            >
+              <span>Test samples</span>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className={['transition-transform duration-panel ease-out', testSamplesOpen ? 'rotate-180' : ''].join(' ')}
+                aria-hidden="true"
+              >
+                <polyline points="2 4 6 8 10 4" />
+              </svg>
+            </button>
+
+            {testSamplesOpen && (
+              <div className="mt-2">
+                <p className="text-[11px] font-body text-muted mb-2">
+                  Held-out, unseen-during-training pairs — run inference to see actual Dice, IoU and HD.
+                </p>
+                <div className="flex flex-col gap-3">
+                  {(['camus', 'brisc'] as DatasetId[]).map((ds) => {
+                    const pairs = samples.filter((s) => s.dataset === ds && s.thumbnailUrl && s.maskUrl);
+                    if (pairs.length === 0) return null;
+                    return (
+                      <div key={ds}>
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-muted/70 mb-1">
+                          {ds === 'camus' ? 'CAMUS' : 'BRISC'}
+                        </p>
+                        <div className="flex flex-col gap-1">
+                          {pairs.map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              disabled={loading}
+                              onClick={() => onLoadTestSample(s)}
+                              className={[
+                                'w-full flex items-center justify-between rounded-md border border-border px-2.5 py-1.5 text-left',
+                                'transition-colors duration-panel ease-out hover:border-accent/50',
+                                'disabled:opacity-50 disabled:cursor-not-allowed',
+                              ].join(' ')}
+                            >
+                              <span className="text-[12px] font-body text-text truncate">{s.anatomy}</span>
+                              <span className="text-[10px] font-mono text-muted capitalize flex-shrink-0 ml-2">
+                                {s.difficulty}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
         )}
 
