@@ -1,11 +1,18 @@
 # Curated sample images (spec §6 sample tiles, §9 dataset explorer).
 # thumbnailUrl/maskUrl point at real CAMUS/BRISC image+ground-truth-mask pairs
-# bundled under public/samples/ (sourced from a small local held-out set). Where
-# no real pair exists yet, thumbnailB64 is left empty and tiles fall back to a
-# procedural placeholder. bestDice is the real Phase A mean Dice (see
-# src/pages/Research/data/evaluationResults.ts) for the closest-matching
+# bundled under public/samples/, sourced from the project's held-out
+# test split (D:\iteris\test-val-sets\holdout\{CAMUS,BRISC}\test\ locally —
+# completely unseen during training). bestDice is the real Phase A mean Dice
+# (see src/pages/Research/data/evaluationResults.ts) for the closest-matching
 # structure/class across the three deployed models — not a per-image score,
 # since per-sample scoring requires running inference.
+#
+# BRISC note: the held-out manifest's own tumor_type column tags the
+# meningioma case here as "unknown" — its filename token is 'me', which
+# iteris/ingestion.py's TYPE_MAP doesn't recognise (it expects 'mn'), so it
+# falls through to the unknown fallback. Verified against every BRISC test
+# manifest row (gl->glioma, pi->pituitary, me->unknown, no exceptions) that
+# 'me' is meningioma, not a real non-tumour class - labelled accordingly here.
 
 - id: camus-a2c
   thumbnailB64: ''
@@ -25,12 +32,12 @@
   difficulty: medium
   bestDice: 0.894
   dataset: camus
-- id: camus-edes
+- id: camus-4ch-es
   thumbnailB64: ''
-  thumbnailUrl: /samples/camus/camus-2ch-es-image.png
-  maskUrl: /samples/camus/camus-2ch-es-mask.png
+  thumbnailUrl: /samples/camus/camus-4ch-es-image.png
+  maskUrl: /samples/camus/camus-4ch-es-mask.png
   modality: ultrasound
-  anatomy: 2CH (End-Systole frame)
+  anatomy: A4C (End-Systole frame)
   difficulty: hard
   bestDice: 0.869
   dataset: camus
@@ -43,12 +50,12 @@
   difficulty: hard
   bestDice: 0.867
   dataset: brisc
-- id: brisc-notumor
+- id: brisc-meningioma
   thumbnailB64: ''
-  thumbnailUrl: /samples/brisc/brisc-notumor-image.jpg
-  maskUrl: /samples/brisc/brisc-notumor-mask.png
+  thumbnailUrl: /samples/brisc/brisc-meningioma-image.jpg
+  maskUrl: /samples/brisc/brisc-meningioma-mask.png
   modality: mri
-  anatomy: Non-tumorous (no lesion)
+  anatomy: Meningioma
   difficulty: medium
   bestDice: 0.870
   dataset: brisc

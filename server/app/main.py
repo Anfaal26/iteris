@@ -113,7 +113,14 @@ def models() -> list[ModelRecord]:
 # exact files from iteris_ui/public/samples/**. This Space never hosts the
 # image bytes itself; it only needs to agree on the same relative paths.
 # Keep in sync with iteris_ui/src/content/samples.yaml (same 6 real CAMUS/
-# BRISC image+ground-truth-mask pairs, same ids/labels/bestDice figures).
+# BRISC image+ground-truth-mask pairs, same ids/labels/bestDice figures) —
+# sourced from the project's held-out test split (test-val-sets/holdout/),
+# completely unseen during training.
+#
+# BRISC note: the meningioma case's filename token is 'me', which
+# iteris/ingestion.py's TYPE_MAP doesn't recognise (it expects 'mn'), so the
+# held-out manifest tags it "unknown" — verified against every manifest row
+# that 'me' is meningioma, not a real non-tumour class.
 SAMPLES: list[SampleImage] = [
     SampleImage(
         id='camus-a2c', thumbnailB64='',
@@ -130,10 +137,10 @@ SAMPLES: list[SampleImage] = [
         difficulty='medium', bestDice=0.894, dataset='camus',
     ),
     SampleImage(
-        id='camus-edes', thumbnailB64='',
-        thumbnailUrl='/samples/camus/camus-2ch-es-image.png',
-        maskUrl='/samples/camus/camus-2ch-es-mask.png',
-        modality='ultrasound', anatomy='2CH (End-Systole frame)',
+        id='camus-4ch-es', thumbnailB64='',
+        thumbnailUrl='/samples/camus/camus-4ch-es-image.png',
+        maskUrl='/samples/camus/camus-4ch-es-mask.png',
+        modality='ultrasound', anatomy='A4C (End-Systole frame)',
         difficulty='hard', bestDice=0.869, dataset='camus',
     ),
     SampleImage(
@@ -144,10 +151,10 @@ SAMPLES: list[SampleImage] = [
         difficulty='hard', bestDice=0.867, dataset='brisc',
     ),
     SampleImage(
-        id='brisc-notumor', thumbnailB64='',
-        thumbnailUrl='/samples/brisc/brisc-notumor-image.jpg',
-        maskUrl='/samples/brisc/brisc-notumor-mask.png',
-        modality='mri', anatomy='Non-tumorous (no lesion)',
+        id='brisc-meningioma', thumbnailB64='',
+        thumbnailUrl='/samples/brisc/brisc-meningioma-image.jpg',
+        maskUrl='/samples/brisc/brisc-meningioma-mask.png',
+        modality='mri', anatomy='Meningioma',
         difficulty='medium', bestDice=0.870, dataset='brisc',
     ),
     SampleImage(

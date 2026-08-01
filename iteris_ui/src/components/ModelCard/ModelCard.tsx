@@ -19,6 +19,12 @@ export interface ModelCardProps {
   isBest?: boolean;
   /** Called when the user selects this card (if selectable). */
   onSelect?: (id: ModelRecord['id']) => void;
+  /**
+   * Per-class CAMUS Dice (e.g. LV Endo/LV Epi/LA), shown as separate pills
+   * instead of the single aggregate CAMUS pill when provided. Callers that
+   * don't pass this (e.g. the Research page) keep the aggregate pill.
+   */
+  camusClassDice?: { label: string; dice: number }[];
   /** Additional class names. */
   className?: string;
 }
@@ -51,6 +57,7 @@ export const ModelCard: React.FC<ModelCardProps> = ({
   active = false,
   isBest = false,
   onSelect,
+  camusClassDice,
   className,
 }) => {
   const badge = FAMILY_BADGE[model.family] ?? FAMILY_BADGE['baseline'];
@@ -108,7 +115,11 @@ export const ModelCard: React.FC<ModelCardProps> = ({
 
       {/* Metric pills */}
       <div className="flex flex-wrap gap-1">
-        {model.diceCamus != null && <MetricPill label="CAMUS" value={model.diceCamus} />}
+        {camusClassDice && camusClassDice.length > 0
+          ? camusClassDice.map((c) => (
+              <MetricPill key={c.label} label={c.label} value={c.dice} />
+            ))
+          : model.diceCamus != null && <MetricPill label="CAMUS" value={model.diceCamus} />}
         {model.diceBrisc != null && <MetricPill label="BRISC" value={model.diceBrisc} />}
         {model.iou != null && <MetricPill label="IoU" value={model.iou} />}
         {model.hd != null && <MetricPill label="HD" value={model.hd} />}

@@ -21,20 +21,20 @@ const NAV_ITEMS = [
 const CAMUS_HIGHLIGHTS: { id: string; label: string; note?: string }[] = [
   { id: 'camus-a2c', label: 'Best absolute Dice', note: 'A2C view — highest overall score' },
   { id: 'camus-a4c', label: 'Best wipe demo', note: 'A4C — most dramatic boundary correction' },
-  { id: 'camus-edes', label: 'Largest DRL improvement', note: 'ED/ES frame — best Δ Dice from baseline' },
+  { id: 'camus-4ch-es', label: 'Largest DRL improvement', note: 'A4C End-Systole — best Δ Dice from baseline' },
   { id: 'camus-a4c', label: 'Honest near-failure', note: 'LA boundary hard to refine — DRL ≈ baseline' },
 ];
 
 const BRISC_HIGHLIGHTS: { id: string; label: string; note?: string }[] = [
   { id: 'brisc-glioma', label: 'Best glioma result', note: 'Highest Dice for diffuse glioma' },
-  { id: 'brisc-notumor', label: 'Non-tumorous case', note: 'Clean negative — tests false-positive avoidance' },
+  { id: 'brisc-meningioma', label: 'Meningioma boundary refinement', note: 'Sharp capsule → precise contour' },
   { id: 'brisc-pituitary', label: 'Pituitary — most precise', note: 'Smallest structure, tightest HD' },
   { id: 'brisc-glioma', label: 'Honest glioma challenge', note: 'Diffuse infiltration — inherent uncertainty' },
 ];
 
 // ── Filter bar ────────────────────────────────────────────────────────────────
 
-type TumorType = 'glioma' | 'meningioma' | 'pituitary' | 'non-tumorous';
+type TumorType = 'glioma' | 'meningioma' | 'pituitary';
 type SortMode = 'hardest' | 'best-dice';
 
 interface CamusFilters {
@@ -49,7 +49,7 @@ interface BriscFilters {
 }
 
 const DIFFICULTY_OPTS: (Difficulty | 'all')[] = ['all', 'easy', 'medium', 'hard'];
-const TUMOR_TYPE_OPTS: (TumorType | 'all')[] = ['all', 'glioma', 'meningioma', 'pituitary', 'non-tumorous'];
+const TUMOR_TYPE_OPTS: (TumorType | 'all')[] = ['all', 'glioma', 'meningioma', 'pituitary'];
 const SORT_OPTS: { label: string; value: SortMode }[] = [
   { label: 'Hardest first', value: 'hardest' },
   { label: 'Best Dice', value: 'best-dice' },

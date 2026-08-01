@@ -17,6 +17,7 @@ import type { ModelRecord, ModelFamily, DatasetId } from '@/api/contract';
 import { api } from '@/api/client';
 import { ROUTES } from '@/routes';
 import { colorsHex } from '@/tokens';
+import { EVAL_ROWS } from '../Research/data/evaluationResults';
 
 const NAV_ITEMS = [
   { label: 'Workspace', href: ROUTES.workspace },
@@ -44,6 +45,33 @@ const DATASET_OPTIONS: { label: string; value: DatasetId | 'all' }[] = [
   { label: 'CAMUS', value: 'camus' },
   { label: 'BRISC', value: 'brisc' },
 ];
+
+// Real Phase A per-class CAMUS Dice (see evaluationResults.ts), keyed by the
+// registry's model id and matched to the eval data's own model name.
+const EVAL_MODEL_NAME: Partial<Record<ModelRecord['id'], string>> = {
+  'unet-baseline': 'AttentionResUNet',
+  'dueling-dqn': 'DuelingDDQN',
+  td3: 'TD3',
+};
+const CAMUS_CLASS_LABEL: Record<string, string> = {
+  LV_endo: 'LV Endo',
+  LV_epi: 'LV Epi',
+  LA: 'LA',
+};
+const CAMUS_CLASS_ORDER = ['LV_endo', 'LV_epi', 'LA'];
+
+/** Per-class CAMUS Dice pills for a model, or undefined if no eval row matches. */
+function camusClassDiceFor(id: ModelRecord['id']): { label: string; dice: number }[] | undefined {
+  const name = EVAL_MODEL_NAME[id];
+  if (!name) return undefined;
+  const rows = CAMUS_CLASS_ORDER
+    .map((cls) => EVAL_ROWS.find(
+      (r) => r.model === name && r.phase === 'Phase A' && r.dataset === 'CAMUS' && r.className === cls,
+    ))
+    .filter((r): r is NonNullable<typeof r> => !!r);
+  if (rows.length === 0) return undefined;
+  return rows.map((r) => ({ label: CAMUS_CLASS_LABEL[r.className] ?? r.className, dice: r.dice }));
+}
 
 /** Generate synthetic sinusoidal convergence data for a given target Dice over N steps. */
 function convergenceData(targetDice: number, steps = 50) {
@@ -168,7 +196,13 @@ const ExpandedModelCard: React.FC<ExpandedModelCardProps> = ({
     <div className="bg-surface border border-border rounded-xl p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
-          <ModelCard model={model} variant="expanded" isBest={isBest} className="w-full border-0 p-0 shadow-none" />
+          <ModelCard
+            model={model}
+            variant="expanded"
+            isBest={isBest}
+            camusClassDice={camusClassDiceFor(model.id)}
+            className="w-full border-0 p-0 shadow-none"
+          />
         </div>
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
           {model.selectable && (
